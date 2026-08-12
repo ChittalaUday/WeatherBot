@@ -1,0 +1,600 @@
+{
+  "info": {
+    "_postman_id": "6331aae2-9d3d-4f14-b9ba-d882e5acfc48",
+    "name": "WeatherSnap APIs",
+    "description": "Comprehensive Postman collection for WeatherSnap Mobile App APIs, including authentication, weather forecasting, hourly weather data, sunrise/sunset times, location lookup, and Solr location auto-suggestions.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "42404377",
+    "_collection_link": "https://go.postman.co/collection/42404377-6331aae2-9d3d-4f14-b9ba-d882e5acfc48?source=collection_link"
+  },
+  "item": [
+    {
+      "name": "Authentication",
+      "item": [
+        {
+          "name": "User Login",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"user@example.com\",\n  \"password\": \"your_password\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/user/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "user",
+                "login"
+              ]
+            },
+            "description": "Authenticates a user with email/username and password credentials."
+          },
+          "response": []
+        }
+      ],
+      "description": "Endpoints related to user authentication and account management."
+    },
+    {
+      "name": "Weather Data",
+      "item": [
+        {
+          "name": "Get Formatted Weather (Interpolated Forecast)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{gfsApiUrl}}/interpolate?lat={{lat}}&lon={{lng}}",
+              "host": [
+                "{{gfsApiUrl}}"
+              ],
+              "path": [
+                "interpolate"
+              ],
+              "query": [
+                {
+                  "key": "lat",
+                  "value": "{{lat}}",
+                  "description": "Latitude coordinate (e.g. 17.385044)"
+                },
+                {
+                  "key": "lon",
+                  "value": "{{lng}}",
+                  "description": "Longitude coordinate (e.g. 78.486671)"
+                }
+              ]
+            },
+            "description": "Fetches interpolated daily forecast data for a specified location."
+          },
+          "response": [
+            {
+              "name": "Get Formatted Weather (Interpolated Forecast)",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{gfsApiUrl}}/interpolate?lat={{lat}}&lon={{lng}}",
+                  "host": [
+                    "{{gfsApiUrl}}"
+                  ],
+                  "path": [
+                    "interpolate"
+                  ],
+                  "query": [
+                    {
+                      "key": "lat",
+                      "value": "{{lat}}",
+                      "description": "Latitude coordinate (e.g. 17.385044)"
+                    },
+                    {
+                      "key": "lon",
+                      "value": "{{lng}}",
+                      "description": "Longitude coordinate (e.g. 78.486671)"
+                    }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": null,
+              "header": [
+                {
+                  "key": "Server",
+                  "value": "nginx/1.24.0 (Ubuntu)"
+                },
+                {
+                  "key": "Date",
+                  "value": "Wed, 12 Aug 2026 18:07:54 GMT"
+                },
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                },
+                {
+                  "key": "Content-Length",
+                  "value": "4701"
+                },
+                {
+                  "key": "Connection",
+                  "value": "keep-alive"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n    \"Forecast data\": [\n        {\n            \"Date_time\": \"2026-08-11T00:00:00\",\n            \"Rainfall\": 1.11,\n            \"Tmin\": 22.41,\n            \"Tmax\": 32.27,\n            \"Tavg\": 27.34,\n            \"RH\": 65.8,\n            \"DPT\": 19.6,\n            \"Wind_Speed\": 5.23,\n            \"Wind_Direction\": 272.9,\n            \"SunSD\": 12.62,\n            \"Lowcloud\": 0.2,\n            \"Soilm10\": 0.28,\n            \"Soilm40\": 0.25,\n            \"Soilt10\": 26.94,\n            \"RH_max\": 83.12,\n            \"RH_min\": 48.2,\n            \"Wind_max\": 7.25,\n            \"DayLength\": 7.4\n        },\n        {\n            \"Date_time\": \"2026-08-12T00:00:00\",\n            \"Rainfall\": 3.23,\n            \"Tmin\": 21.74,\n            \"Tmax\": 30.01,\n            \"Tavg\": 25.88,\n            \"RH\": 67.79,\n            \"DPT\": 19.93,\n            \"Wind_Speed\": 5.38,\n            \"Wind_Direction\": 275.82,\n            \"SunSD\": 12.16,\n            \"Lowcloud\": 0.5,\n            \"Soilm10\": 0.25,\n            \"Soilm40\": 0.22,\n            \"Soilt10\": 27.19,\n            \"RH_max\": 82.82,\n            \"RH_min\": 53.21,\n            \"Wind_max\": 7.34,\n            \"DayLength\": 5.36\n        },\n        {\n            \"Date_time\": \"2026-08-13T00:00:00\",\n            \"Rainfall\": 2.73,\n            \"Tmin\": 21.79,\n            \"Tmax\": 30.73,\n            \"Tavg\": 26.26,\n            \"RH\": 65.13,\n            \"DPT\": 19.37,\n            \"Wind_Speed\": 5.44,\n            \"Wind_Direction\": 280.3,\n            \"SunSD\": 12.62,\n            \"Lowcloud\": 0.39,\n            \"Soilm10\": 0.24,\n            \"Soilm40\": 0.22,\n            \"Soilt10\": 27.03,\n            \"RH_max\": 80.92,\n            \"RH_min\": 48.67,\n            \"Wind_max\": 7.24,\n            \"DayLength\": 5.69\n        },\n        {\n            \"Date_time\": \"2026-08-14T00:00:00\",\n            \"Rainfall\": 1.79,\n            \"Tmin\": 22.06,\n            \"Tmax\": 30.84,\n            \"Tavg\": 26.45,\n            \"RH\": 62.78,\n            \"DPT\": 18.75,\n            \"Wind_Speed\": 6.24,\n            \"Wind_Direction\": 280.06,\n            \"SunSD\": 10.74,\n            \"Lowcloud\": 0.23,\n            \"Soilm10\": 0.23,\n            \"Soilm40\": 0.22,\n            \"Soilt10\": 26.93,\n            \"RH_max\": 77.21,\n            \"RH_min\": 47.17,\n            \"Wind_max\": 8.23,\n            \"DayLength\": 6.3\n        },\n        {\n            \"Date_time\": \"2026-08-15T00:00:00\",\n            \"Rainfall\": 2.82,\n            \"Tmin\": 21.56,\n            \"Tmax\": 31.58,\n            \"Tavg\": 26.57,\n            \"RH\": 60.28,\n            \"DPT\": 18.42,\n            \"Wind_Speed\": 6.24,\n            \"Wind_Direction\": 281.32,\n            \"SunSD\": 12.27,\n            \"Lowcloud\": 0.46,\n            \"Soilm10\": 0.22,\n            \"Soilm40\": 0.21,\n            \"Soilt10\": 27.45,\n            \"RH_max\": 78.1,\n            \"RH_min\": 43.3,\n            \"Wind_max\": 8.02,\n            \"DayLength\": 6.76\n        },\n        {\n            \"Date_time\": \"2026-08-16T00:00:00\",\n            \"Rainfall\": 2.28,\n            \"Tmin\": 21.66,\n            \"Tmax\": 32.28,\n            \"Tavg\": 26.97,\n            \"RH\": 62.77,\n            \"DPT\": 18.28,\n            \"Wind_Speed\": 6.68,\n            \"Wind_Direction\": 272.42,\n            \"SunSD\": 11.96,\n            \"Lowcloud\": 0.49,\n            \"Soilm10\": 0.21,\n            \"Soilm40\": 0.21,\n            \"Soilt10\": 27.22,\n            \"RH_max\": 76.28,\n            \"RH_min\": 40.11,\n            \"Wind_max\": 8.36,\n            \"DayLength\": 6.93\n        },\n        {\n            \"Date_time\": \"2026-08-17T00:00:00\",\n            \"Rainfall\": 1.65,\n            \"Tmin\": 21.63,\n            \"Tmax\": 28.51,\n            \"Tavg\": 25.07,\n            \"RH\": 63.07,\n            \"DPT\": 18.43,\n            \"Wind_Speed\": 6.45,\n            \"Wind_Direction\": 270.75,\n            \"SunSD\": 12.58,\n            \"Lowcloud\": 0.46,\n            \"Soilm10\": 0.2,\n            \"Soilm40\": 0.21,\n            \"Soilt10\": 26.77,\n            \"RH_max\": 78.07,\n            \"RH_min\": 54.32,\n            \"Wind_max\": 8.17,\n            \"DayLength\": 4.49\n        },\n        {\n            \"Date_time\": \"2026-08-18T00:00:00\",\n            \"Rainfall\": 1.72,\n            \"Tmin\": 21.49,\n            \"Tmax\": 29.66,\n            \"Tavg\": 25.57,\n            \"RH\": 61.92,\n            \"DPT\": 18.45,\n            \"Wind_Speed\": 6.32,\n            \"Wind_Direction\": 275.13,\n            \"SunSD\": 12.57,\n            \"Lowcloud\": 0.36,\n            \"Soilm10\": 0.19,\n            \"Soilm40\": 0.21,\n            \"Soilt10\": 26.81,\n            \"RH_max\": 78.6,\n            \"RH_min\": 50.14,\n            \"Wind_max\": 7.7,\n            \"DayLength\": 5.63\n        },\n        {\n            \"Date_time\": \"2026-08-19T00:00:00\",\n            \"Rainfall\": 2.34,\n            \"Tmin\": 21.65,\n            \"Tmax\": 30.74,\n            \"Tavg\": 26.2,\n            \"RH\": 62.92,\n            \"DPT\": 18.85,\n            \"Wind_Speed\": 5.52,\n            \"Wind_Direction\": 280.57,\n            \"SunSD\": 12.51,\n            \"Lowcloud\": 0.39,\n            \"Soilm10\": 0.18,\n            \"Soilm40\": 0.21,\n            \"Soilt10\": 27.12,\n            \"RH_max\": 78.77,\n            \"RH_min\": 48.51,\n            \"Wind_max\": 7.34,\n            \"DayLength\": 5.88\n        },\n        {\n            \"Date_time\": \"2026-08-20T00:00:00\",\n            \"Rainfall\": 2.41,\n            \"Tmin\": 22.45,\n            \"Tmax\": 30.01,\n            \"Tavg\": 26.23,\n            \"RH\": 63.49,\n            \"DPT\": 19.24,\n            \"Wind_Speed\": 4.95,\n            \"Wind_Direction\": 300.59,\n            \"SunSD\": 12.53,\n            \"Lowcloud\": 0.42,\n            \"Soilm10\": 0.18,\n            \"Soilm40\": 0.21,\n            \"Soilt10\": 27.09,\n            \"RH_max\": 78.57,\n            \"RH_min\": 51.98,\n            \"Wind_max\": 7.46,\n            \"DayLength\": 4.86\n        },\n        {\n            \"Date_time\": \"2026-08-21T00:00:00\",\n            \"Rainfall\": 1.52,\n            \"Tmin\": 22.44,\n            \"Tmax\": 29.81,\n            \"Tavg\": 26.12,\n            \"RH\": 67.22,\n            \"DPT\": 19.79,\n            \"Wind_Speed\": 5.02,\n            \"Wind_Direction\": 289.28,\n            \"SunSD\": 11.96,\n            \"Lowcloud\": 0.37,\n            \"Soilm10\": 0.18,\n            \"Soilm40\": 0.21,\n            \"Soilt10\": 26.9,\n            \"RH_max\": 80.76,\n            \"RH_min\": 54.25,\n            \"Wind_max\": 6.92,\n            \"DayLength\": 4.45\n        },\n        {\n            \"Date_time\": \"2026-08-22T00:00:00\",\n            \"Rainfall\": 1.64,\n            \"Tmin\": 21.51,\n            \"Tmax\": 30.81,\n            \"Tavg\": 26.16,\n            \"RH\": 66.74,\n            \"DPT\": 19.35,\n            \"Wind_Speed\": 6.42,\n            \"Wind_Direction\": 289.51,\n            \"SunSD\": 11.93,\n            \"Lowcloud\": 0.28,\n            \"Soilm10\": 0.2,\n            \"Soilm40\": 0.2,\n            \"Soilt10\": 26.68,\n            \"RH_max\": 81.4,\n            \"RH_min\": 48.13,\n            \"Wind_max\": 8.42,\n            \"DayLength\": 6.68\n        },\n        {\n            \"Date_time\": \"2026-08-23T00:00:00\",\n            \"Rainfall\": 0.96,\n            \"Tmin\": 22.01,\n            \"Tmax\": 28.38,\n            \"Tavg\": 25.19,\n            \"RH\": 70.04,\n            \"DPT\": 19.39,\n            \"Wind_Speed\": 6.6,\n            \"Wind_Direction\": 286.44,\n            \"SunSD\": 7.64,\n            \"Lowcloud\": 0.18,\n            \"Soilm10\": 0.2,\n            \"Soilm40\": 0.2,\n            \"Soilt10\": 25.9,\n            \"RH_max\": 77.29,\n            \"RH_min\": 57.12,\n            \"Wind_max\": 9.43,\n            \"DayLength\": 3.17\n        },\n        {\n            \"Date_time\": \"2026-08-24T00:00:00\",\n            \"Rainfall\": 1.92,\n            \"Tmin\": 21.78,\n            \"Tmax\": 28.23,\n            \"Tavg\": 25,\n            \"RH\": 71.49,\n            \"DPT\": 19.49,\n            \"Wind_Speed\": 6.6,\n            \"Wind_Direction\": 283.85,\n            \"SunSD\": 7.59,\n            \"Lowcloud\": 0.28,\n            \"Soilm10\": 0.2,\n            \"Soilm40\": 0.2,\n            \"Soilt10\": 25.21,\n            \"RH_max\": 79.3,\n            \"RH_min\": 59.01,\n            \"Wind_max\": 8.19,\n            \"DayLength\": 2.23\n        },\n        {\n            \"Date_time\": \"2026-08-25T00:00:00\",\n            \"Rainfall\": 2.55,\n            \"Tmin\": 21.29,\n            \"Tmax\": 24.25,\n            \"Tavg\": 22.77,\n            \"RH\": 83.46,\n            \"DPT\": 20.26,\n            \"Wind_Speed\": 6.07,\n            \"Wind_Direction\": 270.52,\n            \"SunSD\": 2.56,\n            \"Lowcloud\": 0.49,\n            \"Soilm10\": 0.23,\n            \"Soilm40\": 0.2,\n            \"Soilt10\": 24.06,\n            \"RH_max\": 87.34,\n            \"RH_min\": 78.9,\n            \"Wind_max\": 7.18,\n            \"DayLength\": 1.01\n        },\n        {\n            \"Date_time\": \"2026-08-26T00:00:00\",\n            \"Rainfall\": 2.53,\n            \"Tmin\": 21.08,\n            \"Tmax\": 25.93,\n            \"Tavg\": 23.5,\n            \"RH\": 80.86,\n            \"DPT\": 20.31,\n            \"Wind_Speed\": 6.05,\n            \"Wind_Direction\": 268.3,\n            \"SunSD\": 8.81,\n            \"Lowcloud\": 0.36,\n            \"Soilm10\": 0.24,\n            \"Soilm40\": 0.2,\n            \"Soilt10\": 23.8,\n            \"RH_max\": 89.66,\n            \"RH_min\": 70.68,\n            \"Wind_max\": 7.91,\n            \"DayLength\": 2.43\n        }\n    ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get Hourly Weather Data",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{gfsApiUrl}}/hrlydata?lat={{lat}}&lon={{lng}}",
+              "host": [
+                "{{gfsApiUrl}}"
+              ],
+              "path": [
+                "hrlydata"
+              ],
+              "query": [
+                {
+                  "key": "lat",
+                  "value": "{{lat}}",
+                  "description": "Latitude coordinate (e.g. 17.385044)"
+                },
+                {
+                  "key": "lon",
+                  "value": "{{lng}}",
+                  "description": "Longitude coordinate (e.g. 78.486671)"
+                }
+              ]
+            },
+            "description": "Fetches detailed hourly weather parameter forecasts for a given coordinate pair."
+          },
+          "response": [
+            {
+              "name": "Get Hourly Weather Data",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{gfsApiUrl}}/hrlydata?lat={{lat}}&lon={{lng}}",
+                  "host": [
+                    "{{gfsApiUrl}}"
+                  ],
+                  "path": [
+                    "hrlydata"
+                  ],
+                  "query": [
+                    {
+                      "key": "lat",
+                      "value": "{{lat}}",
+                      "description": "Latitude coordinate (e.g. 17.385044)"
+                    },
+                    {
+                      "key": "lon",
+                      "value": "{{lng}}",
+                      "description": "Longitude coordinate (e.g. 78.486671)"
+                    }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": null,
+              "header": [
+                {
+                  "key": "Server",
+                  "value": "nginx/1.24.0 (Ubuntu)"
+                },
+                {
+                  "key": "Date",
+                  "value": "Wed, 12 Aug 2026 16:17:51 GMT"
+                },
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                },
+                {
+                  "key": "Content-Length",
+                  "value": "5765"
+                },
+                {
+                  "key": "Connection",
+                  "value": "keep-alive"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n    \"Forecast data\": [\n        {\n            \"Date_time\": \"2026-08-12T21:00:00\",\n            \"Rainfall\": 0.47,\n            \"Tmin\": 24.84,\n            \"Tmax\": 26.42,\n            \"Tavg\": 25.63,\n            \"RH\": 68.95,\n            \"DPT\": 20.07,\n            \"Wind_Speed\": 3.01,\n            \"Wind_Direction\": 299.26,\n            \"SunSD\": 0.54,\n            \"Lowcloud\": 0.52,\n            \"Soilm10\": 0.24,\n            \"Soilm40\": 0.22,\n            \"Soilt10\": 27.75\n        },\n        {\n            \"Date_time\": \"2026-08-12T22:00:00\",\n            \"Rainfall\": 0,\n            \"Tmin\": 24.75,\n            \"Tmax\": 26.33,\n            \"Tavg\": 25.54,\n            \"RH\": 69.44,\n            \"DPT\": 20.11,\n            \"Wind_Speed\": 2.95,\n            \"Wind_Direction\": 287.9,\n            \"SunSD\": 0,\n            \"Lowcloud\": 0.53,\n            \"Soilm10\": 0.24,\n            \"Soilm40\": 0.22,\n            \"Soilt10\": 27.47\n        },\n        {\n            \"Date_time\": \"2026-08-12T23:00:00\",\n            \"Rainfall\": 0.03,\n            \"Tmin\": 24.28,\n            \"Tmax\": 25.86,\n            \"Tavg\": 25.07,\n            \"RH\": 71.15,\n            \"DPT\": 20.06,\n            \"Wind_Speed\": 2.91,\n            \"Wind_Direction\": 282.53,\n            \"SunSD\": 0,\n            \"Lowcloud\": 0.48,\n            \"Soilm10\": 0.24,\n            \"Soilm40\": 0.22,\n            \"Soilt10\": 27.2\n        },\n        {\n            \"Date_time\": \"2026-08-13T00:00:00\",\n            \"Rainfall\": 1.29,\n            \"Tmin\": 23.99,\n            \"Tmax\": 25.56,\n            \"Tavg\": 24.78,\n            \"RH\": 72.7,\n            \"DPT\": 19.99,\n            \"Wind_Speed\": 3.21,\n            \"Wind_Direction\": 281.82,\n            \"SunSD\": 0,\n            \"Lowcloud\": 0.44,\n            \"Soilm10\": 0.25,\n            \"Soilm40\": 0.22,\n            \"Soilt10\": 26.9\n        },\n        {\n            \"Date_time\": \"2026-08-13T01:00:00\",\n            \"Rainfall\": 0.09,\n            \"Tmin\": 24.04,\n            \"Tmax\": 25.61,\n            \"Tavg\": 24.82,\n            \"RH\": 72.61,\n            \"DPT\": 20.07,\n            \"Wind_Speed\": 3.2,\n            \"Wind_Direction\": 280.88,\n            \"SunSD\": 0,\n            \"Lowcloud\": 0.95,\n            \"Soilm10\": 0.25,\n            \"Soilm40\": 0.22,\n            \"Soilt10\": 26.7\n        },\n        {\n            \"Date_time\": \"2026-08-13T02:00:00\",\n            \"Rainfall\": 0,\n            \"Tmin\": 23.71,\n            \"Tmax\": 25.28,\n            \"Tavg\": 24.5,\n            \"RH\": 73.27,\n            \"DPT\": 19.95,\n            \"Wind_Speed\": 3.78,\n            \"Wind_Direction\": 276.37,\n            \"SunSD\": 0,\n            \"Lowcloud\": 0.84,\n            \"Soilm10\": 0.25,\n            \"Soilm40\": 0.22,\n            \"Soilt10\": 26.4\n        },\n        {\n            \"Date_time\": \"2026-08-13T03:00:00\",\n            \"Rainfall\": 0.58,\n            \"Tmin\": 23.35,\n            \"Tmax\": 24.93,\n            \"Tavg\": 24.14,\n            \"RH\": 74.39,\n            \"DPT\": 19.86,\n            \"Wind_Speed\": 4.14,\n            \"Wind_Direction\": 279.71,\n            \"SunSD\": 0,\n            \"Lowcloud\": 0.76,\n            \"Soilm10\": 0.25,\n            \"Soilm40\": 0.22,\n            \"Soilt10\": 26.21\n        },\n        {\n            \"Date_time\": \"2026-08-13T04:00:00\",\n            \"Rainfall\": 0,\n            \"Tmin\": 22.88,\n            \"Tmax\": 24.45,\n            \"Tavg\": 23.66,\n            \"RH\": 76.45,\n            \"DPT\": 19.8,\n            \"Wind_Speed\": 4.6,\n            \"Wind_Direction\": 276.03,\n            \"SunSD\": 0,\n            \"Lowcloud\": 0.67,\n            \"Soilm10\": 0.25,\n            \"Soilm40\": 0.22,\n            \"Soilt10\": 26.01\n        },\n        {\n            \"Date_time\": \"2026-08-13T05:00:00\",\n            \"Rainfall\": 0,\n            \"Tmin\": 22.39,\n            \"Tmax\": 23.96,\n            \"Tavg\": 23.17,\n            \"RH\": 78.42,\n            \"DPT\": 19.71,\n            \"Wind_Speed\": 4.9,\n            \"Wind_Direction\": 274.93,\n            \"SunSD\": 0,\n            \"Lowcloud\": 0.54,\n            \"Soilm10\": 0.25,\n            \"Soilm40\": 0.22,\n            \"Soilt10\": 25.72\n        },\n        {\n            \"Date_time\": \"2026-08-13T06:00:00\",\n            \"Rainfall\": 0.59,\n            \"Tmin\": 21.93,\n            \"Tmax\": 23.51,\n            \"Tavg\": 22.72,\n            \"RH\": 80.02,\n            \"DPT\": 19.56,\n            \"Wind_Speed\": 4.98,\n            \"Wind_Direction\": 274.69,\n            \"SunSD\": 0,\n            \"Lowcloud\": 0.45,\n            \"Soilm10\": 0.24,\n            \"Soilm40\": 0.22,\n            \"Soilt10\": 25.47\n        },\n        {\n            \"Date_time\": \"2026-08-13T07:00:00\",\n            \"Rainfall\": 0,\n            \"Tmin\": 21.79,\n            \"Tmax\": 23.36,\n            \"Tavg\": 22.58,\n            \"RH\": 80.92,\n            \"DPT\": 19.71,\n            \"Wind_Speed\": 5.14,\n            \"Wind_Direction\": 274.57,\n            \"SunSD\": 1649.3,\n            \"Lowcloud\": 0,\n            \"Soilm10\": 0.24,\n            \"Soilm40\": 0.22,\n            \"Soilt10\": 25.22\n        },\n        {\n            \"Date_time\": \"2026-08-13T08:00:00\",\n            \"Rainfall\": 0,\n            \"Tmin\": 22.65,\n            \"Tmax\": 24.23,\n            \"Tavg\": 23.44,\n            \"RH\": 76.9,\n            \"DPT\": 19.67,\n            \"Wind_Speed\": 6.32,\n            \"Wind_Direction\": 273.78,\n            \"SunSD\": 3600,\n            \"Lowcloud\": 0,\n            \"Soilm10\": 0.24,\n            \"Soilm40\": 0.22,\n            \"Soilt10\": 25.18\n        },\n        {\n            \"Date_time\": \"2026-08-13T09:00:00\",\n            \"Rainfall\": 0,\n            \"Tmin\": 24.23,\n            \"Tmax\": 25.8,\n            \"Tavg\": 25.02,\n            \"RH\": 69.54,\n            \"DPT\": 19.62,\n            \"Wind_Speed\": 6.76,\n            \"Wind_Direction\": 276.14,\n            \"SunSD\": 3600.03,\n            \"Lowcloud\": 0,\n            \"Soilm10\": 0.24,\n            \"Soilm40\": 0.22,\n            \"Soilt10\": 25.36\n        },\n        {\n            \"Date_time\": \"2026-08-13T10:00:00\",\n            \"Rainfall\": 0,\n            \"Tmin\": 25.87,\n            \"Tmax\": 27.44,\n            \"Tavg\": 26.65,\n            \"RH\": 62.58,\n            \"DPT\": 19.47,\n            \"Wind_Speed\": 6.96,\n            \"Wind_Direction\": 278.4,\n            \"SunSD\": 3600,\n            \"Lowcloud\": 0,\n            \"Soilm10\": 0.24,\n            \"Soilm40\": 0.22,\n            \"Soilt10\": 25.85\n        },\n        {\n            \"Date_time\": \"2026-08-13T11:00:00\",\n            \"Rainfall\": 0,\n            \"Tmin\": 27.32,\n            \"Tmax\": 28.9,\n            \"Tavg\": 28.11,\n            \"RH\": 56.52,\n            \"DPT\": 19.23,\n            \"Wind_Speed\": 7.18,\n            \"Wind_Direction\": 282.72,\n            \"SunSD\": 3600,\n            \"Lowcloud\": 0,\n            \"Soilm10\": 0.24,\n            \"Soilm40\": 0.22,\n            \"Soilt10\": 26.5\n        },\n        {\n            \"Date_time\": \"2026-08-13T12:00:00\",\n            \"Rainfall\": 0,\n            \"Tmin\": 28.52,\n            \"Tmax\": 30.1,\n            \"Tavg\": 29.31,\n            \"RH\": 51.74,\n            \"DPT\": 18.96,\n            \"Wind_Speed\": 7.18,\n            \"Wind_Direction\": 286.6,\n            \"SunSD\": 3600,\n            \"Lowcloud\": 0.06,\n            \"Soilm10\": 0.24,\n            \"Soilm40\": 0.22,\n            \"Soilt10\": 27.29\n        },\n        {\n            \"Date_time\": \"2026-08-13T13:00:00\",\n            \"Rainfall\": 0.03,\n            \"Tmin\": 29.16,\n            \"Tmax\": 30.73,\n            \"Tavg\": 29.94,\n            \"RH\": 48.67,\n            \"DPT\": 18.61,\n            \"Wind_Speed\": 6.92,\n            \"Wind_Direction\": 286.37,\n            \"SunSD\": 3600,\n            \"Lowcloud\": 0.55,\n            \"Soilm10\": 0.24,\n            \"Soilm40\": 0.22,\n            \"Soilt10\": 27.89\n        },\n        {\n            \"Date_time\": \"2026-08-13T14:00:00\",\n            \"Rainfall\": 0,\n            \"Tmin\": 28.19,\n            \"Tmax\": 29.76,\n            \"Tavg\": 28.98,\n            \"RH\": 51.61,\n            \"DPT\": 18.56,\n            \"Wind_Speed\": 6.48,\n            \"Wind_Direction\": 280.63,\n            \"SunSD\": 3600,\n            \"Lowcloud\": 0.7,\n            \"Soilm10\": 0.24,\n            \"Soilm40\": 0.22,\n            \"Soilt10\": 28.2\n        },\n        {\n            \"Date_time\": \"2026-08-13T15:00:00\",\n            \"Rainfall\": 0.27,\n            \"Tmin\": 27.96,\n            \"Tmax\": 29.54,\n            \"Tavg\": 28.75,\n            \"RH\": 52.13,\n            \"DPT\": 18.5,\n            \"Wind_Speed\": 6.41,\n            \"Wind_Direction\": 283.49,\n            \"SunSD\": 3600,\n            \"Lowcloud\": 0.8,\n            \"Soilm10\": 0.24,\n            \"Soilm40\": 0.22,\n            \"Soilt10\": 28.3\n        },\n        {\n            \"Date_time\": \"2026-08-13T16:00:00\",\n            \"Rainfall\": 0,\n            \"Tmin\": 28.04,\n            \"Tmax\": 29.62,\n            \"Tavg\": 28.83,\n            \"RH\": 52.77,\n            \"DPT\": 18.81,\n            \"Wind_Speed\": 6.65,\n            \"Wind_Direction\": 283.52,\n            \"SunSD\": 3600,\n            \"Lowcloud\": 0.81,\n            \"Soilm10\": 0.23,\n            \"Soilm40\": 0.22,\n            \"Soilt10\": 28.5\n        },\n        {\n            \"Date_time\": \"2026-08-13T17:00:00\",\n            \"Rainfall\": 0,\n            \"Tmin\": 28.38,\n            \"Tmax\": 29.95,\n            \"Tavg\": 29.17,\n            \"RH\": 51.68,\n            \"DPT\": 18.81,\n            \"Wind_Speed\": 6.98,\n            \"Wind_Direction\": 289.92,\n            \"SunSD\": 3600,\n            \"Lowcloud\": 0.71,\n            \"Soilm10\": 0.23,\n            \"Soilm40\": 0.22,\n            \"Soilt10\": 28.7\n        },\n        {\n            \"Date_time\": \"2026-08-13T18:00:00\",\n            \"Rainfall\": 0.84,\n            \"Tmin\": 27.62,\n            \"Tmax\": 29.2,\n            \"Tavg\": 28.41,\n            \"RH\": 56.12,\n            \"DPT\": 19.42,\n            \"Wind_Speed\": 6.53,\n            \"Wind_Direction\": 287.74,\n            \"SunSD\": 3600,\n            \"Lowcloud\": 0.64,\n            \"Soilm10\": 0.23,\n            \"Soilm40\": 0.22,\n            \"Soilt10\": 28.74\n        },\n        {\n            \"Date_time\": \"2026-08-13T19:00:00\",\n            \"Rainfall\": 0,\n            \"Tmin\": 26.07,\n            \"Tmax\": 27.64,\n            \"Tavg\": 26.86,\n            \"RH\": 61.64,\n            \"DPT\": 19.42,\n            \"Wind_Speed\": 5.31,\n            \"Wind_Direction\": 282.4,\n            \"SunSD\": 3600,\n            \"Lowcloud\": 0.08,\n            \"Soilm10\": 0.23,\n            \"Soilm40\": 0.22,\n            \"Soilt10\": 28.49\n        },\n        {\n            \"Date_time\": \"2026-08-13T20:00:00\",\n            \"Rainfall\": 0,\n            \"Tmin\": 25.11,\n            \"Tmax\": 26.69,\n            \"Tavg\": 25.9,\n            \"RH\": 64.51,\n            \"DPT\": 19.33,\n            \"Wind_Speed\": 4.14,\n            \"Wind_Direction\": 279.64,\n            \"SunSD\": 599.91,\n            \"Lowcloud\": 0.01,\n            \"Soilm10\": 0.23,\n            \"Soilm40\": 0.22,\n            \"Soilt10\": 28.19\n        },\n        {\n            \"Date_time\": \"2026-08-13T21:00:00\",\n            \"Rainfall\": 0.37,\n            \"Tmin\": 24.84,\n            \"Tmax\": 26.42,\n            \"Tavg\": 25.63,\n            \"RH\": 65.76,\n            \"DPT\": 19.33,\n            \"Wind_Speed\": 4.36,\n            \"Wind_Direction\": 284.29,\n            \"SunSD\": 0,\n            \"Lowcloud\": 0.01,\n            \"Soilm10\": 0.23,\n            \"Soilm40\": 0.22,\n            \"Soilt10\": 27.89\n        }\n    ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get Sunrise and Sunset Times",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://api.sunrise-sunset.org/json?lat={{lat}}&lng={{lng}}&date=today&formatted=0",
+              "protocol": "https",
+              "host": [
+                "api",
+                "sunrise-sunset",
+                "org"
+              ],
+              "path": [
+                "json"
+              ],
+              "query": [
+                {
+                  "key": "lat",
+                  "value": "{{lat}}"
+                },
+                {
+                  "key": "lng",
+                  "value": "{{lng}}"
+                },
+                {
+                  "key": "date",
+                  "value": "today"
+                },
+                {
+                  "key": "formatted",
+                  "value": "0"
+                }
+              ]
+            },
+            "description": "Fetches UTC astronomical sunrise, sunset, solar noon, and day length data."
+          },
+          "response": [
+            {
+              "name": "Get Sunrise and Sunset Times",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "https://api.sunrise-sunset.org/json?lat={{lat}}&lng={{lng}}&date=today&formatted=0",
+                  "protocol": "https",
+                  "host": [
+                    "api",
+                    "sunrise-sunset",
+                    "org"
+                  ],
+                  "path": [
+                    "json"
+                  ],
+                  "query": [
+                    {
+                      "key": "lat",
+                      "value": "{{lat}}"
+                    },
+                    {
+                      "key": "lng",
+                      "value": "{{lng}}"
+                    },
+                    {
+                      "key": "date",
+                      "value": "today"
+                    },
+                    {
+                      "key": "formatted",
+                      "value": "0"
+                    }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": null,
+              "header": [
+                {
+                  "key": ":status",
+                  "value": 200
+                },
+                {
+                  "key": "date",
+                  "value": "Wed, 12 Aug 2026 18:08:51 GMT"
+                },
+                {
+                  "key": "content-type",
+                  "value": "application/json"
+                },
+                {
+                  "key": "server",
+                  "value": "cloudflare"
+                },
+                {
+                  "key": "vary",
+                  "value": "Accept-Encoding"
+                },
+                {
+                  "key": "access-control-allow-origin",
+                  "value": "*"
+                },
+                {
+                  "key": "link",
+                  "value": "<https://api.sunrise-sunset.org/v2>; rel=\"successor-version\""
+                },
+                {
+                  "key": "content-encoding",
+                  "value": "gzip"
+                },
+                {
+                  "key": "cf-cache-status",
+                  "value": "DYNAMIC"
+                },
+                {
+                  "key": "nel",
+                  "value": "{\"report_to\":\"cf-nel\",\"success_fraction\":0.0,\"max_age\":604800}"
+                },
+                {
+                  "key": "report-to",
+                  "value": "{\"group\":\"cf-nel\",\"max_age\":604800,\"endpoints\":[{\"url\":\"https://a.nel.cloudflare.com/report/v4?s=lMSSZiX67OU7wVHrqPR0ceqAxLS8rVTGRsKMcLOQMElljDzi7VGdACwU2TVu%2BIZ6%2B83luDWZCRwXH3HQZx9%2FWx7eVhYBmK099prWl00iZSTOwr4dgdXvSrKDV220RPCheVQhgEQLRdAU\"}]}"
+                },
+                {
+                  "key": "cf-ray",
+                  "value": "a2a16d7b7832d11e-HYD"
+                },
+                {
+                  "key": "alt-svc",
+                  "value": "h3=\":443\"; ma=86400"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n    \"results\": {\n        \"sunrise\": \"2026-08-12T00:27:12+00:00\",\n        \"sunset\": \"2026-08-12T13:15:05+00:00\",\n        \"solar_noon\": \"2026-08-12T06:51:08+00:00\",\n        \"day_length\": 46073,\n        \"civil_twilight_begin\": \"2026-08-12T00:05:43+00:00\",\n        \"civil_twilight_end\": \"2026-08-12T13:36:34+00:00\",\n        \"nautical_twilight_begin\": \"2026-08-11T23:39:08+00:00\",\n        \"nautical_twilight_end\": \"2026-08-12T14:03:08+00:00\",\n        \"astronomical_twilight_begin\": \"2026-08-11T23:12:08+00:00\",\n        \"astronomical_twilight_end\": \"2026-08-12T14:30:08+00:00\"\n    },\n    \"status\": \"OK\",\n    \"tzid\": \"UTC\"\n}"
+            }
+          ]
+        }
+      ],
+      "description": "Endpoints providing forecast data, interpolation, and hourly weather details."
+    },
+    {
+      "name": "Location Services",
+      "item": [
+        {
+          "name": "Get Place Name (Centroids Reverse Geocode)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{infestServerUrl}}/api/centroids?latitude={{lat}}&longitude={{lng}}",
+              "host": [
+                "{{infestServerUrl}}"
+              ],
+              "path": [
+                "api",
+                "centroids"
+              ],
+              "query": [
+                {
+                  "key": "latitude",
+                  "value": "{{lat}}",
+                  "description": "Latitude coordinate (e.g. 17.385044)"
+                },
+                {
+                  "key": "longitude",
+                  "value": "{{lng}}",
+                  "description": "Longitude coordinate (e.g. 78.486671)"
+                }
+              ]
+            },
+            "description": "Resolves location names (Village, District, State) for given coordinates."
+          },
+          "response": [
+            {
+              "name": "Get Place Name (Centroids Reverse Geocode)",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{infestServerUrl}}/api/centroids?latitude={{lat}}&longitude={{lng}}",
+                  "host": [
+                    "{{infestServerUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "centroids"
+                  ],
+                  "query": [
+                    {
+                      "key": "latitude",
+                      "value": "{{lat}}",
+                      "description": "Latitude coordinate (e.g. 17.385044)"
+                    },
+                    {
+                      "key": "longitude",
+                      "value": "{{lng}}",
+                      "description": "Longitude coordinate (e.g. 78.486671)"
+                    }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": null,
+              "header": [
+                {
+                  "key": ":status",
+                  "value": 200
+                },
+                {
+                  "key": "access-control-allow-origin",
+                  "value": "*"
+                },
+                {
+                  "key": "content-type",
+                  "value": "application/json; charset=utf-8"
+                },
+                {
+                  "key": "date",
+                  "value": "Wed, 12 Aug 2026 18:08:57 GMT"
+                },
+                {
+                  "key": "etag",
+                  "value": "W/\"a4-732yZiJBPvYtUIBfVmYWkT752+o\""
+                },
+                {
+                  "key": "x-powered-by",
+                  "value": "Express"
+                },
+                {
+                  "key": "content-length",
+                  "value": "164"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n    \"location\": {\n        \"location\": {\n            \"type\": \"Point\",\n            \"coordinates\": [\n                78.45509,\n                17.37827\n            ]\n        },\n        \"state\": \"Telangana\",\n        \"district\": \"Hyderabad\",\n        \"sub_dist\": \"Hyderabad\",\n        \"village\": \"Hyderabad\"\n    }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Location Search Suggestions (Solr Auto-complete)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "{{solrAuthHeader}}",
+                "description": "Basic Auth header using variable solrAuthHeader"
+              }
+            ],
+            "url": {
+              "raw": "{{solrUrl}}/solr/location_data/select?q=(village:{{searchQuery}}* OR state:{{searchQuery}}* OR district:{{searchQuery}}*)&rows=10",
+              "host": [
+                "{{solrUrl}}"
+              ],
+              "path": [
+                "solr",
+                "location_data",
+                "select"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "(village:{{searchQuery}}* OR state:{{searchQuery}}* OR district:{{searchQuery}}*)",
+                  "description": "Search query matching village, state, or district fields"
+                },
+                {
+                  "key": "rows",
+                  "value": "10",
+                  "description": "Maximum number of location records to return"
+                }
+              ]
+            },
+            "description": "Searches for location suggestions matching user prefix query."
+          },
+          "response": [
+            {
+              "name": "Location Search Suggestions (Solr Auto-complete)",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "{{solrAuthHeader}}",
+                    "description": "Basic Auth header using variable solrAuthHeader"
+                  }
+                ],
+                "url": {
+                  "raw": "{{solrUrl}}/solr/location_data/select?q=(village:{{searchQuery}}* OR state:{{searchQuery}}* OR district:{{searchQuery}}*)&rows=10",
+                  "host": [
+                    "{{solrUrl}}"
+                  ],
+                  "path": [
+                    "solr",
+                    "location_data",
+                    "select"
+                  ],
+                  "query": [
+                    {
+                      "key": "q",
+                      "value": "(village:{{searchQuery}}* OR state:{{searchQuery}}* OR district:{{searchQuery}}*)",
+                      "description": "Search query matching village, state, or district fields"
+                    },
+                    {
+                      "key": "rows",
+                      "value": "10",
+                      "description": "Maximum number of location records to return"
+                    }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": null,
+              "header": [
+                {
+                  "key": ":status",
+                  "value": 200
+                },
+                {
+                  "key": "access-control-allow-credentials",
+                  "value": "true"
+                },
+                {
+                  "key": "access-control-allow-origin",
+                  "value": "*"
+                },
+                {
+                  "key": "content-encoding",
+                  "value": "gzip"
+                },
+                {
+                  "key": "content-security-policy",
+                  "value": "default-src 'none'; base-uri 'none'; connect-src 'self'; form-action 'self'; font-src 'self'; frame-ancestors 'none'; img-src 'self' data:; media-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; worker-src 'self';"
+                },
+                {
+                  "key": "content-type",
+                  "value": "application/json;charset=utf-8"
+                },
+                {
+                  "key": "vary",
+                  "value": "Accept-Encoding,Origin"
+                },
+                {
+                  "key": "x-content-type-options",
+                  "value": "nosniff"
+                },
+                {
+                  "key": "x-frame-options",
+                  "value": "SAMEORIGIN"
+                },
+                {
+                  "key": "x-xss-protection",
+                  "value": "1; mode=block"
+                },
+                {
+                  "key": "content-length",
+                  "value": "1270"
+                },
+                {
+                  "key": "date",
+                  "value": "Wed, 12 Aug 2026 18:05:17 GMT"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n    \"responseHeader\": {\n        \"status\": 0,\n        \"QTime\": 0,\n        \"params\": {\n            \"q\": \"(village:Hyd* OR state:Hyd* OR district:Hyd*)\",\n            \"rows\": \"10\"\n        }\n    },\n    \"response\": {\n        \"numFound\": 18,\n        \"start\": 0,\n        \"numFoundExact\": true,\n        \"docs\": [\n            {\n                \"state\": [\n                    \"Telangana\"\n                ],\n                \"state_latitude\": [\n                    17.87621\n                ],\n                \"state_longitude\": [\n                    79.29873787\n                ],\n                \"district\": [\n                    \"Hyderabad\"\n                ],\n                \"district_latitude\": [\n                    17.394505\n                ],\n                \"district_longitude\": [\n                    78.45946108\n                ],\n                \"sub_district\": [\n                    \"Secunderabad\"\n                ],\n                \"sub_district_latitude\": [\n                    17.471495\n                ],\n                \"sub_district_longitude\": [\n                    78.46480736\n                ],\n                \"village\": [\n                    \"Hyderabad (m Corp+og) (part)\"\n                ],\n                \"village_latitude\": [\n                    17.4715\n                ],\n                \"village_longitude\": [\n                    78.46481\n                ],\n                \"id\": \"db262761-fecd-4dc0-8644-5294a0d7d52b\",\n                \"_version_\": 1813524168212217860\n            },\n            {\n                \"state\": [\n                    \"Telangana\"\n                ],\n                \"state_latitude\": [\n                    17.87621\n                ],\n                \"state_longitude\": [\n                    79.29873787\n                ],\n                \"district\": [\n                    \"Hyderabad\"\n                ],\n                \"district_latitude\": [\n                    17.394505\n                ],\n                \"district_longitude\": [\n                    78.45946108\n                ],\n                \"sub_district\": [\n                    \"Hyderabad\"\n                ],\n                \"sub_district_latitude\": [\n                    17.37827\n                ],\n                \"sub_district_longitude\": [\n                    78.45508672\n                ],\n                \"village\": [\n                    \"Hyderabad\"\n                ],\n                \"village_latitude\": [\n                    17.37827\n                ],\n                \"village_longitude\": [\n                    78.45509\n                ],\n                \"id\": \"828defd1-053c-41e2-9981-4a4560cb0b0c\",\n                \"_version_\": 1813524168283521027\n            },\n            {\n                \"state\": [\n                    \"Karnataka\"\n                ],\n                \"state_latitude\": [\n                    15.0218635\n                ],\n                \"state_longitude\": [\n                    75.53809107\n                ],\n                \"district\": [\n                    \"Bengaluru Rural\"\n                ],\n                \"district_latitude\": [\n                    13.1812865\n                ],\n                \"district_longitude\": [\n                    77.34037835\n                ],\n                \"sub_district\": [\n                    \"Nelamangala\"\n                ],\n                \"sub_district_latitude\": [\n                    13.1494575\n                ],\n                \"sub_district_longitude\": [\n                    77.34679804\n                ],\n                \"village\": [\n                    \"Hydalu\"\n                ],\n                \"village_latitude\": [\n                    13.13619\n                ],\n                \"village_longitude\": [\n                    77.40482\n                ],\n                \"id\": \"0ca2d637-956b-4f12-aa49-ff27f1049b9e\",\n                \"_version_\": 1813524172437979141\n            },\n            {\n                \"state\": [\n                    \"Karnataka\"\n                ],\n                \"state_latitude\": [\n                    15.0218635\n                ],\n                \"state_longitude\": [\n                    75.53809107\n                ],\n                \"district\": [\n                    \"Koppal\"\n                ],\n                \"district_latitude\": [\n                    15.5766375\n                ],\n                \"district_longitude\": [\n                    76.3122932\n                ],\n                \"sub_district\": [\n                    \"Koppal\"\n                ],\n                \"sub_district_latitude\": [\n                    15.3770415\n                ],\n                \"sub_district_longitude\": [\n                    76.24335339\n                ],\n                \"village\": [\n                    \"Hydernagar\"\n                ],\n                \"village_latitude\": [\n                    15.17974\n                ],\n                \"village_longitude\": [\n                    75.9501\n                ],\n                \"id\": \"44f8f171-e985-499b-924b-506291ad434a\",\n                \"_version_\": 1813524172581634056\n            },\n            {\n                \"state\": [\n                    \"Uttarpradesh\"\n                ],\n                \"state_latitude\": [\n                    27.13991378\n                ],\n                \"state_longitude\": [\n                    80.78202065\n                ],\n                \"district\": [\n                    \"Unnao\"\n                ],\n                \"district_latitude\": [\n                    26.57215655\n                ],\n                \"district_longitude\": [\n                    80.62442719\n                ],\n                \"sub_district\": [\n                    \"Hasanganj\"\n                ],\n                \"sub_district_latitude\": [\n                    26.78011022\n                ],\n                \"sub_district_longitude\": [\n                    80.57199016\n                ],\n                \"village\": [\n                    \"Hyderabad  (up)\"\n                ],\n                \"village_latitude\": [\n                    26.82391\n                ],\n                \"village_longitude\": [\n                    80.49045\n                ],\n                \"id\": \"001127ef-6eeb-40d5-a8e1-0a0fd79790b0\",\n                \"_version_\": 1813524160354189313\n            },\n            {\n                \"state\": [\n                    \"Telangana\"\n                ],\n                \"state_latitude\": [\n                    17.87621\n                ],\n                \"state_longitude\": [\n                    79.29873787\n                ],\n                \"district\": [\n                    \"Khammam\"\n                ],\n                \"district_latitude\": [\n                    17.1753\n                ],\n                \"district_longitude\": [\n                    80.40541331\n                ],\n                \"sub_district\": [\n                    \"Thirumalayapalem\"\n                ],\n                \"sub_district_latitude\": [\n                    17.33464\n                ],\n                \"sub_district_longitude\": [\n                    79.96654893\n                ],\n                \"village\": [\n                    \"Hydersaipeta\"\n                ],\n                \"village_latitude\": [\n                    17.39114\n                ],\n                \"village_longitude\": [\n                    79.98083\n                ],\n                \"id\": \"ac3f9e64-1859-4139-be5b-662554871b54\",\n                \"_version_\": 1813524168335949833\n            },\n            {\n                \"state\": [\n                    \"Telangana\"\n                ],\n                \"state_latitude\": [\n                    17.87621\n                ],\n                \"state_longitude\": [\n                    79.29873787\n                ],\n                \"district\": [\n                    \"Rangareddy\"\n                ],\n                \"district_latitude\": [\n                    17.130735\n                ],\n                \"district_longitude\": [\n                    78.39862708\n                ],\n                \"sub_district\": [\n                    \"Saroornagar\"\n                ],\n                \"sub_district_latitude\": [\n                    17.30611\n                ],\n                \"sub_district_longitude\": [\n                    78.54241721\n                ],\n                \"village\": [\n                    \"Hyderabad (m+og) (part)\"\n                ],\n                \"village_latitude\": [\n                    17.29289\n                ],\n                \"village_longitude\": [\n                    78.49153\n                ],\n                \"id\": \"571a51df-c395-47a6-8f30-9b24f84d3137\",\n                \"_version_\": 1813524168455487491\n            },\n            {\n                \"state\": [\n                    \"Telangana\"\n                ],\n                \"state_latitude\": [\n                    17.87621\n                ],\n                \"state_longitude\": [\n                    79.29873787\n                ],\n                \"district\": [\n                    \"Nalgonda\"\n                ],\n                \"district_latitude\": [\n                    16.858665\n                ],\n                \"district_longitude\": [\n                    79.21802741\n                ],\n                \"sub_district\": [\n                    \"Nampalli\"\n                ],\n                \"sub_district_latitude\": [\n                    16.85404\n                ],\n                \"sub_district_longitude\": [\n                    78.94578508\n                ],\n                \"village\": [\n                    \"Hydelapur\"\n                ],\n                \"village_latitude\": [\n                    16.88566\n                ],\n                \"village_longitude\": [\n                    78.85666\n                ],\n                \"id\": \"81132e8b-cd30-42b1-9333-7e859d145fa9\",\n                \"_version_\": 1813524168474361868\n            },\n            {\n                \"state\": [\n                    \"Telangana\"\n                ],\n                \"state_latitude\": [\n                    17.87621\n                ],\n                \"state_longitude\": [\n                    79.29873787\n                ],\n                \"district\": [\n                    \"Hyderabad\"\n                ],\n                \"district_latitude\": [\n                    17.394505\n                ],\n                \"district_longitude\": [\n                    78.45946108\n                ],\n                \"sub_district\": [\n                    \"Hyderabad\"\n                ],\n                \"sub_district_latitude\": [\n                    17.37827\n                ],\n                \"sub_district_longitude\": [\n                    78.45508672\n                ],\n                \"village\": [\n                    \"Osmania University\"\n                ],\n                \"village_latitude\": [\n                    17.41701\n                ],\n                \"village_longitude\": [\n                    78.52004\n                ],\n                \"id\": \"abab60d0-b9cd-4b1f-b876-db6a9e61f191\",\n                \"_version_\": 1813524168537276416\n            },\n            {\n                \"state\": [\n                    \"Telangana\"\n                ],\n                \"state_latitude\": [\n                    17.87621\n                ],\n                \"state_longitude\": [\n                    79.29873787\n                ],\n                \"district\": [\n                    \"Rangareddy\"\n                ],\n                \"district_latitude\": [\n                    17.130735\n                ],\n                \"district_longitude\": [\n                    78.39862708\n                ],\n                \"sub_district\": [\n                    \"Patan Cheruvu\"\n                ],\n                \"sub_district_latitude\": [\n                    17.35326\n                ],\n                \"sub_district_longitude\": [\n                    78.375105\n                ],\n                \"village\": [\n                    \"Hyderabad (m+og) (part)\"\n                ],\n                \"village_latitude\": [\n                    17.36649\n                ],\n                \"village_longitude\": [\n                    78.40257\n                ],\n                \"id\": \"6c7e7d47-85b6-4272-b4f1-b2eb66327087\",\n                \"_version_\": 1813524168537276418\n            }\n        ]\n    }\n}"
+            }
+          ]
+        }
+      ],
+      "description": "Endpoints for resolving place names, reverse geocoding, and location search autocompletion."
+    }
+  ]
+}
