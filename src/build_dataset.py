@@ -35,7 +35,7 @@ from itertools import product
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from src.schema import Action, WeatherIntent
+from src.schema import Action, Aggregation, WeatherIntent
 
 # --- vocabulary -------------------------------------------------------------
 
@@ -512,6 +512,79 @@ def _load_location_vocab(path=LOCATIONS_CSV):
 
 LOCATIONS, HELDOUT_LOCATIONS = _load_location_vocab()
 
+# Aggregation (Rule 2.3) is carried by the wording, so it is generated as its own frame set.
+# {m} = metric noun, and each frame declares which reduction it implies.
+AGG_FRAMES = {
+    "SUM": [
+        "total {m} in {loc} {t}",
+        "how much {m} in total in {loc} {t}?",
+        "cumulative {m} for {loc} {t}",
+        "add up the {m} in {loc} {t}",
+        "overall {m} in {loc} {t}",
+        "sum of {m} in {loc} {t}",
+    ],
+    "AVG": [
+        "average {m} in {loc} {t}",
+        "mean {m} for {loc} {t}",
+        "on average what is the {m} in {loc} {t}?",
+        "typical {m} in {loc} {t}",
+        "avg {m} {loc} {t}",
+    ],
+    "MAX": [
+        "peak {m} in {loc} {t}",
+        "highest {m} in {loc} {t}",
+        "what is the maximum {m} in {loc} {t}?",
+        "worst {m} in {loc} {t}",
+        "strongest {m} in {loc} {t}",
+        "when is the {m} highest in {loc} {t}?",
+    ],
+    "MIN": [
+        "lowest {m} in {loc} {t}",
+        "minimum {m} in {loc} {t}",
+        "weakest {m} in {loc} {t}",
+        "when is the {m} lowest in {loc} {t}?",
+    ],
+    "TREND": [
+        "when will the {m} start dropping in {loc} {t}?",
+        "when does the {m} rise in {loc} {t}?",
+        "is the {m} increasing in {loc} {t}?",
+        "how is the {m} changing in {loc} {t}?",
+        "around what time does the {m} pick up in {loc} {t}?",
+        "is the {m} getting better or worse in {loc} {t}?",
+    ],
+}
+
+# Sentences with real conversational padding. The tagger kept labelling "expect", "plan"
+# and "skies" as places because every training prompt was a bare command - these teach it
+# what an ordinary noun looks like next to a place name.
+CHATTY_GET_FRAMES = [
+    "i am planning a trip to {loc} {t}, what kind of {m} should i expect?",
+    "i might be driving through {loc} {t}, any chance of {m}?",
+    "we are heading to {loc} {t} - what is the {m} looking like?",
+    "thinking of visiting {loc} {t}, how is the {m} there?",
+    "quick question, what is the {m} around {loc} {t}?",
+    "hey, can you check the {m} for {loc} {t}?",
+    "do you think the {m} in {loc} will be ok {t}?",
+    "i have an outdoor plan in {loc} {t} - what is the {m}?",
+    "what kind of {m} should i expect in {loc} {t}?",
+    "any idea what the {m} does in {loc} {t}?",
+    "{m} of {loc} {t}",
+    "{m} of {loc} please {t}",
+    "whats the {m} like over in {loc} {t}?",
+    "i want to know if the {m} in {loc} is fine {t}",
+]
+CHATTY_COMPARE_FRAMES = [
+    "between {loc} and {loc2}, which one looks better for {m} {t}?",
+    "can you check whether {loc} will be better than {loc2} for {m} {t}?",
+    "i am deciding between {loc} and {loc2} {t} - which has better {m}?",
+    "we might go to {loc} or {loc2} {t}, how does the {m} compare?",
+    "which one should i pick for {m} {t}, {loc} or {loc2}?",
+    "is {loc} or {loc2} the safer bet for {m} {t}?",
+    "{m} in {loc}, {loc2} {t}",
+    "compare the {m} in {loc}, {loc2} and {loc3} {t}",
+    "{loc}, {loc2} {m} {t}",
+]
+
 _PUNCT_FIX = [(" ?", "?"), (" ,", ","), (" .", "."), ("? ?", "?")]
 NO_TIME_RATE = 0.18  # share of prompts with no temporal mention (time == [])
 CLOCK_RATE = 0.28    # share of temporal mentions that are wall-clock times
@@ -519,6 +592,8 @@ TYPO_RATE = 0.26     # share of prompts carrying a spelling mistake (outside the
 COMPARE_TYPO_BONUS = 0.12  # COMPARE wording is the most template-like, so rough it up harder
 GRAMMAR_RATE = 0.28  # share of prompts with dropped function words / chat punctuation
 LOCATION_TYPO_RATE = 0.18  # share of prompts where the PLACE NAME itself is misspelt
+AGG_RATE = 0.22      # share of prompts that ask for a reduction (total / average / peak ...)
+CHATTY_RATE = 0.20   # share of prompts wrapped in conversational padding
 
 
 def _clock(rng):
@@ -589,7 +664,7 @@ def _clean(text: str) -> str:
 def _render(frame: str, metric: str, locs, times):
     """Fill a frame; return (text, location_spans, time_spans)."""
     values = {"m": metric}
-    for key, (surface, _) in zip(("loc", "loc2"), locs):
+    for key, (surface, _) in zip(("loc", "loc2", "loc3"), locs):
         values[key] = surface
     for key, (surface, _) in zip(("t", "t2"), times):
         values[key] = surface
@@ -713,13 +788,22 @@ def _cell_rows(rng, intent: str, action: str, n: int, avoid=()):
     while len(rows) < n and guard < n * 200:
         guard += 1
         roll = rng.random()
-        if noloc and roll < 0.15:   # no location at all -> location == [] (Rule 4.1)
+        aggregation = "RAW"
+        # AGG_FRAMES carry a single {loc}; COMPARE needs two, and ALERT has its own wording
+        if rng.random() < AGG_RATE and action == "GET":
+            # the wording itself declares the reduction, so the label comes from the frame
+            aggregation = rng.choice(list(AGG_FRAMES))
+            frame, pool = rng.choice(AGG_FRAMES[aggregation]), locations
+        elif rng.random() < CHATTY_RATE:
+            chatty = CHATTY_COMPARE_FRAMES if action == "COMPARE" else CHATTY_GET_FRAMES
+            frame, pool = rng.choice(chatty), locations
+        elif noloc and roll < 0.15:   # no location at all -> location == [] (Rule 4.1)
             frame, pool = rng.choice(noloc), locations
-        elif roll < 0.32:           # relative location ("near me", "in my field")
+        elif roll < 0.32:             # relative location ("near me", "in my field")
             frame, pool = rng.choice(bare), relative
         else:
             frame, pool = rng.choice(frames), locations
-        n_loc = frame.count("{loc}") + frame.count("{loc2}")
+        n_loc = frame.count("{loc}") + frame.count("{loc2}") + frame.count("{loc3}")
         n_time = frame.count("{t}") + frame.count("{t2}")
         # relative compare frames read as "<relative> with <place>", never relative twice
         if pool is relative and n_loc == 2:
@@ -754,7 +838,7 @@ def _cell_rows(rng, intent: str, action: str, n: int, avoid=()):
             continue
         seen.add(key)
         rows.append({"text": text, "weather_intent": intent, "action": action,
-                     "location": loc_spans, "time": time_spans})
+                     "aggregation": aggregation, "location": loc_spans, "time": time_spans})
     if len(rows) < n:
         print(f"  ! {intent}/{action}: only {len(rows)}/{n} unique prompts available")
     return rows
@@ -764,6 +848,7 @@ def _cell_rows(rng, intent: str, action: str, n: int, avoid=()):
 
 INTENTS = [i.value for i in WeatherIntent]
 ACTIONS = [a.value for a in Action]
+AGGREGATIONS = [a.value for a in Aggregation]
 _LEADING_PREP = re.compile(r"^(on|at|in|from|for|during|by|over)\s", re.I)
 
 
@@ -776,6 +861,8 @@ def validate_row(row) -> str:
         return f"bad weather_intent {row['weather_intent']!r}"
     if row["action"] not in ACTIONS:
         return f"bad action {row['action']!r}"
+    if row.get("aggregation", "RAW") not in AGGREGATIONS:
+        return f"bad aggregation {row.get('aggregation')!r}"
     for field in ("location", "time"):
         spans = row[field]
         if not isinstance(spans, list):
@@ -814,6 +901,8 @@ def load_seed(path: Path):
         for row in csv.DictReader(fh):
             row["location"] = json.loads(row["location"] or "[]")
             row["time"] = json.loads(row["time"] or "[]")
+            row.setdefault("aggregation", "RAW")
+            row["aggregation"] = row["aggregation"] or "RAW"
             rows.append(row)
     return rows
 
@@ -887,16 +976,19 @@ def main():
     out.parent.mkdir(parents=True, exist_ok=True)
     with out.open("w", newline="", encoding="utf-8") as fh:
         writer = csv.writer(fh)
-        writer.writerow(["text", "weather_intent", "action", "location", "time"])
+        writer.writerow(["text", "weather_intent", "action", "aggregation", "location", "time"])
         for row in unique:
             writer.writerow([row["text"], row["weather_intent"], row["action"],
+                             row.get("aggregation", "RAW"),
                              json.dumps(row["location"]), json.dumps(row["time"])])
 
     no_loc = sum(1 for r in unique if not r["location"])
     no_time = sum(1 for r in unique if not r["time"])
     print(f"Wrote {len(unique)} rows -> {out}")
+    aggregations = Counter(r.get("aggregation", "RAW") for r in unique)
     print(f"  intents: {len(INTENTS)}  actions: {len(ACTIONS)}  "
           f"no-location: {no_loc}  no-time: {no_time}")
+    print(f"  aggregations: {dict(aggregations)}")
     print(f"  location spans inside India: {india_share(unique):.1%}"
           if INDIA_NAMES else "  location source: built-in fallback list")
 

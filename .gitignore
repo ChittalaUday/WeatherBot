@@ -1,12 +1,8 @@
-# Byte-compiled / optimized / DLL files
+# --- Python ---------------------------------------------------------------
 __pycache__/
 *.py[cod]
 *$py.class
-
-# C extensions
 *.so
-
-# Distribution / packaging
 .Python
 build/
 develop-eggs/
@@ -26,7 +22,18 @@ share/python-wheels/
 *.egg
 MANIFEST
 
-# Unit test / coverage reports
+# --- Environments ---------------------------------------------------------
+.env
+.env.*
+!.env.example
+.venv
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# --- Tests / coverage -----------------------------------------------------
 htmlcov/
 .tox/
 .nox/
@@ -38,27 +45,45 @@ coverage.xml
 *.cover
 .pytest_cache/
 .hypothesis/
+.ruff_cache/
+.mypy_cache/
 
-# Jupyter Notebook
+# --- Jupyter --------------------------------------------------------------
 .ipynb_checkpoints
+notebooks/*-checkpoint.ipynb
 
-# Environments & Virtual Envs
-.env
-.venv
-env/
-venv/
-ENV/
-env.bak/
-venv.bak/
+# --- Model artefacts (regenerate: python src/nlu.py --export) -------------
+models/*.joblib
+models/metrics.json
 
-# IDEs & Editors
+# --- Runtime data ---------------------------------------------------------
+# conversations.db is per-deployment chat history; export labels instead:
+#   python -m backend.store --export data/from_users.csv
+data/conversations.db
+data/conversations.db-wal
+data/conversations.db-shm
+data/processed/hard_cases.csv
+data/from_users.csv
+
+# --- Node / Next.js -------------------------------------------------------
+node_modules/
+.next/
+out/
+.turbo/
+next-env.d.ts
+*.tsbuildinfo
+.vercel
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# --- Editors / OS ---------------------------------------------------------
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
-
-# macOS / OS metadata
 .DS_Store
 .DS_Store?
 ._*
@@ -67,16 +92,8 @@ venv.bak/
 ehthumbs.db
 Thumbs.db
 
-# Logs & Temporary files
+# --- Logs / temp ----------------------------------------------------------
 *.log
 logs/
 tmp/
 temp/
-
-# runtime data
-data/conversations.db*
-
-# regenerable artefacts
-models/*.joblib
-frontend/node_modules/
-frontend/.next/
