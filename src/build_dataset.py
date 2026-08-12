@@ -576,13 +576,78 @@ CHATTY_GET_FRAMES = [
 CHATTY_COMPARE_FRAMES = [
     "between {loc} and {loc2}, which one looks better for {m} {t}?",
     "can you check whether {loc} will be better than {loc2} for {m} {t}?",
+    "can you check whether {loc} will be cooler than {loc2} for {m} {t}?",
     "i am deciding between {loc} and {loc2} {t} - which has better {m}?",
     "we might go to {loc} or {loc2} {t}, how does the {m} compare?",
     "which one should i pick for {m} {t}, {loc} or {loc2}?",
     "is {loc} or {loc2} the safer bet for {m} {t}?",
-    "{m} in {loc}, {loc2} {t}",
+    # comma lists always carry "and"/"vs" as well: a bare comma belongs to an address
+    # ("Taloda, Nandurbar, Maharashtra"), not to a list of places
     "compare the {m} in {loc}, {loc2} and {loc3} {t}",
-    "{loc}, {loc2} {m} {t}",
+    "{m} in {loc}, {loc2} and {loc3} {t}",
+]
+
+# Comparatives where the adjective is the ONLY signal - no metric noun anywhere. "will X be
+# cooler than Y" has to reach TEMPERATURE on the strength of "cooler" alone, which is what
+# real users type and what every template so far avoided.
+COMPARATIVE_EXTRA = {
+    "TEMPERATURE": [
+        "will {loc} be cooler than {loc2} {t}?",
+        "is {loc} warmer than {loc2} {t}?",
+        "can you check whether {loc} will be cooler than {loc2} {t}?",
+        "which is cooler {t}, {loc} or {loc2}?",
+        "is it colder in {loc} or {loc2} {t}?",
+    ],
+    "TEMPERATURE_MAX": [
+        "will {loc} be hotter than {loc2} {t}?",
+        "which gets hotter {t}, {loc} or {loc2}?",
+    ],
+    "RAIN": [
+        "is {loc} wetter than {loc2} {t}?",
+        "which is rainier {t}, {loc} or {loc2}?",
+        "will {loc} get more rain than {loc2} {t}?",
+    ],
+    "WIND_SPEED": [
+        "is {loc} windier than {loc2} {t}?",
+        "which is windier {t}, {loc} or {loc2}?",
+    ],
+    "SUNSHINE": [
+        "is {loc} sunnier than {loc2} {t}?",
+        "which is brighter {t}, {loc} or {loc2}?",
+    ],
+    "HUMIDITY": [
+        "is {loc} more humid than {loc2} {t}?",
+        "which is stickier {t}, {loc} or {loc2}?",
+    ],
+    "CLOUD_COVER": [
+        "is {loc} cloudier than {loc2} {t}?",
+        "which has clearer skies {t}, {loc} or {loc2}?",
+    ],
+    "CURRENT_CONDITIONS": [
+        "between {loc} and {loc2}, which one looks better {t}?",
+        "which is nicer {t}, {loc} or {loc2}?",
+        "where is it pleasanter {t}, {loc} or {loc2}?",
+    ],
+}
+
+# Single-place questions whose only signal is an adjective or an activity.
+ADJECTIVE_EXTRA = {
+    "CLOUD_COVER": ["is {loc} likely to have clear skies {t}?", "will the sky be clear in {loc} {t}?"],
+    "SUNSHINE": ["will it be bright in {loc} {t}?", "is it going to be gloomy in {loc} {t}?"],
+    "TEMPERATURE": ["will {loc} be pleasant {t}?", "is {loc} going to be chilly {t}?"],
+    "WIND_SPEED": ["will it be breezy in {loc} {t}?", "is {loc} going to be gusty {t}?"],
+    "RAIN": ["is {loc} going to be wet {t}?", "will {loc} stay dry {t}?"],
+}
+
+# Conversational ALERT wording. Without these the chatty GET frames were being generated as
+# ALERT rows too, which taught the model that "can you check ..." means ALERT.
+CHATTY_ALERT_FRAMES = [
+    "can you keep an eye on the {m} in {loc} {t}?",
+    "let me know if the {m} changes in {loc} {t}",
+    "give me a heads up about the {m} in {loc} {t}",
+    "i want to be told if the {m} turns bad in {loc} {t}",
+    "watch the {m} for me in {loc} {t}",
+    "tell me if anything happens with the {m} in {loc} {t}",
 ]
 
 _PUNCT_FIX = [(" ?", "?"), (" ,", ","), (" .", "."), ("? ?", "?")]
@@ -775,11 +840,13 @@ def _cell_rows(rng, intent: str, action: str, n: int, avoid=()):
     extra = EXTRA.get(intent, {}).get(action, [])
     locations, relative, times, clocks = LOCATIONS, RELATIVE, TIMES, CLOCKS
     if action == "GET":
-        frames, noloc, bare = GET_FRAMES + extra, NOLOC_GET_FRAMES, BARE_GET_FRAMES
+        frames = GET_FRAMES + extra + ADJECTIVE_EXTRA.get(intent, [])
+        noloc, bare = NOLOC_GET_FRAMES, BARE_GET_FRAMES
     elif action == "ALERT":
         frames, noloc, bare = ALERT_FRAMES + extra, NOLOC_ALERT_FRAMES, BARE_ALERT_FRAMES
     else:
-        frames, noloc, bare = COMPARE_FRAMES + COMPARE_TIME_FRAMES, [], BARE_COMPARE_FRAMES
+        frames = COMPARE_FRAMES + COMPARE_TIME_FRAMES + COMPARATIVE_EXTRA.get(intent, [])
+        noloc, bare = [], BARE_COMPARE_FRAMES
         if intent not in NON_SCALAR:
             frames = frames + COMPARE_SCALAR_FRAMES
 
@@ -795,7 +862,8 @@ def _cell_rows(rng, intent: str, action: str, n: int, avoid=()):
             aggregation = rng.choice(list(AGG_FRAMES))
             frame, pool = rng.choice(AGG_FRAMES[aggregation]), locations
         elif rng.random() < CHATTY_RATE:
-            chatty = CHATTY_COMPARE_FRAMES if action == "COMPARE" else CHATTY_GET_FRAMES
+            chatty = {"COMPARE": CHATTY_COMPARE_FRAMES, "ALERT": CHATTY_ALERT_FRAMES}.get(
+                action, CHATTY_GET_FRAMES)
             frame, pool = rng.choice(chatty), locations
         elif noloc and roll < 0.15:   # no location at all -> location == [] (Rule 4.1)
             frame, pool = rng.choice(noloc), locations

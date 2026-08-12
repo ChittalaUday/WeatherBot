@@ -30,7 +30,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from backend import respond, store, weather
+from backend import insights, locations, respond, store, weather
 from src.nlu import NLUModel
 
 app = FastAPI(title="WeatherBot", version="1.0")
@@ -70,12 +70,16 @@ async def handle_query(socket: WebSocket, text: str, coords: dict | None, sessio
     await socket.send_json({"type": "status", "stage": "understanding"})
     parsed = model.predict(text)
     intent, action = parsed.weather_intent.value, parsed.action.value
+    # the model picks the reduction (Rule 2.3); the guard drops it when the prompt contains
+    # no word that could have meant it - "weather in KKD" is not a request for a maximum
+    aggregation = insights.confirm_aggregation(text, parsed.aggregation.value)
     spans = parsed.entities
 
     await socket.send_json({
         "type": "nlu",
         "intent": intent,
         "action": action,
+        "aggregation": aggregation,
         "entities": {
             "location": spans.location,
             "time": spans.time,
@@ -108,8 +112,9 @@ async def handle_query(socket: WebSocket, text: str, coords: dict | None, sessio
         })
         return
 
-    named = [name for name in spans.location if not weather.is_relative(name)]
-    relative = [name for name in spans.location if weather.is_relative(name)]
+    named = [name for name in spans.location
+             if not locations.is_relative(name) and not locations.is_probably_not_a_place(name)]
+    relative = [name for name in spans.location if locations.is_relative(name)]
 
     # A comparison with one place is not a comparison; ask instead of quietly answering
     # about whichever place happened to be extracted.
@@ -143,7 +148,10 @@ async def handle_query(socket: WebSocket, text: str, coords: dict | None, sessio
         await socket.send_json({"type": "status", "stage": "locating"})
         places, unknown = [], []
         if named:
-            resolved = await asyncio.gather(*(weather.resolve_location(http, n) for n in named))
+            solr = lambda query, rows=8: weather.solr_query(http, query, rows)
+            # a comma span can be one address or two places - the resolver decides
+            named = [part for name in named for part in locations.split_span(name)]
+            resolved = await asyncio.gather(*(locations.resolve(solr, n) for n in named))
             places = [p for p in resolved if p]
             unknown = [n for n, p in zip(named, resolved) if not p]
             if unknown and not places:
@@ -156,10 +164,30 @@ async def handle_query(socket: WebSocket, text: str, coords: dict | None, sessio
         if not places and coords:
             places = [await weather.reverse_geocode(http, coords["lat"], coords["lon"])]
 
+        # One name, several real places ("Angara" is in Jharkhand and in Andhra Pradesh):
+        # the resolver hands back every match and the user picks, rather than us guessing.
+        ambiguous = next((p for p in places if p.get("ambiguous") and len(named) == 1), None)
+        if ambiguous:
+            turn_id = log("clarified", f"ambiguous location: {ambiguous['raw']}", places=places)
+            await socket.send_json({
+                "type": "clarify",
+                "turn_id": turn_id,
+                "message": f"There are several places called {ambiguous['normalized']}. Which one?",
+                "options": [
+                    {"intent": intent, "confidence": 1.0,
+                     "label": ", ".join(part for part in (m["normalized"], m["district"], m["state"])
+                                        if part),
+                     "query": text.replace(ambiguous["raw"], f"{m['normalized']}, {m['state']}")}
+                    for m in ambiguous["matches"][:4]
+                ],
+                "text": text,
+            })
+            return
+
         await socket.send_json({"type": "status", "stage": "fetching", "places": places})
 
         normalized = spans.time_normalized[0] if spans.time_normalized else ""
-        hourly = respond.needs_hourly(normalized)
+        hourly = respond.needs_hourly(normalized, aggregation)
         fetch = weather.hourly_forecast if hourly else weather.daily_forecast
         try:
             feeds = await asyncio.gather(*(fetch(http, p["lat"], p["lon"]) for p in places))
@@ -176,8 +204,18 @@ async def handle_query(socket: WebSocket, text: str, coords: dict | None, sessio
     table = respond.build_table(selected if compare else selected[0], fields, places, hourly)
     summary = respond.summarize(intent, action, selected if compare else selected[0],
                                 fields, places, when)
+
+    reduced = insights.apply_aggregation(selected[0], fields[0], aggregation)
+    if reduced:                                     # lead with the number that was asked for
+        summary = f"{reduced['text']}. {summary}"
+    chart = insights.build_chart(selected, places, fields[0], hourly)
+    notes = insights.build_insights(selected, places, fields, aggregation, hourly)
     if unknown:
         summary += f" (Could not find {', '.join(unknown)} - showing the rest.)"
+    for place in places:
+        if place.get("fuzzy"):
+            summary += (f" (No exact match for \"{place['raw']}\" - showing the closest, "
+                        f"{place['normalized']}, {place['state']}.)")
 
     turn_id = log("answered", summary, places=places, unresolved=unknown)
     await socket.send_json({
@@ -189,6 +227,10 @@ async def handle_query(socket: WebSocket, text: str, coords: dict | None, sessio
         "places": places,
         "granularity": "hourly" if hourly else "daily",
         "summary": summary,
+        "aggregation": aggregation,
+        "reduced": reduced,
+        "chart": chart,
+        "insights": notes,
         # never drop a place silently: a comparison missing one side is a wrong answer
         "unresolved": unknown,
         "table": table,

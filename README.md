@@ -176,9 +176,24 @@ one prompt - what the deterministic layer downstream actually consumes:
 
 | set | intent | action | location F1 | time F1 | all 4 |
 | :-- | --: | --: | --: | --: | --: |
-| test (generated, 1512) | 98.0% | 99.5% | 0.967 | 0.990 | 93.1% |
-| **eval (English, 193)** | **95.3%** | **97.9%** | **0.974** | **0.973** | **88.1%** |
-| eval (code-mixed, 16) | 75.0% | 31.2% | 0.789 | 0.000 | 0.0% |
+| set | intent | action | aggregation | location F1 | time F1 | all 5 |
+| :-- | --: | --: | --: | --: | --: | --: |
+| test (generated, 1512) | 96.6% | 99.4% | 98.3% | 0.954 | 0.988 | 89.3% |
+| **eval (English, 219)** | **94.1%** | **97.7%** | **95.0%** | **0.963** | **0.964** | **80.4%** |
+| eval (code-mixed, 16) | 75.0% | 18.8% | 100% | 0.732 | 0.000 | 0.0% |
+
+"all 5" means every target correct on one prompt - the number the deterministic layer
+actually depends on. It fell from the earlier 4-target 88.1% because the eval set gained
+26 harder hand-written rows (conversational padding, aggregations, 3-way comparisons) and
+a fifth target to get right.
+
+**Location resolution is a separate layer** (`backend/locations.py`), never the model's job:
+the model reports `"KKD"` verbatim (Rule 4.1) and the resolver turns it into
+Kakinada, Andhra Pradesh via `data/location_aliases.json` -> Solr -> ranked candidates.
+Teaching the system a new abbreviation is a one-line edit to that JSON, not a retraining run.
+When two real places match equally well ("Angara" in Jharkhand and in Andhra Pradesh) the
+resolver returns every candidate and the chat asks; a district seat never counts as ambiguous
+against a same-named hamlet.
 
 The tagger deliberately does **not** get a "is this token in the gazetteer" feature. During
 fitting every training place name is in the gazetteer by construction, so the model learned

@@ -18,9 +18,10 @@ ROOT = Path(__file__).parent
 FLOORS = {
     "weather_intent_accuracy": 0.92,   # measured 0.953
     "action_accuracy": 0.95,           # measured 0.979
-    "location_f1": 0.93,               # measured 0.974
-    "time_f1": 0.95,                   # measured 0.973
-    "all_four_targets": 0.84,          # measured 0.881
+    "aggregation_accuracy": 0.90,      # measured 0.950
+    "location_f1": 0.90,               # measured 0.949
+    "time_f1": 0.94,                   # measured 0.976
+    "all_targets": 0.70,               # measured 0.753 - now 5 targets, harder eval rows
 }
 
 # (query, intent, action, locations, times) - unambiguous English, the V1 target language.
@@ -36,6 +37,16 @@ SMOKE = [
     ("whats the temprature in Peddapuram, East Godavari at 6:45 pm",
      "TEMPERATURE", "GET", ["Peddapuram, East Godavari"], ["6:45 pm"]),
     ("humidity", "HUMIDITY", "GET", [], []),
+]
+
+# (query, aggregation) - the model, not a keyword rule, decides the reduction (Rule 2.3)
+AGGREGATION_SMOKE = [
+    ("total rainfall in Nokha next 7 days", "SUM"),
+    ("average humidity in Tarora next 3 days", "AVG"),
+    ("peak wind speed in Kakinada tomorrow", "MAX"),
+    ("lowest soil temperature in Vaghan this week", "MIN"),
+    ("when will the rain stop in Remta today?", "TREND"),
+    ("will it rain in Guntur tomorrow?", "RAW"),
 ]
 
 
@@ -95,9 +106,10 @@ def check_accuracy(model, df, label):
     actual = {
         "weather_intent_accuracy": scores["weather_intent_accuracy"],
         "action_accuracy": scores["action_accuracy"],
+        "aggregation_accuracy": scores["aggregation_accuracy"],
         "location_f1": scores["location_span"]["f1"],
         "time_f1": scores["time_span"]["f1"],
-        "all_four_targets": scores["all_four_targets"],
+        "all_targets": scores["all_targets"],
     }
     for metric, floor in FLOORS.items():
         assert actual[metric] >= floor, f"[{label}] {metric} {actual[metric]:.3f} below floor {floor}"
@@ -114,6 +126,10 @@ def main():
     print(f"OK loaded  : {BUNDLE_PATH.name} ({BUNDLE_PATH.stat().st_size / 1e6:.1f} MB)")
 
     check_smoke(model)
+    for query, wanted in AGGREGATION_SMOKE:
+        got = model.predict(query).aggregation.value
+        assert got == wanted, f"{query!r} -> {got}, want {wanted}"
+    print(f"OK agg     : {len(AGGREGATION_SMOKE)} reductions chosen correctly")
 
     evaluation = load_intents_csv(EVAL_MANUAL)
     english = evaluation[evaluation["lang"] == "en"]
@@ -124,7 +140,7 @@ def main():
     # Code-mixed rows are a diagnostic, not a gate: reported, never asserted.
     mixed = evaluate(model, evaluation[evaluation["lang"] == "mixed"])
     print(f"INFO       : code-mixed ({mixed['rows']} rows) intent {mixed['weather_intent_accuracy']:.3f}  "
-          f"action {mixed['action_accuracy']:.3f}  all 4 {mixed['all_four_targets']:.3f}  (not a V1 target)")
+          f"action {mixed['action_accuracy']:.3f}  all 4 {mixed['all_targets']:.3f}  (not a V1 target)")
 
 
 if __name__ == "__main__":

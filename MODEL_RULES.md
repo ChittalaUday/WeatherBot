@@ -86,6 +86,27 @@ The model must classify queries into exactly **ONE** of the following 14 weather
 - **PROHIBITED:** Raw location names as intents (`Hyderabad`, `Chennai`, `Vizag`, `Delhi`).
 - **PROHIBITED:** Derived thresholds (`HEAVY_RAIN`, `HEATWAVE`, `FROST_WARNING`) until explicit deterministic rule-based thresholds are established.
 
+### Rule 2.3: `aggregation` (How to Reduce the Rows)
+
+A fifth model target, orthogonal to `weather_intent`: the intent picks the **field**,
+the aggregation picks what to do with the **rows** the time expression selected.
+
+| Label | Meaning | Example |
+| :--- | :--- | :--- |
+| `RAW` | show the values as they come | "rainfall in Guntur tomorrow" |
+| `SUM` | total across the range | "total rainfall next 7 days" |
+| `AVG` | mean across the range | "average humidity this week" |
+| `MAX` | largest value, and when | "peak wind speed tomorrow" |
+| `MIN` | smallest value, and when | "lowest soil temperature this week" |
+| `TREND` | direction and turning point | "when will the temperature start dropping?" |
+
+- `TEMPERATURE_MIN` + `RAW` is the `Tmin` field for one day. `TEMPERATURE` + `MIN` is the
+  coldest value across a range. They are different questions and must not be conflated.
+- **Lexical support required.** A reduction is always spoken out loud ("total", "average",
+  "peak"). `backend/insights.py::confirm_aggregation` drops a non-`RAW` prediction when no
+  such word appears - a short prompt like "weather in KKD" is not a request for a maximum.
+- `TREND` forces hourly granularity: a turning point cannot be read off one daily row.
+
 ---
 
 ## 3. Action Taxonomy & Rules
@@ -161,6 +182,7 @@ positionally aligned one-to-one, folding each span to a single shape:
    {
      "weather_intent": "<INTENT_ENUM>",
      "action": "<ACTION_ENUM>",
+     "aggregation": "<AGGREGATION_ENUM>",
      "entities": {
        "location": ["<RAW_LOCATION_SPAN>"],
        "time": ["<RAW_TIME_SPAN>"],

@@ -11,12 +11,14 @@ import {
   Navigation,
   Radar,
   Search,
+  Sigma,
   Sparkles,
   ThumbsDown,
   ThumbsUp,
 } from "lucide-react";
 import { useState } from "react";
 import { useFeedback } from "@/lib/use-feedback";
+import { ResultChart } from "@/components/result-chart";
 import { ResultTable } from "@/components/result-table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -57,8 +59,14 @@ function NluChips({ nlu }: { nlu: Nlu }) {
       <Badge variant="outline" className="font-mono text-[11px]">
         {nlu.action}
       </Badge>
-      {entities.location.map((place) => (
-        <Badge key={place} variant="outline" className="gap-1 text-[11px]">
+      {nlu.aggregation && nlu.aggregation !== "RAW" && (
+        <Badge variant="outline" className="gap-1 font-mono text-[11px]">
+          <Sigma className="h-3 w-3" />
+          {nlu.aggregation}
+        </Badge>
+      )}
+      {entities.location.map((place, index) => (
+        <Badge key={`${place}-${index}`} variant="outline" className="gap-1 text-[11px]">
           <MapPin className="h-3 w-3" />
           {place}
         </Badge>
@@ -226,7 +234,7 @@ export function Messages({
                   <div className="mt-3 flex flex-wrap gap-2">
                     {message.options.map((option) => (
                       <Button
-                        key={option.intent}
+                        key={option.label}
                         size="sm"
                         variant="outline"
                         className="h-7 text-xs"
@@ -261,6 +269,14 @@ export function Messages({
                   <CloudSunRain className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
                   <div className="min-w-0">
                     <p className="font-medium">{result.summary}</p>
+                    {result.reduced && (
+                      <p className="mt-1 text-2xl font-semibold tabular-nums">
+                        {result.reduced.value}
+                        <span className="ml-1 text-sm font-normal text-muted-foreground">
+                          {result.reduced.unit} · {result.reduced.kind.toLowerCase()}
+                        </span>
+                      </p>
+                    )}
                     <div className="mt-1 flex flex-wrap gap-1.5 text-[11px] text-muted-foreground">
                       {result.places.map((place) => (
                         <span key={place.name} className="inline-flex items-center gap-1">
@@ -275,7 +291,18 @@ export function Messages({
                       <span>· {result.granularity}</span>
                       <span>· {result.when}</span>
                     </div>
+                    {result.chart && <ResultChart chart={result.chart} />}
                     <ResultTable data={result.table} />
+                    {result.insights.length > 0 && (
+                      <ul className="mt-2 space-y-1">
+                        {result.insights.map((insight) => (
+                          <li key={insight} className="flex gap-1.5 text-[11px] text-muted-foreground">
+                            <span className="text-primary">•</span>
+                            {insight}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
                     <Rate turnId={result.turn_id} intent={result.intent} action={result.action} />
                   </div>
                 </div>

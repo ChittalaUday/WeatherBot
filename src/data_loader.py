@@ -15,6 +15,9 @@ def load_intents_csv(csv_path: str = "data/intents.csv") -> pd.DataFrame:
     df = pd.read_csv(csv_path)
     df["location"] = df["location"].apply(lambda x: json.loads(x) if isinstance(x, str) else [])
     df["time"] = df["time"].apply(lambda x: json.loads(x) if isinstance(x, str) else [])
+    if "aggregation" not in df.columns:            # older CSVs predate Rule 2.3
+        df["aggregation"] = "RAW"
+    df["aggregation"] = df["aggregation"].fillna("RAW")
     return df
 
 

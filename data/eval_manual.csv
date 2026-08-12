@@ -1,210 +1,236 @@
-text,weather_intent,action,location,time,lang
-hows the weather in Remta rn,CURRENT_CONDITIONS,GET,"[""Remta""]","[""rn""]",en
-WHAT IS THE WEATHER LIKE IN BUXAR RIGHT NOW,CURRENT_CONDITIONS,GET,"[""BUXAR""]","[""RIGHT NOW""]",en
-weather?,CURRENT_CONDITIONS,GET,[],[],en
-"Could you please tell me the current weather conditions in Tarora, Patan, Gujarat?",CURRENT_CONDITIONS,GET,"[""Tarora, Patan, Gujarat""]",[],en
-ee roju Vaghan lo vaatavaranam ela undi?,CURRENT_CONDITIONS,GET,"[""Vaghan""]","[""ee roju""]",mixed
-kal Muzaffarpur ka mausam kaisa rahega,CURRENT_CONDITIONS,GET,"[""Muzaffarpur""]","[""kal""]",mixed
-how is it outside,CURRENT_CONDITIONS,GET,[],[],en
-whats the weather at 5:05 am in Golmuri,CURRENT_CONDITIONS,GET,"[""Golmuri""]","[""5:05 am""]",en
-compare the weather in Ladakh and Alabama tomorrow,CURRENT_CONDITIONS,COMPARE,"[""Ladakh"", ""Alabama""]","[""tomorrow""]",en
-"which is better today, Japan or Brazil weather",CURRENT_CONDITIONS,COMPARE,"[""Japan"", ""Brazil""]","[""today""]",en
-weather in Paridi vs Kantamegha vs Dehuridih this evening,CURRENT_CONDITIONS,COMPARE,"[""Paridi"", ""Kantamegha"", ""Dehuridih""]","[""this evening""]",en
-alert me if the weather turns bad here tonight,CURRENT_CONDITIONS,ALERT,"[""here""]","[""tonight""]",en
-"is there any weather warning for Sadia Circle, Tinsukia",CURRENT_CONDITIONS,ALERT,"[""Sadia Circle, Tinsukia""]",[],en
-notify me about weather changes in my village on Sunday,CURRENT_CONDITIONS,ALERT,"[""my village""]","[""Sunday""]",en
-7 day forecast for Nokha,FORECAST,GET,"[""Nokha""]","[""7 day""]",en
-wat is the forcast for tomorow in Siyana,FORECAST,GET,"[""Siyana""]","[""tomorow""]",en
-forecast,FORECAST,GET,[],[],en
-Will the weather hold up for the wedding in Pandharpur this weekend?,FORECAST,GET,"[""Pandharpur""]","[""this weekend""]",en
-extended outlook for Mainpuri next month please,FORECAST,GET,"[""Mainpuri""]","[""next month""]",en
-aage kya mausam rahega Buxar me,FORECAST,GET,"[""Buxar""]",[],mixed
-5 day outlook Marpalli,FORECAST,GET,"[""Marpalli""]","[""5 day""]",en
-what's coming weather wise in Tripura over the weekend,FORECAST,GET,"[""Tripura""]","[""weekend""]",en
-compare the forecast for Bihar and West Bengal for the next 3 days,FORECAST,COMPARE,"[""Bihar"", ""West Bengal""]","[""next 3 days""]",en
-Perambalur vs Vijayapura forecast tomorrow,FORECAST,COMPARE,"[""Perambalur"", ""Vijayapura""]","[""tomorrow""]",en
-how does tomorrow's forecast compare with Friday in Gangrar?,FORECAST,COMPARE,"[""Gangrar""]","[""tomorrow"", ""Friday""]",en
-alert me if the forecast changes for Ausa,FORECAST,ALERT,"[""Ausa""]",[],en
-let me know when the forecast updates for my farm tomorrow morning,FORECAST,ALERT,"[""my farm""]","[""tomorrow morning""]",en
-any severe weather in the forecast for Arunachal Pradesh next week?,FORECAST,ALERT,"[""Arunachal Pradesh""]","[""next week""]",en
-temp Tarora,TEMPERATURE,GET,"[""Tarora""]",[],en
-how hot is it rn in Muzaffarpur,TEMPERATURE,GET,"[""Muzaffarpur""]","[""rn""]",en
-what is the temprature in Ghandiyali today,TEMPERATURE,GET,"[""Ghandiyali""]","[""today""]",en
-Is it 40 degrees in Buxar right now?,TEMPERATURE,GET,"[""Buxar""]","[""right now""]",en
-air temperature at 6:47 pm in Jaitpur,TEMPERATURE,GET,"[""Jaitpur""]","[""6:47 pm""]",en
-TEMPERATURE IN LAWNGTLAI TOMORROW,TEMPERATURE,GET,"[""LAWNGTLAI""]","[""TOMORROW""]",en
-kitna temperature hai Siyana me abhi,TEMPERATURE,GET,"[""Siyana""]","[""abhi""]",mixed
-how warm will it be day after tomorrow in Remta,TEMPERATURE,GET,"[""Remta""]","[""day after tomorrow""]",en
-"Compare the temperature in Haryana, Bihar and Tripura today",TEMPERATURE,COMPARE,"[""Haryana"", ""Bihar"", ""Tripura""]","[""today""]",en
-is it hotter in Mendoza or San Juan this week,TEMPERATURE,COMPARE,"[""Mendoza"", ""San Juan""]","[""this week""]",en
-compare the temperature here at 6 AM and at 6 PM,TEMPERATURE,COMPARE,"[""here""]","[""6 AM"", ""6 PM""]",en
-alert me if the temperature crosses 42 degrees in Iragavaram tomorrow,TEMPERATURE,ALERT,"[""Iragavaram""]","[""tomorrow""]",en
-temp alert for my field,TEMPERATURE,ALERT,"[""my field""]",[],en
-warn me when it gets too hot in Nellurkembraje this afternoon,TEMPERATURE,ALERT,"[""Nellurkembraje""]","[""this afternoon""]",en
-min temp in Ghandiyali tonight,TEMPERATURE_MIN,GET,"[""Ghandiyali""]","[""tonight""]",en
-how low will it go tonight in Chhati Dih?,TEMPERATURE_MIN,GET,"[""Chhati Dih""]","[""tonight""]",en
-lowest temprature tomorow in Nokha,TEMPERATURE_MIN,GET,"[""Nokha""]","[""tomorow""]",en
-overnight low for Bandhogarh on Friday,TEMPERATURE_MIN,GET,"[""Bandhogarh""]","[""Friday""]",en
-minimum temperature pls,TEMPERATURE_MIN,GET,[],[],en
-coldest it will get in Ladakh next week,TEMPERATURE_MIN,GET,"[""Ladakh""]","[""next week""]",en
-raat ka temperature kitna hoga Mainpuri me,TEMPERATURE_MIN,GET,"[""Mainpuri""]","[""raat""]",mixed
-min temp at 4:20 am in Paridi,TEMPERATURE_MIN,GET,"[""Paridi""]","[""4:20 am""]",en
-compare the minimum temperature between Ladakh and Arunachal Pradesh tonight,TEMPERATURE_MIN,COMPARE,"[""Ladakh"", ""Arunachal Pradesh""]","[""tonight""]",en
-"which is colder tonight, Buxar or Sibsagar",TEMPERATURE_MIN,COMPARE,"[""Buxar"", ""Sibsagar""]","[""tonight""]",en
-min temp in Golmuri tonight vs tomorrow night,TEMPERATURE_MIN,COMPARE,"[""Golmuri""]","[""tonight"", ""tomorrow night""]",en
-warn me if the min temp falls below 8 degrees in Ghandiyali,TEMPERATURE_MIN,ALERT,"[""Ghandiyali""]",[],en
-frost alert for my farm tomorrow morning,TEMPERATURE_MIN,ALERT,"[""my farm""]","[""tomorrow morning""]",en
-"notify me about the overnight low in Tarora, Patan",TEMPERATURE_MIN,ALERT,"[""Tarora, Patan""]",[],en
-max temp Vijayapura tomorrow,TEMPERATURE_MAX,GET,"[""Vijayapura""]","[""tomorrow""]",en
-how high will the mercury go in Rajapalaiyam this week,TEMPERATURE_MAX,GET,"[""Rajapalaiyam""]","[""this week""]",en
-"daytime high for Taloda, Nandurbar, Maharashtra on Sunday",TEMPERATURE_MAX,GET,"[""Taloda, Nandurbar, Maharashtra""]","[""Sunday""]",en
-peak temperature today,TEMPERATURE_MAX,GET,[],"[""today""]",en
-HIGHEST TEMPERATURE IN ALABAMA TOMORROW?,TEMPERATURE_MAX,GET,"[""ALABAMA""]","[""TOMORROW""]",en
-maximum temprature in Hichhopal day after tomorow,TEMPERATURE_MAX,GET,"[""Hichhopal""]","[""day after tomorow""]",en
-sabse zyada temperature kal Siyana me,TEMPERATURE_MAX,GET,"[""Siyana""]","[""kal""]",mixed
-how hot will it get in Kantamegha between 11 AM and 4 PM,TEMPERATURE_MAX,GET,"[""Kantamegha""]","[""11 AM"", ""4 PM""]",en
-compare max temp in Perambalur and Rajapalaiyam tomorrow,TEMPERATURE_MAX,COMPARE,"[""Perambalur"", ""Rajapalaiyam""]","[""tomorrow""]",en
-is the daytime high higher in Brazil or Uganda this weekend,TEMPERATURE_MAX,COMPARE,"[""Brazil"", ""Uganda""]","[""this weekend""]",en
-max temp in Nokha tomorrow vs day after tomorrow,TEMPERATURE_MAX,COMPARE,"[""Nokha""]","[""tomorrow"", ""day after tomorrow""]",en
-alert me if the max temp goes above 45 degrees in Buxar,TEMPERATURE_MAX,ALERT,"[""Buxar""]",[],en
-heat warning for my village this week?,TEMPERATURE_MAX,ALERT,"[""my village""]","[""this week""]",en
-notify me about the daytime high in Marpalli at 2:15 pm,TEMPERATURE_MAX,ALERT,"[""Marpalli""]","[""2:15 pm""]",en
-will it rain in Remta tomorrow,RAIN,GET,"[""Remta""]","[""tomorrow""]",en
-do i need an umbrella today in Muzaffarpur?,RAIN,GET,"[""Muzaffarpur""]","[""today""]",en
-kal barish hogi kya Buxar me,RAIN,GET,"[""Buxar""]","[""kal""]",mixed
-rian tomorow in nokha,RAIN,GET,"[""nokha""]","[""tomorow""]",en
-how many mm of rainfall in Sibsagar over the next 3 days,RAIN,GET,"[""Sibsagar""]","[""next 3 days""]",en
-won't it rain in Pandharpur tonight?,RAIN,GET,"[""Pandharpur""]","[""tonight""]",en
-rain?,RAIN,GET,[],[],en
-vaana padutunda Vaghan lo repu?,RAIN,GET,"[""Vaghan""]","[""repu""]",mixed
-"will it rain in Remta, Lakhanpur, Jharsuguda tomorrow at 6:30 pm",RAIN,GET,"[""Remta, Lakhanpur, Jharsuguda""]","[""tomorrow"", ""6:30 pm""]",en
-"compare rainfall in East Godavari, Perambalur and Tinsukia this week",RAIN,COMPARE,"[""East Godavari"", ""Perambalur"", ""Tinsukia""]","[""this week""]",en
-"which got more rain yesterday, Remta or Paridi",RAIN,COMPARE,"[""Remta"", ""Paridi""]","[""yesterday""]",en
-rainfall in Vaghan today vs this weekend,RAIN,COMPARE,"[""Vaghan""]","[""today"", ""this weekend""]",en
-compare rainfall between my field and Iragavaram tomorrow,RAIN,COMPARE,"[""my field"", ""Iragavaram""]","[""tomorrow""]",en
-alert me if it rains in my field tonight,RAIN,ALERT,"[""my field""]","[""tonight""]",en
-heavy rain warning for Lawngtlai next 2 days?,RAIN,ALERT,"[""Lawngtlai""]","[""next 2 days""]",en
-ping me if precipitation crosses 50 mm in Hichhopal tomorrow,RAIN,ALERT,"[""Hichhopal""]","[""tomorrow""]",en
-set an alert for rain in Nokha from 7:15 AM to 10:45 AM,RAIN,ALERT,"[""Nokha""]","[""7:15 AM to 10:45 AM""]",en
-is there a heavy rain alert for Tinsukia this week?,RAIN,ALERT,"[""Tinsukia""]","[""this week""]",en
-humidity?,HUMIDITY,GET,[],[],en
-rh in Tarora right now,HUMIDITY,GET,"[""Tarora""]","[""right now""]",en
-how humid is it in Golmuri at 3:35 pm,HUMIDITY,GET,"[""Golmuri""]","[""3:35 pm""]",en
-humidty level in Siyana tomorow,HUMIDITY,GET,"[""Siyana""]","[""tomorow""]",en
-is the air sticky in Rajapalaiyam this evening,HUMIDITY,GET,"[""Rajapalaiyam""]","[""this evening""]",en
-"humidity percentage for Baniya Bandh, Jaunpur today",HUMIDITY,GET,"[""Baniya Bandh, Jaunpur""]","[""today""]",en
-namii kitni hai Mainpuri me abhi,HUMIDITY,GET,"[""Mainpuri""]","[""abhi""]",mixed
-relative humidity next 2 hours in Ausa,HUMIDITY,GET,"[""Ausa""]","[""next 2 hours""]",en
-"whats the humidity in durgapur, hugli, west bengal on friday evening",HUMIDITY,GET,"[""durgapur, hugli, west bengal""]","[""friday evening""]",en
-compare humidity in Mendoza and Parana tomorrow,HUMIDITY,COMPARE,"[""Mendoza"", ""Parana""]","[""tomorrow""]",en
-is it more humid in Japan or South Korea this week,HUMIDITY,COMPARE,"[""Japan"", ""South Korea""]","[""this week""]",en
-humidity here at 6 AM vs 6 PM,HUMIDITY,COMPARE,"[""here""]","[""6 AM"", ""6 PM""]",en
-alert me if humidity goes above 90 percent in my farm,HUMIDITY,ALERT,"[""my farm""]",[],en
-humidity warning for Iragavaram tonight?,HUMIDITY,ALERT,"[""Iragavaram""]","[""tonight""]",en
-let me know the humidity in Dehuridih every morning,HUMIDITY,ALERT,"[""Dehuridih""]","[""every morning""]",en
-dew point in Buxar now,DEW_POINT,GET,"[""Buxar""]","[""now""]",en
-whats the dewpoint at 5:45 am in Chhati Dih,DEW_POINT,GET,"[""Chhati Dih""]","[""5:45 am""]",en
-dew point,DEW_POINT,GET,[],[],en
-"dew point temperature for Vaghan, Santrampur, Mahisagar tomorrow morning",DEW_POINT,GET,"[""Vaghan, Santrampur, Mahisagar""]","[""tomorrow morning""]",en
-will there be dew on the crop in my field tomorrow?,DEW_POINT,GET,"[""my field""]","[""tomorrow""]",en
-dewpoint tomorow in taloda,DEW_POINT,GET,"[""taloda""]","[""tomorow""]",en
-os bindu Marpalli me kal,DEW_POINT,GET,"[""Marpalli""]","[""kal""]",mixed
-dew point from 4 AM to 7 AM in Remta,DEW_POINT,GET,"[""Remta""]","[""4 AM to 7 AM""]",en
-compare the dew point in Tripura and Haryana tonight,DEW_POINT,COMPARE,"[""Tripura"", ""Haryana""]","[""tonight""]",en
-dew point in Nokha tonight vs tomorrow night,DEW_POINT,COMPARE,"[""Nokha""]","[""tonight"", ""tomorrow night""]",en
-"which has a higher dew point, Uganda or Mauritius today",DEW_POINT,COMPARE,"[""Uganda"", ""Mauritius""]","[""today""]",en
-alert me if the dew point rises in Kantamegha tonight,DEW_POINT,ALERT,"[""Kantamegha""]","[""tonight""]",en
-dew point alert for my village,DEW_POINT,ALERT,"[""my village""]",[],en
-notify me when dew point crosses 20 in Gangrar tomorrow,DEW_POINT,ALERT,"[""Gangrar""]","[""tomorrow""]",en
-how windy is it in Pandharpur rn,WIND_SPEED,GET,"[""Pandharpur""]","[""rn""]",en
-wind speed in kmph for Buxar today,WIND_SPEED,GET,"[""Buxar""]","[""today""]",en
-wind,WIND_SPEED,GET,[],[],en
-is it too windy to spray pesticide in my field this afternoon?,WIND_SPEED,GET,"[""my field""]","[""this afternoon""]",en
-wnd speed tomorow Siyana,WIND_SPEED,GET,"[""Siyana""]","[""tomorow""]",en
-wind strength at 7:25 am in Ghandiyali,WIND_SPEED,GET,"[""Ghandiyali""]","[""7:25 am""]",en
-hawa ki raftar kya hai Nokha me abhi,WIND_SPEED,GET,"[""Nokha""]","[""abhi""]",mixed
-wind speed near me for the next 6 hours,WIND_SPEED,GET,"[""near me""]","[""next 6 hours""]",en
-"wind speed in Sadia Circle, Tinsukia, Assam at 11:59 pm",WIND_SPEED,GET,"[""Sadia Circle, Tinsukia, Assam""]","[""11:59 pm""]",en
-compare wind speed in Alabama and Mendoza tomorrow,WIND_SPEED,COMPARE,"[""Alabama"", ""Mendoza""]","[""tomorrow""]",en
-windier in Sibsagar or Tinsukia this week?,WIND_SPEED,COMPARE,"[""Sibsagar"", ""Tinsukia""]","[""this week""]",en
-wind speed in Ausa tomorrow vs Friday,WIND_SPEED,COMPARE,"[""Ausa""]","[""tomorrow"", ""Friday""]",en
-alert me if wind crosses 40 kmph in Bandhogarh tonight,WIND_SPEED,ALERT,"[""Bandhogarh""]","[""tonight""]",en
-strong wind warning for my farm this weekend?,WIND_SPEED,ALERT,"[""my farm""]","[""this weekend""]",en
-notify me about gusts in Rajapalaiyam at 6:10 pm,WIND_SPEED,ALERT,"[""Rajapalaiyam""]","[""6:10 pm""]",en
-which way is the wind blowing in Remta,WIND_DIRECTION,GET,"[""Remta""]",[],en
-wind direction near me right now,WIND_DIRECTION,GET,"[""near me""]","[""right now""]",en
-wind direction,WIND_DIRECTION,GET,[],[],en
-is the wind coming from the north in Tarora today?,WIND_DIRECTION,GET,"[""Tarora""]","[""today""]",en
-wnd direction tomorow in mainpuri,WIND_DIRECTION,GET,"[""mainpuri""]","[""tomorow""]",en
-wind heading at 8:40 am in Paridi,WIND_DIRECTION,GET,"[""Paridi""]","[""8:40 am""]",en
-hawa kis taraf se aa rahi hai Siyana me,WIND_DIRECTION,GET,"[""Siyana""]",[],mixed
-compare wind direction in Buxar and Muzaffarpur tomorrow,WIND_DIRECTION,COMPARE,"[""Buxar"", ""Muzaffarpur""]","[""tomorrow""]",en
-wind direction in Golmuri this morning vs this evening,WIND_DIRECTION,COMPARE,"[""Golmuri""]","[""this morning"", ""this evening""]",en
-does the wind blow differently in Japan and Romania today,WIND_DIRECTION,COMPARE,"[""Japan"", ""Romania""]","[""today""]",en
-notify me if the wind direction shifts in my field tomorrow,WIND_DIRECTION,ALERT,"[""my field""]","[""tomorrow""]",en
-wind direction alert for Iragavaram this evening,WIND_DIRECTION,ALERT,"[""Iragavaram""]","[""this evening""]",en
-let me know when the wind turns westerly in Vaghan,WIND_DIRECTION,ALERT,"[""Vaghan""]",[],en
-will it be sunny in Pandharpur tomorrow,SUNSHINE,GET,"[""Pandharpur""]","[""tomorrow""]",en
-how many hours of sunlight in Buxar today,SUNSHINE,GET,"[""Buxar""]","[""today""]",en
-sunshine hrs,SUNSHINE,GET,[],[],en
-enough sun to dry paddy in my village tomorrow?,SUNSHINE,GET,"[""my village""]","[""tomorrow""]",en
-sunshien tomorow in nokha,SUNSHINE,GET,"[""nokha""]","[""tomorow""]",en
-solar exposure between 9 AM and 3 PM in Marpalli,SUNSHINE,GET,"[""Marpalli""]","[""9 AM"", ""3 PM""]",en
-dhoop kitni rahegi kal Mainpuri me,SUNSHINE,GET,"[""Mainpuri""]","[""kal""]",mixed
-how much sunshine did we get in Buxar last week,SUNSHINE,GET,"[""Buxar""]","[""last week""]",en
-compare sunshine hours in Ladakh and Tripura this week,SUNSHINE,COMPARE,"[""Ladakh"", ""Tripura""]","[""this week""]",en
-sunnier in Brazil or Uganda tomorrow?,SUNSHINE,COMPARE,"[""Brazil"", ""Uganda""]","[""tomorrow""]",en
-sunshine in Ausa today vs tomorrow,SUNSHINE,COMPARE,"[""Ausa""]","[""today"", ""tomorrow""]",en
-alert me if sunshine drops in Kantamegha this week,SUNSHINE,ALERT,"[""Kantamegha""]","[""this week""]",en
-sunlight alert for my farm tomorrow morning,SUNSHINE,ALERT,"[""my farm""]","[""tomorrow morning""]",en
-notify me if sunshine hours fall below 5 in Gangrar tomorrow,SUNSHINE,ALERT,"[""Gangrar""]","[""tomorrow""]",en
-how cloudy is it in Remta right now,CLOUD_COVER,GET,"[""Remta""]","[""right now""]",en
-cloud cover percentage for Buxar today,CLOUD_COVER,GET,"[""Buxar""]","[""today""]",en
-cloud cover,CLOUD_COVER,GET,[],[],en
-is the sky clear over my field tonight?,CLOUD_COVER,GET,"[""my field""]","[""tonight""]",en
-cloudness tomorow in siyana,CLOUD_COVER,GET,"[""siyana""]","[""tomorow""]",en
-total cloud cover at 1:05 pm in Chhati Dih,CLOUD_COVER,GET,"[""Chhati Dih""]","[""1:05 pm""]",en
-badal kitne hain abhi Marpalli me,CLOUD_COVER,GET,"[""Marpalli""]","[""abhi""]",mixed
-compare cloud cover in Alabama and Parana tomorrow,CLOUD_COVER,COMPARE,"[""Alabama"", ""Parana""]","[""tomorrow""]",en
-cloudier in Sibsagar or Lawngtlai this weekend?,CLOUD_COVER,COMPARE,"[""Sibsagar"", ""Lawngtlai""]","[""this weekend""]",en
-cloud cover in Nokha today vs day after tomorrow,CLOUD_COVER,COMPARE,"[""Nokha""]","[""today"", ""day after tomorrow""]",en
-alert me if it gets overcast in Bandhogarh this afternoon,CLOUD_COVER,ALERT,"[""Bandhogarh""]","[""this afternoon""]",en
-cloud alert for my village tomorrow,CLOUD_COVER,ALERT,"[""my village""]","[""tomorrow""]",en
-notify me when clouds clear in Taloda,CLOUD_COVER,ALERT,"[""Taloda""]",[],en
-soil moisture in my field today,SOIL_MOISTURE,GET,"[""my field""]","[""today""]",en
-do i need to irrigate in Iragavaram tomorrow?,SOIL_MOISTURE,GET,"[""Iragavaram""]","[""tomorrow""]",en
-soil moisture at 10cm in Vaghan right now,SOIL_MOISTURE,GET,"[""Vaghan""]","[""right now""]",en
-field moisture,SOIL_MOISTURE,GET,[],[],en
-soil moistur tomorow in nokha,SOIL_MOISTURE,GET,"[""nokha""]","[""tomorow""]",en
-"how dry is the soil in Hichhopal, Narkatiaganj this week",SOIL_MOISTURE,GET,"[""Hichhopal, Narkatiaganj""]","[""this week""]",en
-mitti me nami kitni hai Siyana me aaj,SOIL_MOISTURE,GET,"[""Siyana""]","[""aaj""]",mixed
-compare soil moisture in East Godavari and Perambalur today,SOIL_MOISTURE,COMPARE,"[""East Godavari"", ""Perambalur""]","[""today""]",en
-"which field is drier, Remta or Paridi this week",SOIL_MOISTURE,COMPARE,"[""Remta"", ""Paridi""]","[""this week""]",en
-soil moisture in my farm today vs next week,SOIL_MOISTURE,COMPARE,"[""my farm""]","[""today"", ""next week""]",en
-soil moisture near me and in Perambalur this evening,SOIL_MOISTURE,COMPARE,"[""near me"", ""Perambalur""]","[""this evening""]",en
-alert me if soil moisture drops below normal in Kantamegha,SOIL_MOISTURE,ALERT,"[""Kantamegha""]",[],en
-irrigation alert for my village tomorrow morning,SOIL_MOISTURE,ALERT,"[""my village""]","[""tomorrow morning""]",en
-notify me when the soil dries out in Gangrar this week,SOIL_MOISTURE,ALERT,"[""Gangrar""]","[""this week""]",en
-soil temperature in my field right now,SOIL_TEMPERATURE,GET,"[""my field""]","[""right now""]",en
-is the soil warm enough for sowing in Buxar this week?,SOIL_TEMPERATURE,GET,"[""Buxar""]","[""this week""]",en
-soil temp at 10cm in Tarora today,SOIL_TEMPERATURE,GET,"[""Tarora""]","[""today""]",en
-ground temperature,SOIL_TEMPERATURE,GET,[],[],en
-soil temprature tomorow in mainpuri,SOIL_TEMPERATURE,GET,"[""mainpuri""]","[""tomorow""]",en
-soil temperature at 6:55 am in Dehuridih,SOIL_TEMPERATURE,GET,"[""Dehuridih""]","[""6:55 am""]",en
-mitti ka taapmaan kya hai Nokha me abhi,SOIL_TEMPERATURE,GET,"[""Nokha""]","[""abhi""]",mixed
-compare soil temperature in Bihar and Madhya Pradesh this week,SOIL_TEMPERATURE,COMPARE,"[""Bihar"", ""Madhya Pradesh""]","[""this week""]",en
-warmer soil in Vijayapura or Muzaffarpur tomorrow?,SOIL_TEMPERATURE,COMPARE,"[""Vijayapura"", ""Muzaffarpur""]","[""tomorrow""]",en
-soil temp in Ausa today vs Friday,SOIL_TEMPERATURE,COMPARE,"[""Ausa""]","[""today"", ""Friday""]",en
-alert me if soil temperature falls in Nellurkembraje tonight,SOIL_TEMPERATURE,ALERT,"[""Nellurkembraje""]","[""tonight""]",en
-soil temp alert for my farm before sowing next week,SOIL_TEMPERATURE,ALERT,"[""my farm""]","[""next week""]",en
-notify me when ground temperature crosses 25 in Taloda,SOIL_TEMPERATURE,ALERT,"[""Taloda""]",[],en
-MAX TEMP MUZAFFARPUR SUNDAY,TEMPERATURE_MAX,GET,"[""MUZAFFARPUR""]","[""SUNDAY""]",en
-"temperature in Barreh Gurudayalram, Amarpatan, Satna, Madhya Pradesh tomorrow",TEMPERATURE,GET,"[""Barreh Gurudayalram, Amarpatan, Satna, Madhya Pradesh""]","[""tomorrow""]",en
-rainfall Buxar 6:15 pm to 9:45 pm,RAIN,GET,"[""Buxar""]","[""6:15 pm to 9:45 pm""]",en
-whats the min temp gonna be in remta tmrw,TEMPERATURE_MIN,GET,"[""remta""]","[""tmrw""]",en
-cloud cover for my plot at 10:20 am,CLOUD_COVER,GET,"[""my plot""]","[""10:20 am""]",en
-humidity in Jaitpur and Dehuridih and Remta tomorrow morning,HUMIDITY,COMPARE,"[""Jaitpur"", ""Dehuridih"", ""Remta""]","[""tomorrow morning""]",en
-sun tomorrow?,SUNSHINE,GET,[],"[""tomorrow""]",en
-is there any wind alert,WIND_SPEED,ALERT,[],[],en
-soil moisture,SOIL_MOISTURE,GET,[],[],en
-tell me tomorrow's rain chance for Nellurkembraje and Ghandiyali,RAIN,COMPARE,"[""Nellurkembraje"", ""Ghandiyali""]","[""tomorrow""]",en
+text,weather_intent,action,aggregation,location,time,lang
+hows the weather in Remta rn,CURRENT_CONDITIONS,GET,RAW,"[""Remta""]","[""rn""]",en
+WHAT IS THE WEATHER LIKE IN BUXAR RIGHT NOW,CURRENT_CONDITIONS,GET,RAW,"[""BUXAR""]","[""RIGHT NOW""]",en
+weather?,CURRENT_CONDITIONS,GET,RAW,[],[],en
+"Could you please tell me the current weather conditions in Tarora, Patan, Gujarat?",CURRENT_CONDITIONS,GET,RAW,"[""Tarora, Patan, Gujarat""]",[],en
+ee roju Vaghan lo vaatavaranam ela undi?,CURRENT_CONDITIONS,GET,RAW,"[""Vaghan""]","[""ee roju""]",mixed
+kal Muzaffarpur ka mausam kaisa rahega,CURRENT_CONDITIONS,GET,RAW,"[""Muzaffarpur""]","[""kal""]",mixed
+how is it outside,CURRENT_CONDITIONS,GET,RAW,[],[],en
+whats the weather at 5:05 am in Golmuri,CURRENT_CONDITIONS,GET,RAW,"[""Golmuri""]","[""5:05 am""]",en
+compare the weather in Ladakh and Alabama tomorrow,CURRENT_CONDITIONS,COMPARE,RAW,"[""Ladakh"", ""Alabama""]","[""tomorrow""]",en
+"which is better today, Japan or Brazil weather",CURRENT_CONDITIONS,COMPARE,RAW,"[""Japan"", ""Brazil""]","[""today""]",en
+weather in Paridi vs Kantamegha vs Dehuridih this evening,CURRENT_CONDITIONS,COMPARE,RAW,"[""Paridi"", ""Kantamegha"", ""Dehuridih""]","[""this evening""]",en
+alert me if the weather turns bad here tonight,CURRENT_CONDITIONS,ALERT,RAW,"[""here""]","[""tonight""]",en
+"is there any weather warning for Sadia Circle, Tinsukia",CURRENT_CONDITIONS,ALERT,RAW,"[""Sadia Circle, Tinsukia""]",[],en
+notify me about weather changes in my village on Sunday,CURRENT_CONDITIONS,ALERT,RAW,"[""my village""]","[""Sunday""]",en
+7 day forecast for Nokha,FORECAST,GET,RAW,"[""Nokha""]","[""7 day""]",en
+wat is the forcast for tomorow in Siyana,FORECAST,GET,RAW,"[""Siyana""]","[""tomorow""]",en
+forecast,FORECAST,GET,RAW,[],[],en
+Will the weather hold up for the wedding in Pandharpur this weekend?,FORECAST,GET,RAW,"[""Pandharpur""]","[""this weekend""]",en
+extended outlook for Mainpuri next month please,FORECAST,GET,RAW,"[""Mainpuri""]","[""next month""]",en
+aage kya mausam rahega Buxar me,FORECAST,GET,RAW,"[""Buxar""]",[],mixed
+5 day outlook Marpalli,FORECAST,GET,RAW,"[""Marpalli""]","[""5 day""]",en
+what's coming weather wise in Tripura over the weekend,FORECAST,GET,RAW,"[""Tripura""]","[""weekend""]",en
+compare the forecast for Bihar and West Bengal for the next 3 days,FORECAST,COMPARE,RAW,"[""Bihar"", ""West Bengal""]","[""next 3 days""]",en
+Perambalur vs Vijayapura forecast tomorrow,FORECAST,COMPARE,RAW,"[""Perambalur"", ""Vijayapura""]","[""tomorrow""]",en
+how does tomorrow's forecast compare with Friday in Gangrar?,FORECAST,COMPARE,RAW,"[""Gangrar""]","[""tomorrow"", ""Friday""]",en
+alert me if the forecast changes for Ausa,FORECAST,ALERT,RAW,"[""Ausa""]",[],en
+let me know when the forecast updates for my farm tomorrow morning,FORECAST,ALERT,RAW,"[""my farm""]","[""tomorrow morning""]",en
+any severe weather in the forecast for Arunachal Pradesh next week?,FORECAST,ALERT,RAW,"[""Arunachal Pradesh""]","[""next week""]",en
+temp Tarora,TEMPERATURE,GET,RAW,"[""Tarora""]",[],en
+how hot is it rn in Muzaffarpur,TEMPERATURE,GET,RAW,"[""Muzaffarpur""]","[""rn""]",en
+what is the temprature in Ghandiyali today,TEMPERATURE,GET,RAW,"[""Ghandiyali""]","[""today""]",en
+Is it 40 degrees in Buxar right now?,TEMPERATURE,GET,RAW,"[""Buxar""]","[""right now""]",en
+air temperature at 6:47 pm in Jaitpur,TEMPERATURE,GET,RAW,"[""Jaitpur""]","[""6:47 pm""]",en
+TEMPERATURE IN LAWNGTLAI TOMORROW,TEMPERATURE,GET,RAW,"[""LAWNGTLAI""]","[""TOMORROW""]",en
+kitna temperature hai Siyana me abhi,TEMPERATURE,GET,RAW,"[""Siyana""]","[""abhi""]",mixed
+how warm will it be day after tomorrow in Remta,TEMPERATURE,GET,RAW,"[""Remta""]","[""day after tomorrow""]",en
+"Compare the temperature in Haryana, Bihar and Tripura today",TEMPERATURE,COMPARE,RAW,"[""Haryana"", ""Bihar"", ""Tripura""]","[""today""]",en
+is it hotter in Mendoza or San Juan this week,TEMPERATURE,COMPARE,RAW,"[""Mendoza"", ""San Juan""]","[""this week""]",en
+compare the temperature here at 6 AM and at 6 PM,TEMPERATURE,COMPARE,RAW,"[""here""]","[""6 AM"", ""6 PM""]",en
+alert me if the temperature crosses 42 degrees in Iragavaram tomorrow,TEMPERATURE,ALERT,RAW,"[""Iragavaram""]","[""tomorrow""]",en
+temp alert for my field,TEMPERATURE,ALERT,RAW,"[""my field""]",[],en
+warn me when it gets too hot in Nellurkembraje this afternoon,TEMPERATURE,ALERT,RAW,"[""Nellurkembraje""]","[""this afternoon""]",en
+min temp in Ghandiyali tonight,TEMPERATURE_MIN,GET,RAW,"[""Ghandiyali""]","[""tonight""]",en
+how low will it go tonight in Chhati Dih?,TEMPERATURE_MIN,GET,MIN,"[""Chhati Dih""]","[""tonight""]",en
+lowest temprature tomorow in Nokha,TEMPERATURE_MIN,GET,RAW,"[""Nokha""]","[""tomorow""]",en
+overnight low for Bandhogarh on Friday,TEMPERATURE_MIN,GET,RAW,"[""Bandhogarh""]","[""Friday""]",en
+minimum temperature pls,TEMPERATURE_MIN,GET,RAW,[],[],en
+coldest it will get in Ladakh next week,TEMPERATURE_MIN,GET,MIN,"[""Ladakh""]","[""next week""]",en
+raat ka temperature kitna hoga Mainpuri me,TEMPERATURE_MIN,GET,RAW,"[""Mainpuri""]","[""raat""]",mixed
+min temp at 4:20 am in Paridi,TEMPERATURE_MIN,GET,RAW,"[""Paridi""]","[""4:20 am""]",en
+compare the minimum temperature between Ladakh and Arunachal Pradesh tonight,TEMPERATURE_MIN,COMPARE,RAW,"[""Ladakh"", ""Arunachal Pradesh""]","[""tonight""]",en
+"which is colder tonight, Buxar or Sibsagar",TEMPERATURE_MIN,COMPARE,RAW,"[""Buxar"", ""Sibsagar""]","[""tonight""]",en
+min temp in Golmuri tonight vs tomorrow night,TEMPERATURE_MIN,COMPARE,RAW,"[""Golmuri""]","[""tonight"", ""tomorrow night""]",en
+warn me if the min temp falls below 8 degrees in Ghandiyali,TEMPERATURE_MIN,ALERT,RAW,"[""Ghandiyali""]",[],en
+frost alert for my farm tomorrow morning,TEMPERATURE_MIN,ALERT,RAW,"[""my farm""]","[""tomorrow morning""]",en
+"notify me about the overnight low in Tarora, Patan",TEMPERATURE_MIN,ALERT,RAW,"[""Tarora, Patan""]",[],en
+max temp Vijayapura tomorrow,TEMPERATURE_MAX,GET,RAW,"[""Vijayapura""]","[""tomorrow""]",en
+how high will the mercury go in Rajapalaiyam this week,TEMPERATURE_MAX,GET,MAX,"[""Rajapalaiyam""]","[""this week""]",en
+"daytime high for Taloda, Nandurbar, Maharashtra on Sunday",TEMPERATURE_MAX,GET,RAW,"[""Taloda, Nandurbar, Maharashtra""]","[""Sunday""]",en
+peak temperature today,TEMPERATURE_MAX,GET,MAX,[],"[""today""]",en
+HIGHEST TEMPERATURE IN ALABAMA TOMORROW?,TEMPERATURE_MAX,GET,RAW,"[""ALABAMA""]","[""TOMORROW""]",en
+maximum temprature in Hichhopal day after tomorow,TEMPERATURE_MAX,GET,RAW,"[""Hichhopal""]","[""day after tomorow""]",en
+sabse zyada temperature kal Siyana me,TEMPERATURE_MAX,GET,RAW,"[""Siyana""]","[""kal""]",mixed
+how hot will it get in Kantamegha between 11 AM and 4 PM,TEMPERATURE_MAX,GET,MAX,"[""Kantamegha""]","[""11 AM"", ""4 PM""]",en
+compare max temp in Perambalur and Rajapalaiyam tomorrow,TEMPERATURE_MAX,COMPARE,RAW,"[""Perambalur"", ""Rajapalaiyam""]","[""tomorrow""]",en
+is the daytime high higher in Brazil or Uganda this weekend,TEMPERATURE_MAX,COMPARE,RAW,"[""Brazil"", ""Uganda""]","[""this weekend""]",en
+max temp in Nokha tomorrow vs day after tomorrow,TEMPERATURE_MAX,COMPARE,RAW,"[""Nokha""]","[""tomorrow"", ""day after tomorrow""]",en
+alert me if the max temp goes above 45 degrees in Buxar,TEMPERATURE_MAX,ALERT,RAW,"[""Buxar""]",[],en
+heat warning for my village this week?,TEMPERATURE_MAX,ALERT,RAW,"[""my village""]","[""this week""]",en
+notify me about the daytime high in Marpalli at 2:15 pm,TEMPERATURE_MAX,ALERT,RAW,"[""Marpalli""]","[""2:15 pm""]",en
+will it rain in Remta tomorrow,RAIN,GET,RAW,"[""Remta""]","[""tomorrow""]",en
+do i need an umbrella today in Muzaffarpur?,RAIN,GET,RAW,"[""Muzaffarpur""]","[""today""]",en
+kal barish hogi kya Buxar me,RAIN,GET,RAW,"[""Buxar""]","[""kal""]",mixed
+rian tomorow in nokha,RAIN,GET,RAW,"[""nokha""]","[""tomorow""]",en
+how many mm of rainfall in Sibsagar over the next 3 days,RAIN,GET,SUM,"[""Sibsagar""]","[""next 3 days""]",en
+won't it rain in Pandharpur tonight?,RAIN,GET,RAW,"[""Pandharpur""]","[""tonight""]",en
+rain?,RAIN,GET,RAW,[],[],en
+vaana padutunda Vaghan lo repu?,RAIN,GET,RAW,"[""Vaghan""]","[""repu""]",mixed
+"will it rain in Remta, Lakhanpur, Jharsuguda tomorrow at 6:30 pm",RAIN,GET,RAW,"[""Remta, Lakhanpur, Jharsuguda""]","[""tomorrow"", ""6:30 pm""]",en
+"compare rainfall in East Godavari, Perambalur and Tinsukia this week",RAIN,COMPARE,RAW,"[""East Godavari"", ""Perambalur"", ""Tinsukia""]","[""this week""]",en
+"which got more rain yesterday, Remta or Paridi",RAIN,COMPARE,RAW,"[""Remta"", ""Paridi""]","[""yesterday""]",en
+rainfall in Vaghan today vs this weekend,RAIN,COMPARE,RAW,"[""Vaghan""]","[""today"", ""this weekend""]",en
+compare rainfall between my field and Iragavaram tomorrow,RAIN,COMPARE,RAW,"[""my field"", ""Iragavaram""]","[""tomorrow""]",en
+alert me if it rains in my field tonight,RAIN,ALERT,RAW,"[""my field""]","[""tonight""]",en
+heavy rain warning for Lawngtlai next 2 days?,RAIN,ALERT,RAW,"[""Lawngtlai""]","[""next 2 days""]",en
+ping me if precipitation crosses 50 mm in Hichhopal tomorrow,RAIN,ALERT,RAW,"[""Hichhopal""]","[""tomorrow""]",en
+set an alert for rain in Nokha from 7:15 AM to 10:45 AM,RAIN,ALERT,RAW,"[""Nokha""]","[""7:15 AM to 10:45 AM""]",en
+is there a heavy rain alert for Tinsukia this week?,RAIN,ALERT,RAW,"[""Tinsukia""]","[""this week""]",en
+humidity?,HUMIDITY,GET,RAW,[],[],en
+rh in Tarora right now,HUMIDITY,GET,RAW,"[""Tarora""]","[""right now""]",en
+how humid is it in Golmuri at 3:35 pm,HUMIDITY,GET,RAW,"[""Golmuri""]","[""3:35 pm""]",en
+humidty level in Siyana tomorow,HUMIDITY,GET,RAW,"[""Siyana""]","[""tomorow""]",en
+is the air sticky in Rajapalaiyam this evening,HUMIDITY,GET,RAW,"[""Rajapalaiyam""]","[""this evening""]",en
+"humidity percentage for Baniya Bandh, Jaunpur today",HUMIDITY,GET,RAW,"[""Baniya Bandh, Jaunpur""]","[""today""]",en
+namii kitni hai Mainpuri me abhi,HUMIDITY,GET,RAW,"[""Mainpuri""]","[""abhi""]",mixed
+relative humidity next 2 hours in Ausa,HUMIDITY,GET,RAW,"[""Ausa""]","[""next 2 hours""]",en
+"whats the humidity in durgapur, hugli, west bengal on friday evening",HUMIDITY,GET,RAW,"[""durgapur, hugli, west bengal""]","[""friday evening""]",en
+compare humidity in Mendoza and Parana tomorrow,HUMIDITY,COMPARE,RAW,"[""Mendoza"", ""Parana""]","[""tomorrow""]",en
+is it more humid in Japan or South Korea this week,HUMIDITY,COMPARE,RAW,"[""Japan"", ""South Korea""]","[""this week""]",en
+humidity here at 6 AM vs 6 PM,HUMIDITY,COMPARE,RAW,"[""here""]","[""6 AM"", ""6 PM""]",en
+alert me if humidity goes above 90 percent in my farm,HUMIDITY,ALERT,RAW,"[""my farm""]",[],en
+humidity warning for Iragavaram tonight?,HUMIDITY,ALERT,RAW,"[""Iragavaram""]","[""tonight""]",en
+let me know the humidity in Dehuridih every morning,HUMIDITY,ALERT,RAW,"[""Dehuridih""]","[""every morning""]",en
+dew point in Buxar now,DEW_POINT,GET,RAW,"[""Buxar""]","[""now""]",en
+whats the dewpoint at 5:45 am in Chhati Dih,DEW_POINT,GET,RAW,"[""Chhati Dih""]","[""5:45 am""]",en
+dew point,DEW_POINT,GET,RAW,[],[],en
+"dew point temperature for Vaghan, Santrampur, Mahisagar tomorrow morning",DEW_POINT,GET,RAW,"[""Vaghan, Santrampur, Mahisagar""]","[""tomorrow morning""]",en
+will there be dew on the crop in my field tomorrow?,DEW_POINT,GET,RAW,"[""my field""]","[""tomorrow""]",en
+dewpoint tomorow in taloda,DEW_POINT,GET,RAW,"[""taloda""]","[""tomorow""]",en
+os bindu Marpalli me kal,DEW_POINT,GET,RAW,"[""Marpalli""]","[""kal""]",mixed
+dew point from 4 AM to 7 AM in Remta,DEW_POINT,GET,RAW,"[""Remta""]","[""4 AM to 7 AM""]",en
+compare the dew point in Tripura and Haryana tonight,DEW_POINT,COMPARE,RAW,"[""Tripura"", ""Haryana""]","[""tonight""]",en
+dew point in Nokha tonight vs tomorrow night,DEW_POINT,COMPARE,RAW,"[""Nokha""]","[""tonight"", ""tomorrow night""]",en
+"which has a higher dew point, Uganda or Mauritius today",DEW_POINT,COMPARE,RAW,"[""Uganda"", ""Mauritius""]","[""today""]",en
+alert me if the dew point rises in Kantamegha tonight,DEW_POINT,ALERT,RAW,"[""Kantamegha""]","[""tonight""]",en
+dew point alert for my village,DEW_POINT,ALERT,RAW,"[""my village""]",[],en
+notify me when dew point crosses 20 in Gangrar tomorrow,DEW_POINT,ALERT,RAW,"[""Gangrar""]","[""tomorrow""]",en
+how windy is it in Pandharpur rn,WIND_SPEED,GET,RAW,"[""Pandharpur""]","[""rn""]",en
+wind speed in kmph for Buxar today,WIND_SPEED,GET,RAW,"[""Buxar""]","[""today""]",en
+wind,WIND_SPEED,GET,RAW,[],[],en
+is it too windy to spray pesticide in my field this afternoon?,WIND_SPEED,GET,RAW,"[""my field""]","[""this afternoon""]",en
+wnd speed tomorow Siyana,WIND_SPEED,GET,RAW,"[""Siyana""]","[""tomorow""]",en
+wind strength at 7:25 am in Ghandiyali,WIND_SPEED,GET,RAW,"[""Ghandiyali""]","[""7:25 am""]",en
+hawa ki raftar kya hai Nokha me abhi,WIND_SPEED,GET,RAW,"[""Nokha""]","[""abhi""]",mixed
+wind speed near me for the next 6 hours,WIND_SPEED,GET,RAW,"[""near me""]","[""next 6 hours""]",en
+"wind speed in Sadia Circle, Tinsukia, Assam at 11:59 pm",WIND_SPEED,GET,RAW,"[""Sadia Circle, Tinsukia, Assam""]","[""11:59 pm""]",en
+compare wind speed in Alabama and Mendoza tomorrow,WIND_SPEED,COMPARE,RAW,"[""Alabama"", ""Mendoza""]","[""tomorrow""]",en
+windier in Sibsagar or Tinsukia this week?,WIND_SPEED,COMPARE,RAW,"[""Sibsagar"", ""Tinsukia""]","[""this week""]",en
+wind speed in Ausa tomorrow vs Friday,WIND_SPEED,COMPARE,RAW,"[""Ausa""]","[""tomorrow"", ""Friday""]",en
+alert me if wind crosses 40 kmph in Bandhogarh tonight,WIND_SPEED,ALERT,RAW,"[""Bandhogarh""]","[""tonight""]",en
+strong wind warning for my farm this weekend?,WIND_SPEED,ALERT,RAW,"[""my farm""]","[""this weekend""]",en
+notify me about gusts in Rajapalaiyam at 6:10 pm,WIND_SPEED,ALERT,RAW,"[""Rajapalaiyam""]","[""6:10 pm""]",en
+which way is the wind blowing in Remta,WIND_DIRECTION,GET,RAW,"[""Remta""]",[],en
+wind direction near me right now,WIND_DIRECTION,GET,RAW,"[""near me""]","[""right now""]",en
+wind direction,WIND_DIRECTION,GET,RAW,[],[],en
+is the wind coming from the north in Tarora today?,WIND_DIRECTION,GET,RAW,"[""Tarora""]","[""today""]",en
+wnd direction tomorow in mainpuri,WIND_DIRECTION,GET,RAW,"[""mainpuri""]","[""tomorow""]",en
+wind heading at 8:40 am in Paridi,WIND_DIRECTION,GET,RAW,"[""Paridi""]","[""8:40 am""]",en
+hawa kis taraf se aa rahi hai Siyana me,WIND_DIRECTION,GET,RAW,"[""Siyana""]",[],mixed
+compare wind direction in Buxar and Muzaffarpur tomorrow,WIND_DIRECTION,COMPARE,RAW,"[""Buxar"", ""Muzaffarpur""]","[""tomorrow""]",en
+wind direction in Golmuri this morning vs this evening,WIND_DIRECTION,COMPARE,RAW,"[""Golmuri""]","[""this morning"", ""this evening""]",en
+does the wind blow differently in Japan and Romania today,WIND_DIRECTION,COMPARE,RAW,"[""Japan"", ""Romania""]","[""today""]",en
+notify me if the wind direction shifts in my field tomorrow,WIND_DIRECTION,ALERT,RAW,"[""my field""]","[""tomorrow""]",en
+wind direction alert for Iragavaram this evening,WIND_DIRECTION,ALERT,RAW,"[""Iragavaram""]","[""this evening""]",en
+let me know when the wind turns westerly in Vaghan,WIND_DIRECTION,ALERT,RAW,"[""Vaghan""]",[],en
+will it be sunny in Pandharpur tomorrow,SUNSHINE,GET,RAW,"[""Pandharpur""]","[""tomorrow""]",en
+how many hours of sunlight in Buxar today,SUNSHINE,GET,RAW,"[""Buxar""]","[""today""]",en
+sunshine hrs,SUNSHINE,GET,RAW,[],[],en
+enough sun to dry paddy in my village tomorrow?,SUNSHINE,GET,RAW,"[""my village""]","[""tomorrow""]",en
+sunshien tomorow in nokha,SUNSHINE,GET,RAW,"[""nokha""]","[""tomorow""]",en
+solar exposure between 9 AM and 3 PM in Marpalli,SUNSHINE,GET,RAW,"[""Marpalli""]","[""9 AM"", ""3 PM""]",en
+dhoop kitni rahegi kal Mainpuri me,SUNSHINE,GET,RAW,"[""Mainpuri""]","[""kal""]",mixed
+how much sunshine did we get in Buxar last week,SUNSHINE,GET,SUM,"[""Buxar""]","[""last week""]",en
+compare sunshine hours in Ladakh and Tripura this week,SUNSHINE,COMPARE,RAW,"[""Ladakh"", ""Tripura""]","[""this week""]",en
+sunnier in Brazil or Uganda tomorrow?,SUNSHINE,COMPARE,RAW,"[""Brazil"", ""Uganda""]","[""tomorrow""]",en
+sunshine in Ausa today vs tomorrow,SUNSHINE,COMPARE,RAW,"[""Ausa""]","[""today"", ""tomorrow""]",en
+alert me if sunshine drops in Kantamegha this week,SUNSHINE,ALERT,RAW,"[""Kantamegha""]","[""this week""]",en
+sunlight alert for my farm tomorrow morning,SUNSHINE,ALERT,RAW,"[""my farm""]","[""tomorrow morning""]",en
+notify me if sunshine hours fall below 5 in Gangrar tomorrow,SUNSHINE,ALERT,RAW,"[""Gangrar""]","[""tomorrow""]",en
+how cloudy is it in Remta right now,CLOUD_COVER,GET,RAW,"[""Remta""]","[""right now""]",en
+cloud cover percentage for Buxar today,CLOUD_COVER,GET,RAW,"[""Buxar""]","[""today""]",en
+cloud cover,CLOUD_COVER,GET,RAW,[],[],en
+is the sky clear over my field tonight?,CLOUD_COVER,GET,RAW,"[""my field""]","[""tonight""]",en
+cloudness tomorow in siyana,CLOUD_COVER,GET,RAW,"[""siyana""]","[""tomorow""]",en
+total cloud cover at 1:05 pm in Chhati Dih,CLOUD_COVER,GET,RAW,"[""Chhati Dih""]","[""1:05 pm""]",en
+badal kitne hain abhi Marpalli me,CLOUD_COVER,GET,RAW,"[""Marpalli""]","[""abhi""]",mixed
+compare cloud cover in Alabama and Parana tomorrow,CLOUD_COVER,COMPARE,RAW,"[""Alabama"", ""Parana""]","[""tomorrow""]",en
+cloudier in Sibsagar or Lawngtlai this weekend?,CLOUD_COVER,COMPARE,RAW,"[""Sibsagar"", ""Lawngtlai""]","[""this weekend""]",en
+cloud cover in Nokha today vs day after tomorrow,CLOUD_COVER,COMPARE,RAW,"[""Nokha""]","[""today"", ""day after tomorrow""]",en
+alert me if it gets overcast in Bandhogarh this afternoon,CLOUD_COVER,ALERT,RAW,"[""Bandhogarh""]","[""this afternoon""]",en
+cloud alert for my village tomorrow,CLOUD_COVER,ALERT,RAW,"[""my village""]","[""tomorrow""]",en
+notify me when clouds clear in Taloda,CLOUD_COVER,ALERT,RAW,"[""Taloda""]",[],en
+soil moisture in my field today,SOIL_MOISTURE,GET,RAW,"[""my field""]","[""today""]",en
+do i need to irrigate in Iragavaram tomorrow?,SOIL_MOISTURE,GET,RAW,"[""Iragavaram""]","[""tomorrow""]",en
+soil moisture at 10cm in Vaghan right now,SOIL_MOISTURE,GET,RAW,"[""Vaghan""]","[""right now""]",en
+field moisture,SOIL_MOISTURE,GET,RAW,[],[],en
+soil moistur tomorow in nokha,SOIL_MOISTURE,GET,RAW,"[""nokha""]","[""tomorow""]",en
+"how dry is the soil in Hichhopal, Narkatiaganj this week",SOIL_MOISTURE,GET,RAW,"[""Hichhopal, Narkatiaganj""]","[""this week""]",en
+mitti me nami kitni hai Siyana me aaj,SOIL_MOISTURE,GET,RAW,"[""Siyana""]","[""aaj""]",mixed
+compare soil moisture in East Godavari and Perambalur today,SOIL_MOISTURE,COMPARE,RAW,"[""East Godavari"", ""Perambalur""]","[""today""]",en
+"which field is drier, Remta or Paridi this week",SOIL_MOISTURE,COMPARE,RAW,"[""Remta"", ""Paridi""]","[""this week""]",en
+soil moisture in my farm today vs next week,SOIL_MOISTURE,COMPARE,RAW,"[""my farm""]","[""today"", ""next week""]",en
+soil moisture near me and in Perambalur this evening,SOIL_MOISTURE,COMPARE,RAW,"[""near me"", ""Perambalur""]","[""this evening""]",en
+alert me if soil moisture drops below normal in Kantamegha,SOIL_MOISTURE,ALERT,RAW,"[""Kantamegha""]",[],en
+irrigation alert for my village tomorrow morning,SOIL_MOISTURE,ALERT,RAW,"[""my village""]","[""tomorrow morning""]",en
+notify me when the soil dries out in Gangrar this week,SOIL_MOISTURE,ALERT,RAW,"[""Gangrar""]","[""this week""]",en
+soil temperature in my field right now,SOIL_TEMPERATURE,GET,RAW,"[""my field""]","[""right now""]",en
+is the soil warm enough for sowing in Buxar this week?,SOIL_TEMPERATURE,GET,RAW,"[""Buxar""]","[""this week""]",en
+soil temp at 10cm in Tarora today,SOIL_TEMPERATURE,GET,RAW,"[""Tarora""]","[""today""]",en
+ground temperature,SOIL_TEMPERATURE,GET,RAW,[],[],en
+soil temprature tomorow in mainpuri,SOIL_TEMPERATURE,GET,RAW,"[""mainpuri""]","[""tomorow""]",en
+soil temperature at 6:55 am in Dehuridih,SOIL_TEMPERATURE,GET,RAW,"[""Dehuridih""]","[""6:55 am""]",en
+mitti ka taapmaan kya hai Nokha me abhi,SOIL_TEMPERATURE,GET,RAW,"[""Nokha""]","[""abhi""]",mixed
+compare soil temperature in Bihar and Madhya Pradesh this week,SOIL_TEMPERATURE,COMPARE,RAW,"[""Bihar"", ""Madhya Pradesh""]","[""this week""]",en
+warmer soil in Vijayapura or Muzaffarpur tomorrow?,SOIL_TEMPERATURE,COMPARE,RAW,"[""Vijayapura"", ""Muzaffarpur""]","[""tomorrow""]",en
+soil temp in Ausa today vs Friday,SOIL_TEMPERATURE,COMPARE,RAW,"[""Ausa""]","[""today"", ""Friday""]",en
+alert me if soil temperature falls in Nellurkembraje tonight,SOIL_TEMPERATURE,ALERT,RAW,"[""Nellurkembraje""]","[""tonight""]",en
+soil temp alert for my farm before sowing next week,SOIL_TEMPERATURE,ALERT,RAW,"[""my farm""]","[""next week""]",en
+notify me when ground temperature crosses 25 in Taloda,SOIL_TEMPERATURE,ALERT,RAW,"[""Taloda""]",[],en
+MAX TEMP MUZAFFARPUR SUNDAY,TEMPERATURE_MAX,GET,RAW,"[""MUZAFFARPUR""]","[""SUNDAY""]",en
+"temperature in Barreh Gurudayalram, Amarpatan, Satna, Madhya Pradesh tomorrow",TEMPERATURE,GET,RAW,"[""Barreh Gurudayalram, Amarpatan, Satna, Madhya Pradesh""]","[""tomorrow""]",en
+rainfall Buxar 6:15 pm to 9:45 pm,RAIN,GET,RAW,"[""Buxar""]","[""6:15 pm to 9:45 pm""]",en
+whats the min temp gonna be in remta tmrw,TEMPERATURE_MIN,GET,RAW,"[""remta""]","[""tmrw""]",en
+cloud cover for my plot at 10:20 am,CLOUD_COVER,GET,RAW,"[""my plot""]","[""10:20 am""]",en
+humidity in Jaitpur and Dehuridih and Remta tomorrow morning,HUMIDITY,COMPARE,RAW,"[""Jaitpur"", ""Dehuridih"", ""Remta""]","[""tomorrow morning""]",en
+sun tomorrow?,SUNSHINE,GET,RAW,[],"[""tomorrow""]",en
+is there any wind alert,WIND_SPEED,ALERT,RAW,[],[],en
+soil moisture,SOIL_MOISTURE,GET,RAW,[],[],en
+tell me tomorrow's rain chance for Nellurkembraje and Ghandiyali,RAIN,COMPARE,RAW,"[""Nellurkembraje"", ""Ghandiyali""]","[""tomorrow""]",en
+"I might be driving through Kasaragod on Saturday, any chance of heavy rain?",RAIN,GET,RAW,"[""Kasaragod""]","[""Saturday""]",en
+I'm planning a short trip to Mandla this weekend - what kind of weather should I expect?,CURRENT_CONDITIONS,GET,RAW,"[""Mandla""]","[""this weekend""]",en
+Is Pithoragarh likely to have clear skies tonight?,CLOUD_COVER,GET,RAW,"[""Pithoragarh""]","[""tonight""]",en
+"Between Ziro and Kalimpong, which one looks better for an outdoor plan tomorrow?",CURRENT_CONDITIONS,COMPARE,RAW,"[""Ziro"", ""Kalimpong""]","[""tomorrow""]",en
+Can you check whether Chikmagalur will be cooler than Kollam tomorrow morning?,TEMPERATURE,COMPARE,RAW,"[""Chikmagalur"", ""Kollam""]","[""tomorrow morning""]",en
+"we are heading to Daporijo this evening, what is the weather looking like?",CURRENT_CONDITIONS,GET,RAW,"[""Daporijo""]","[""this evening""]",en
+How warm is it expected to get in Tawang tomorrow afternoon?,TEMPERATURE_MAX,GET,MAX,"[""Tawang""]","[""tomorrow afternoon""]",en
+Around what time will the temperature start dropping in Barpeta today?,TEMPERATURE,GET,TREND,"[""Barpeta""]","[""today""]",en
+weather of sydney,CURRENT_CONDITIONS,GET,RAW,"[""sydney""]",[],en
+syndney weather,CURRENT_CONDITIONS,GET,RAW,"[""syndney""]",[],en
+rainfall of Guntur next week,RAIN,GET,RAW,"[""Guntur""]","[""next week""]",en
+"Jaisalmer, Rajasthan vs Kochi, Kerala forecast",FORECAST,COMPARE,RAW,"[""Jaisalmer, Rajasthan"", ""Kochi, Kerala""]",[],en
+"compare rainfall in Ziro, Kalimpong and Tawang this week",RAIN,COMPARE,RAW,"[""Ziro"", ""Kalimpong"", ""Tawang""]","[""this week""]",en
+total rainfall in Nokha next 7 days,RAIN,GET,SUM,"[""Nokha""]","[""next 7 days""]",en
+how much rain in total in Buxar this week?,RAIN,GET,SUM,"[""Buxar""]","[""this week""]",en
+average humidity in Tarora next 3 days,HUMIDITY,GET,AVG,"[""Tarora""]","[""next 3 days""]",en
+mean wind speed for Marpalli this week,WIND_SPEED,GET,AVG,"[""Marpalli""]","[""this week""]",en
+peak wind speed in Kakinada tomorrow,WIND_SPEED,GET,MAX,"[""Kakinada""]","[""tomorrow""]",en
+when is the humidity highest in Golmuri today?,HUMIDITY,GET,MAX,"[""Golmuri""]","[""today""]",en
+lowest soil temperature in Vaghan this week,SOIL_TEMPERATURE,GET,MIN,"[""Vaghan""]","[""this week""]",en
+when will the rain stop in Remta today?,RAIN,GET,TREND,"[""Remta""]","[""today""]",en
+is the humidity increasing in Paridi tomorrow?,HUMIDITY,GET,TREND,"[""Paridi""]","[""tomorrow""]",en
+"quick question, what is the soil moisture around Iragavaram right now?",SOIL_MOISTURE,GET,RAW,"[""Iragavaram""]","[""right now""]",en
+do you think the wind in Ausa will be ok this afternoon?,WIND_SPEED,GET,RAW,"[""Ausa""]","[""this afternoon""]",en
+"hey, can you check the forecast for Bandhogarh tomorrow?",FORECAST,GET,RAW,"[""Bandhogarh""]","[""tomorrow""]",en
+i have an outdoor plan in Nellurkembraje this weekend - what is the rain chance?,RAIN,GET,RAW,"[""Nellurkembraje""]","[""this weekend""]",en

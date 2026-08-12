@@ -26,13 +26,13 @@ from sklearn.svm import SVC
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from src.build_dataset import EVAL_MANUAL, NOUNS, SPLITS
 from src.data_loader import load_intents_csv
-from src.schema import Entities, NLUOutput
+from src.schema import Aggregation, Entities, NLUOutput
 from src.tagger import SpanTagger, choose_min_word_freq, normalize_time
 
 ROOT = Path(__file__).resolve().parent.parent
 BUNDLE_PATH = ROOT / "models/nlu_pipeline.joblib"
 METRICS_PATH = ROOT / "models/metrics.json"
-TARGETS = ["weather_intent", "action", "location", "time"]
+TARGETS = ["weather_intent", "action", "aggregation", "location", "time"]
 
 import re
 
@@ -58,18 +58,22 @@ def build_vectorizer():
 class NLUModel:
     """The 4 targets of MODEL_RULES.md behind one predict() call."""
 
-    def __init__(self, vectorizer, intent_model, action_model, tagger):
+    def __init__(self, vectorizer, intent_model, action_model, tagger, aggregation_model=None):
         self.vectorizer = vectorizer
         self.intent_model = intent_model
         self.action_model = action_model
+        self.aggregation_model = aggregation_model
         self.tagger = tagger
 
     def predict(self, text: str) -> NLUOutput:
         features = self.vectorizer.transform([clean_text(text)])
         spans = self.tagger.predict(text)
+        aggregation = (self.aggregation_model.predict(features)[0]
+                       if self.aggregation_model is not None else Aggregation.RAW.value)
         return NLUOutput(
             weather_intent=self.intent_model.predict(features)[0],
             action=self.action_model.predict(features)[0],
+            aggregation=aggregation,
             entities=Entities(
                 location=spans["location"],
                 time=spans["time"],
@@ -110,8 +114,11 @@ def train(df, verbose=True):
     # Linear SVC wins model selection in the notebook every run; probability=True buys the
     # confidence score for the downstream fallback.
     models = {}
-    for target in ("weather_intent", "action"):
-        models[target] = SVC(kernel="linear", probability=True, random_state=42)
+    for target in ("weather_intent", "action", "aggregation"):
+        # aggregation is heavily RAW-dominated, so it gets balanced class weights
+        weight = "balanced" if target == "aggregation" else None
+        models[target] = SVC(kernel="linear", probability=True, class_weight=weight,
+                             random_state=42)
         models[target].fit(features, df[target])
 
     spans = [{"location": loc, "time": time} for loc, time in zip(df["location"], df["time"])]
@@ -121,7 +128,8 @@ def train(df, verbose=True):
     if verbose:
         print(f"trained on {len(df)} rows | tagger min_word_freq={min_freq} "
               f"({len(tagger.vocab)} words kept)")
-    return NLUModel(vectorizer, models["weather_intent"], models["action"], tagger)
+    return NLUModel(vectorizer, models["weather_intent"], models["action"], tagger,
+                    aggregation_model=models["aggregation"])
 
 
 def span_scores(gold_spans, predicted_spans):
@@ -144,6 +152,7 @@ def evaluate(model, df):
     correct = {
         "weather_intent": [p.weather_intent.value == g for p, g in zip(predictions, df["weather_intent"])],
         "action": [p.action.value == g for p, g in zip(predictions, df["action"])],
+        "aggregation": [p.aggregation.value == g for p, g in zip(predictions, df["aggregation"])],
         "location": [norm(p.entities.location) == norm(g) for p, g in zip(predictions, df["location"])],
         "time": [norm(p.entities.time) == norm(g) for p, g in zip(predictions, df["time"])],
     }
@@ -151,9 +160,10 @@ def evaluate(model, df):
         "rows": len(df),
         "weather_intent_accuracy": round(sum(correct["weather_intent"]) / len(df), 4),
         "action_accuracy": round(sum(correct["action"]) / len(df), 4),
+        "aggregation_accuracy": round(sum(correct["aggregation"]) / len(df), 4),
         "location_span": span_scores(df["location"], [p.entities.location for p in predictions]),
         "time_span": span_scores(df["time"], [p.entities.time for p in predictions]),
-        "all_four_targets": round(sum(all(c[i] for c in correct.values()) for i in range(len(df))) / len(df), 4),
+        "all_targets": round(sum(all(c[i] for c in correct.values()) for i in range(len(df))) / len(df), 4),
     }
 
 
@@ -188,7 +198,7 @@ def describe(model, path=BUNDLE_PATH):
         scores = json.loads(METRICS_PATH.read_text())["eval (English)"]
         print(f"  eval English  intent {scores['weather_intent_accuracy']:.1%}, "
               f"action {scores['action_accuracy']:.1%}, "
-              f"all 4 targets {scores['all_four_targets']:.1%}")
+              f"all 4 targets {scores['all_targets']:.1%}")
 
 
 def repl(model):
@@ -256,9 +266,10 @@ def main():
         if isinstance(scores, dict):
             print(f"{name:16s} intent {scores['weather_intent_accuracy']:.1%}  "
                   f"action {scores['action_accuracy']:.1%}  "
+                  f"agg {scores['aggregation_accuracy']:.1%}  "
                   f"loc F1 {scores['location_span']['f1']:.3f}  "
                   f"time F1 {scores['time_span']['f1']:.3f}  "
-                  f"all-4 {scores['all_four_targets']:.1%}")
+                  f"all-5 {scores['all_targets']:.1%}")
 
 
 if __name__ == "__main__":

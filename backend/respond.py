@@ -61,8 +61,13 @@ def _parse(row: dict) -> datetime:
     return datetime.fromisoformat(row["Date_time"])
 
 
-def needs_hourly(normalized: str) -> bool:
-    """Intra-day expressions need the hourly feed; whole-day ones do not."""
+def needs_hourly(normalized: str, aggregation: str = "RAW") -> bool:
+    """Intra-day expressions need the hourly feed; whole-day ones do not.
+
+    TREND always does: "when does it start dropping" cannot be answered from one daily row.
+    """
+    if aggregation == "TREND":
+        return True
     if not normalized:
         return False
     return (normalized in PART_OF_DAY or normalized == "now"
