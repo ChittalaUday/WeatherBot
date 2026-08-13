@@ -1,39 +1,63 @@
 {
-  "train_rows": 8426,
+  "train_rows": 12003,
   "test": {
     "rows": 1887,
-    "intent_accuracy": 0.9751,
+    "intent_accuracy": 0.9645,
     "aggregation_accuracy": 0.9905,
-    "variables_exact_set": 0.9502,
-    "variables_precision": 0.9593,
-    "variables_recall": 0.9832,
-    "variables_f1": 0.9711,
-    "location_exact": 0.9608,
-    "time_exact": 0.9645,
+    "variables_exact_set": 0.9613,
+    "variables_precision": 0.9692,
+    "variables_recall": 0.9802,
+    "variables_f1": 0.9747,
+    "location_exact": 0.9512,
+    "time_exact": 0.9671,
     "all_slots": 0.8537
   },
-  "eval_english": {
+  "eval_utterances": {
     "rows": 219,
-    "intent_accuracy": 0.9635,
+    "intent_accuracy": 0.968,
     "aggregation_accuracy": 0.9543,
     "variables_exact_set": 0.9224,
-    "variables_precision": 0.9177,
-    "variables_recall": 0.968,
-    "variables_f1": 0.9422,
-    "location_exact": 0.9452,
-    "time_exact": 0.9589,
-    "all_slots": 0.7717
+    "variables_precision": 0.9211,
+    "variables_recall": 0.9589,
+    "variables_f1": 0.9396,
+    "location_exact": 0.9361,
+    "time_exact": 0.9543,
+    "all_slots": 0.7626
   },
-  "multivariable_only": {
-    "rows": 231,
+  "eval_conversation_openers": {
+    "rows": 150,
     "intent_accuracy": 1.0,
     "aggregation_accuracy": 1.0,
-    "variables_exact_set": 0.9827,
-    "variables_precision": 0.9982,
-    "variables_recall": 0.9945,
-    "variables_f1": 0.9964,
+    "variables_exact_set": 1.0,
+    "variables_precision": 1.0,
+    "variables_recall": 1.0,
+    "variables_f1": 1.0,
     "location_exact": 1.0,
-    "time_exact": 0.9048,
-    "all_slots": 0.8918
+    "time_exact": 0.9467,
+    "all_slots": 0.9467
+  },
+  "multivariable_only": {
+    "rows": 238,
+    "intent_accuracy": 1.0,
+    "aggregation_accuracy": 1.0,
+    "variables_exact_set": 0.9832,
+    "variables_precision": 1.0,
+    "variables_recall": 0.993,
+    "variables_f1": 0.9965,
+    "location_exact": 1.0,
+    "time_exact": 0.916,
+    "all_slots": 0.9034
+  },
+  "first_turns_only": {
+    "rows": 1887,
+    "intent_accuracy": 0.9645,
+    "aggregation_accuracy": 0.9905,
+    "variables_exact_set": 0.9613,
+    "variables_precision": 0.9692,
+    "variables_recall": 0.9802,
+    "variables_f1": 0.9747,
+    "location_exact": 0.9512,
+    "time_exact": 0.9671,
+    "all_slots": 0.8537
   }
 }

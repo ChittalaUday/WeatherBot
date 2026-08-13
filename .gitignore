@@ -59,15 +59,11 @@ models/metrics.json
 # --- Runtime data ---------------------------------------------------------
 # conversations.db is per-deployment chat history; export labels instead:
 #   python -m backend.store --export data/from_users.csv
-# rebuild: python -m src.v2.dataset --build
-data/v2_dataset.db
 data/conversations.db
 data/conversations.db-wal
 data/conversations.db-shm
 data/processed/hard_cases.csv
 data/from_users.csv
-# rebuild: python -m src.v2.dataset --build
-data/v2_dataset.db
 
 # --- Node / Next.js -------------------------------------------------------
 node_modules/

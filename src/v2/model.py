@@ -1,7 +1,7 @@
 """
 v2 model - one encoder, three heads, and the v1 span tagger reused unchanged.
 
-    python -m src.v2.model --export        # train from data/v2_dataset.db -> models/nlu_v2.joblib
+    python -m src.v2.model --export        # train from data/v2_dataset.csv -> models/nlu_v2.joblib
     python -m src.v2.model --info
     python -m src.v2.model "rain and temperature in Guntur and Vizag tomorrow"
 
@@ -233,15 +233,23 @@ def main():
     args = parser.parse_args()
 
     if args.export:
-        connection = v2_dataset.connect()
-        model = train(v2_dataset.load(connection, split="train"))
+        train_rows = v2_dataset.load(split="train")
+        model = train(train_rows)
+        test_rows = v2_dataset.load(split="test")
         report = {
-            "train_rows": len(v2_dataset.load(connection, split="train")),
-            "test": evaluate(model, v2_dataset.load(connection, split="test")),
-            "eval_english": evaluate(model, v2_dataset.load(connection, split="eval", lang="en")),
-            "multivariable_only": evaluate(
-                model, [r for r in v2_dataset.load(connection, split="test")
-                        if len(r["variables"]) > 1]),
+            "train_rows": len(train_rows),
+            "test": evaluate(model, test_rows),
+            # standalone utterances only: a follow-up carries no variable in its words, so
+            # per-utterance scoring of "and there?" measures nothing
+            "eval_utterances": evaluate(model, [r for r in v2_dataset.load(split="eval", lang="en")
+                                                if r["source"] != "chats"]),
+            "eval_conversation_openers": evaluate(
+                model, [r for r in v2_dataset.load(split="eval") if r["source"] == "chats"
+                        and r["turn"] == 0]),
+            "multivariable_only": evaluate(model, [r for r in test_rows if len(r["variables"]) > 1]),
+            # follow-up turns are scored by test_conversations.py, which replays them through
+            # the context engine - judging them per-utterance would be meaningless
+            "first_turns_only": evaluate(model, [r for r in test_rows if r["turn"] == 0]),
         }
         model.save()
         METRICS_PATH.write_text(json.dumps(report, indent=2) + "\n")

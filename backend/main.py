@@ -42,7 +42,9 @@ app.add_middleware(
 
 registry = models.Registry()         # v1 and v2, chosen per request
 db = store.connect()                 # every turn is logged for the retraining loop
-SESSIONS: dict[str, ConversationState] = {}   # slot state per socket, deterministic
+# Slot state is keyed by chat, not by socket: a reload reconnects with the same chat_id and
+# the conversation continues where it left off.
+CHATS: dict[str, ConversationState] = {}
 
 
 @app.on_event("startup")
@@ -53,6 +55,12 @@ def load_model():
 @app.get("/api/health")
 def health():
     return {"status": "ok", "model": True, "models": registry.available()}
+
+
+@app.get("/api/chats/{chat_id}")
+def chat_history(chat_id: str):
+    """Every turn of one conversation, for debugging or for rehydrating a client."""
+    return {"chat_id": chat_id, "turns": store.conversation(db, chat_id)}
 
 
 @app.get("/api/models")
@@ -85,7 +93,7 @@ CONFIDENT = 0.95
 
 
 async def handle_query(socket: WebSocket, text: str, coords: dict | None, session: str,
-                       version: str | None = None):
+                       version: str | None = None, chat_id: str | None = None):
     """One turn through the pipeline:
 
         normalize -> model -> context -> location resolver -> time resolver -> validator
@@ -106,7 +114,8 @@ async def handle_query(socket: WebSocket, text: str, coords: dict | None, sessio
     # cheap rules before anything else: a follow-up fragment leans on the previous turn
     reference = context.detect_reference(cleaned.normalized)
     follow_up = context.is_follow_up(cleaned.normalized)
-    state = SESSIONS.get(session, ConversationState())
+    chat_id = chat_id or session
+    state = CHATS.get(chat_id, ConversationState())
 
     await socket.send_json({
         "type": "nlu",
@@ -131,7 +140,8 @@ async def handle_query(socket: WebSocket, text: str, coords: dict | None, sessio
     # classifier ranked first is how you get RAIN one turn and TEMPERATURE the next.
     confidence = understanding.confidence
     log = lambda outcome, detail, **extra: store.record_turn(
-        db, session, f"[{understanding.version}] {text}", intent=intent, action=action,
+        db, session, f"[{understanding.version}] {text}", chat_id=chat_id, turn=state.turns,
+        intent=intent, action=action,
         confidence=confidence, location=understanding.locations, time_raw=understanding.times,
         time_norm=understanding.times_normalized,
         outcome=outcome, detail=detail, normalized=cleaned.normalized,
@@ -306,15 +316,19 @@ async def handle_query(socket: WebSocket, text: str, coords: dict | None, sessio
             summary += (f" (No exact match for \"{place['raw']}\" - showing the closest, "
                         f"{place['normalized']}, {place['state']}.)")
 
-    SESSIONS[session] = state                       # only a turn that answered updates state
+    CHATS[chat_id] = state                          # only a turn that answered updates state
     uncertain = confidence < CONFIDENT
     turn_id = log("uncertain" if uncertain else "answered", summary, places=places,
                   unresolved=unknown, operation=operation.value)
     await socket.send_json({
         "type": "result",
         "turn_id": turn_id,
+        "chat_id": chat_id,
+        "turn": max(state.turns - 1, 0),
         "model": understanding.version,
-        "variables": understanding.variables,
+        # what the answer was actually built from: on a follow-up these are inherited, and
+        # reporting the raw prediction here would contradict the columns in the table
+        "variables": state.variables or understanding.variables,
         "intent": intent,
         "action": action,
         "when": query.time_label or when,
@@ -375,19 +389,27 @@ async def chat(socket: WebSocket):
     session = uuid.uuid4().hex[:12]
     await socket.send_json({"type": "ready", "session": session,
                             "message": "Ask me about the weather."})
+    chat_id: str | None = None
     try:
         while True:
             message = await socket.receive_json()
             kind = message.get("type")
             try:
+                # the client owns the chat id, so a page reload resumes the same conversation
+                chat_id = message.get("chat_id") or chat_id or f"chat-{uuid.uuid4().hex[:10]}"
                 if kind == "query":
                     await handle_query(socket, message["text"], message.get("coords"), session,
-                                       message.get("model"))
+                                       message.get("model"), chat_id)
                 elif kind == "location":
                     # browser answered the geolocation prompt: rerun the pending query
                     await handle_query(socket, message["text"],
                                        {"lat": message["lat"], "lon": message["lon"]}, session,
-                                       message.get("model"))
+                                       message.get("model"), chat_id)
+                elif kind == "reset":
+                    CHATS.pop(chat_id, None)          # "new chat" - forget the slots
+                    chat_id = message.get("chat_id") or f"chat-{uuid.uuid4().hex[:10]}"
+                    await socket.send_json({"type": "ready", "session": session,
+                                            "chat_id": chat_id, "message": "New chat."})
                 elif kind == "ping":
                     await socket.send_json({"type": "pong"})
             except Exception as exc:                               # noqa: BLE001 - one bad turn must not kill the socket

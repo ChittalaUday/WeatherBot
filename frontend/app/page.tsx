@@ -1,6 +1,6 @@
 "use client";
 
-import { CloudSunRain, CornerDownLeft, Loader2 } from "lucide-react";
+import { CloudSunRain, CornerDownLeft, Loader2, MessageSquarePlus } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { HealthBadge } from "@/components/health-badge";
 import { ModelSwitch } from "@/components/model-switch";
@@ -18,7 +18,7 @@ const EXAMPLES = [
 ];
 
 export default function Page() {
-  const { connected, busy, messages, ask, sendLocation } = useWeatherSocket();
+  const { connected, busy, messages, chatId, ask, sendLocation, newChat } = useWeatherSocket();
   const [draft, setDraft] = useState("");
   const [model, setModel] = useState("v1");
   const bottom = useRef<HTMLDivElement>(null);
@@ -42,10 +42,22 @@ export default function Page() {
           </div>
           <div>
             <h1 className="text-sm font-semibold leading-tight">WeatherSnap</h1>
-            <p className="text-xs text-muted-foreground">Ask in plain English</p>
+            <p className="text-xs text-muted-foreground">
+              {chatId ? `chat ${chatId.slice(5, 13)}` : "Ask in plain English"}
+            </p>
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={newChat}
+            title="Start a new chat - forgets the remembered place and time"
+            className="h-8 gap-1.5 px-2 text-xs text-muted-foreground"
+          >
+            <MessageSquarePlus className="h-3.5 w-3.5" />
+            New
+          </Button>
           <ModelSwitch value={model} onChange={setModel} />
           <HealthBadge connected={connected} />
         </div>

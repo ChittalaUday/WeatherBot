@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from backend import locations as locations_module          # re-exported for replay tests
 from src.nlu import BUNDLE_PATH as V1_PATH, NLUModel
 from src.v2.model import BUNDLE_PATH as V2_PATH, V2Model
 

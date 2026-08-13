@@ -32,7 +32,9 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS turns (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     ts            TEXT NOT NULL,
-    session       TEXT NOT NULL,
+    session       TEXT NOT NULL,   -- one websocket connection
+    chat_id       TEXT,            -- one conversation: survives reloads and reconnects
+    turn          INTEGER,         -- position within the chat, 0-based
     text          TEXT NOT NULL,
     intent        TEXT,
     action        TEXT,
@@ -63,6 +65,7 @@ CREATE TABLE IF NOT EXISTS feedback (
     note          TEXT
 );
 CREATE INDEX IF NOT EXISTS turns_session ON turns(session);
+CREATE INDEX IF NOT EXISTS turns_chat ON turns(chat_id);
 CREATE INDEX IF NOT EXISTS turns_outcome ON turns(outcome);
 CREATE INDEX IF NOT EXISTS feedback_turn ON feedback(turn_id);
 """
@@ -82,18 +85,19 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-def record_turn(connection, session, text, *, intent=None, action=None, confidence=None,
+def record_turn(connection, session, text, *, chat_id=None, turn=None, intent=None,
+                action=None, confidence=None,
                 location=None, time_raw=None, time_norm=None, places=None, unresolved=None,
                 outcome="answered", detail=None, latency_ms=None, scores=None,
                 operation=None, normalized=None) -> int:
     """One turn, with the full score vector - knowing *which* intents competed is what makes
     a failed prediction useful later."""
     cursor = connection.execute(
-        """INSERT INTO turns (ts, session, text, intent, action, confidence, location,
-                              time_raw, time_norm, places, unresolved, outcome, detail,
-                              latency_ms, scores, operation, normalized)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-        (_now(), session, text, intent, action, confidence,
+        """INSERT INTO turns (ts, session, chat_id, turn, text, intent, action, confidence,
+                              location, time_raw, time_norm, places, unresolved, outcome,
+                              detail, latency_ms, scores, operation, normalized)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (_now(), session, chat_id, turn, text, intent, action, confidence,
          json.dumps(location or []), json.dumps(time_raw or []), json.dumps(time_norm or []),
          json.dumps(places or []), json.dumps(unresolved or []), outcome, detail, latency_ms,
          json.dumps(scores or {}), operation, normalized),
@@ -116,16 +120,23 @@ def record_feedback(connection, turn_id, kind, *, intent=None, action=None,
     return cursor.lastrowid
 
 
+def conversation(connection, chat_id: str) -> list[dict]:
+    """Every turn of one chat, in order - what the user actually asked, end to end."""
+    return [dict(row) for row in connection.execute(
+        "SELECT * FROM turns WHERE chat_id = ? ORDER BY turn, id", (chat_id,))]
+
+
 def stats(connection) -> dict:
     row = connection.execute(
         """SELECT COUNT(*) turns, COUNT(DISTINCT session) sessions,
+                  COUNT(DISTINCT chat_id) chats,
                   AVG(confidence) confidence, AVG(latency_ms) latency FROM turns""").fetchone()
     outcomes = {r["outcome"]: r["n"] for r in
                 connection.execute("SELECT outcome, COUNT(*) n FROM turns GROUP BY outcome")}
     kinds = {r["kind"]: r["n"] for r in
              connection.execute("SELECT kind, COUNT(*) n FROM feedback GROUP BY kind")}
     return {
-        "turns": row["turns"], "sessions": row["sessions"],
+        "turns": row["turns"], "sessions": row["sessions"], "chats": row["chats"],
         "mean_confidence": round(row["confidence"], 3) if row["confidence"] else None,
         "mean_latency_ms": round(row["latency"]) if row["latency"] else None,
         "outcomes": outcomes, "feedback": kinds,

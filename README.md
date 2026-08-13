@@ -359,11 +359,30 @@ context builder - **one coarse intent, everything else a multi-value slot**:
 | training time | ~3 min (SVC + probability) | ~20 s (LinearSVC + calibration) |
 
 ```bash
-python -m src.v2.dataset --build     # data/v2_dataset.db from v1 rows + multi-variable + user labels
+python -m src.v2.dataset --build     # -> data/v2_dataset.csv
 python -m src.v2.dataset --stats
+python -m src.v2.dataset --chats 3   # print conversations end to end
 python -m src.v2.model --export      # -> models/nlu_v2.joblib
-python -m src.v2.model "rain and temperature in Guntur and Vizag tomorrow"
+python test_conversations.py         # replay held-out chats through the pipeline
 ```
+
+**The dataset is a CSV of turns grouped into chats**, not a pile of isolated sentences -
+14562 turns across 11898 chats, 1350 of them multi-turn:
+
+| chat_id | turn | text | operation | variables |
+| :-- | --: | :-- | :-- | :-- |
+| gen-tr-00337 | 0 | what is the wind in Tirupati tomorrow? | SET | WIND_SPEED |
+| gen-tr-00337 | 1 | what about Chikmagalur then? | REPLACE | WIND_SPEED |
+| gen-tr-00337 | 2 | same for Kollam? | REPLACE | WIND_SPEED |
+
+A follow-up row carries the slots the user *means*, which is not what their words say -
+"what about Chikmagalur then?" names no measurement. So the file is two things: per-turn
+training data for the heads, and a replay script for the context engine. `data/conversations.db`
+stays the runtime store and feeds labelled real turns in as `source=users`.
+
+Per-utterance metrics cannot judge a follow-up, so `test_conversations.py` replays every
+held-out chat through model + normalizer + context engine and scores the **state** after
+each turn: operation 100%, locations 100%, times 100%, variables 99.8% over 437 turns.
 
 The multi-label threshold is calibrated on a held-out slice at training time (0.25 this run),
 not hand-picked: 0.35 was silently dropping TEMPERATURE at 0.205 from "temperature, humidity
@@ -381,6 +400,11 @@ The difference on the query v1 cannot express:
   v1  TEMPERATURE / COMPARE, 28%   -> asks which reading you meant
   v2  FORECAST, [RAIN, TEMPERATURE], 83%   -> one table, both columns
 ```
+
+**Chats.** Every turn belongs to a `chat_id` the browser owns (localStorage), so a reload
+resumes the same conversation with its slots intact; **New** starts a fresh one and clears
+the server-side state. Turns are stored with `chat_id` and `turn`, and
+`GET /api/chats/{chat_id}` returns a conversation end to end.
 
 **Choosing a model.** `GET /api/models` lists what is deployed with each version's metrics;
 every WebSocket query takes an optional `"model": "v1" | "v2"`; the UI has a v1/v2 switch in
