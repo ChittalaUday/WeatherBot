@@ -353,6 +353,14 @@ Not all feedback is equal, and the store treats it that way:
 Every answer is rateable, including one reopened from history: the stored payload carries
 its own `turn_id`, and the UI only reports success once the request actually succeeded.
 
+**One verdict per turn.** A rating is the user's current opinion, not a log of clicks, so
+`feedback.turn_id` is UNIQUE and every submission upserts: thumbs-up, changed to thumbs-down,
+then corrected, leaves one row with `revisions = 2` and the corrected label - not three rows,
+two of which would train the model on a turn that was already relabelled. `ts` is when it was
+first rated, `updated_at` when it last changed, and fields left blank keep their previous
+value, so fixing only the place does not erase an intent that was already right. Reopening a
+chat shows the verdict already recorded, with a **change** link to revise it.
+
 **Thumbs-down opens a correction form** rather than just registering displeasure, because a
 bare "wrong" cannot be trained on. The form is pre-filled with the model's own reading, so
 fixing it is usually one tap:

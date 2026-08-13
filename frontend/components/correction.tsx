@@ -83,6 +83,9 @@ export function Correction({
   return (
     <div className="mt-3 rounded-xl border bg-muted/40 p-3">
       <p className="text-xs font-medium">What should it have been?</p>
+      <p className="mt-0.5 text-[10px] text-muted-foreground">
+        Saved against this turn - sending it again updates the same record.
+      </p>
 
       <div className="mt-2 flex flex-wrap gap-1.5">
         {options.map((label) => (

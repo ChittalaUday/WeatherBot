@@ -397,7 +397,14 @@ def feedback(body: Feedback):
                           variables=body.variables, location=body.location,
                           time_raw=body.time, model=body.model, error_type=body.error_type,
                           note=body.note)
-    return {"ok": True, "labelled": len(store.training_rows(db))}
+    current = store.feedback_for(db, body.turn_id)
+    return {"ok": True, "labelled": len(store.training_rows(db)), "feedback": current}
+
+
+@app.get("/api/feedback/{turn_id}")
+def feedback_for_turn(turn_id: int):
+    """What the user already said about this turn, so a reopened chat shows its ratings."""
+    return {"feedback": store.feedback_for(db, turn_id)}
 
 
 @app.get("/api/labels")

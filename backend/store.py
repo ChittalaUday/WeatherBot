@@ -55,8 +55,12 @@ CREATE TABLE IF NOT EXISTS turns (
 );
 CREATE TABLE IF NOT EXISTS feedback (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    turn_id       INTEGER NOT NULL REFERENCES turns(id),
-    ts            TEXT NOT NULL,
+    -- one row per turn: a rating is the user's current opinion, not a log of clicks.
+    -- Changing your mind updates this row; it never appends a second one.
+    turn_id       INTEGER NOT NULL UNIQUE REFERENCES turns(id),
+    ts            TEXT NOT NULL,   -- first rated
+    updated_at    TEXT,            -- last changed
+    revisions     INTEGER NOT NULL DEFAULT 0,
     kind          TEXT NOT NULL,  -- up | down | correction | choice
     intent        TEXT,
     action        TEXT,
@@ -71,8 +75,27 @@ CREATE TABLE IF NOT EXISTS feedback (
 CREATE INDEX IF NOT EXISTS turns_session ON turns(session);
 CREATE INDEX IF NOT EXISTS turns_chat ON turns(chat_id);
 CREATE INDEX IF NOT EXISTS turns_outcome ON turns(outcome);
-CREATE INDEX IF NOT EXISTS feedback_turn ON feedback(turn_id);
+CREATE UNIQUE INDEX IF NOT EXISTS feedback_turn ON feedback(turn_id);
 """
+
+
+def _migrate(connection) -> None:
+    """Older databases allowed several feedback rows per turn. Keep the newest of each and
+    add the uniqueness the schema now assumes."""
+    columns = {row["name"] for row in connection.execute("PRAGMA table_info(feedback)")}
+    if not columns:
+        return
+    for column, ddl in (("updated_at", "TEXT"), ("revisions", "INTEGER NOT NULL DEFAULT 0")):
+        if column not in columns:
+            connection.execute(f"ALTER TABLE feedback ADD COLUMN {column} {ddl}")
+    duplicates = connection.execute(
+        """DELETE FROM feedback WHERE id NOT IN
+           (SELECT MAX(id) FROM feedback GROUP BY turn_id)""").rowcount
+    if duplicates:
+        print(f"store: collapsed {duplicates} duplicate feedback rows")
+    connection.execute("DROP INDEX IF EXISTS feedback_turn")
+    connection.execute("CREATE UNIQUE INDEX IF NOT EXISTS feedback_turn ON feedback(turn_id)")
+    connection.commit()
 
 
 def connect(path: Path | str = DB_PATH) -> sqlite3.Connection:
@@ -82,6 +105,7 @@ def connect(path: Path | str = DB_PATH) -> sqlite3.Connection:
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA journal_mode=WAL")     # chat writes must not block reads
     connection.executescript(SCHEMA)
+    _migrate(connection)
     return connection
 
 
@@ -116,19 +140,46 @@ def record_turn(connection, session, text, *, chat_id=None, turn=None, intent=No
 def record_feedback(connection, turn_id, kind, *, intent=None, action=None, variables=None,
                     location=None, time_raw=None, note=None, error_type=None,
                     model=None) -> int:
-    """A label from a human. `correction` and `choice` carry what it *should* have been;
-    `down` on its own only says something was wrong, which is triage, not training data."""
-    cursor = connection.execute(
-        """INSERT INTO feedback (turn_id, ts, kind, intent, action, variables, location,
-                                 time_raw, model, error_type, note)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-        (turn_id, _now(), kind, intent, action,
+    """The user's current verdict on one turn - inserted once, updated thereafter.
+
+    `correction` and `choice` carry what it *should* have been; `down` on its own only says
+    something was wrong, which is triage, not training data. A thumbs-down followed by a
+    correction is one opinion refined, so it replaces the earlier row rather than adding to
+    it - otherwise the same turn would train twice, once with a label and once without.
+
+    Fields left as None keep whatever the previous revision held: correcting only the place
+    should not erase the intent that was already right.
+    """
+    connection.execute(
+        """INSERT INTO feedback (turn_id, ts, updated_at, revisions, kind, intent, action,
+                                 variables, location, time_raw, model, error_type, note)
+           VALUES (?,?,?,0,?,?,?,?,?,?,?,?,?)
+           ON CONFLICT(turn_id) DO UPDATE SET
+               updated_at = excluded.updated_at,
+               revisions  = feedback.revisions + 1,
+               kind       = excluded.kind,
+               intent     = COALESCE(excluded.intent, feedback.intent),
+               action     = COALESCE(excluded.action, feedback.action),
+               variables  = COALESCE(excluded.variables, feedback.variables),
+               location   = COALESCE(excluded.location, feedback.location),
+               time_raw   = COALESCE(excluded.time_raw, feedback.time_raw),
+               model      = COALESCE(excluded.model, feedback.model),
+               error_type = COALESCE(excluded.error_type, feedback.error_type),
+               note       = COALESCE(excluded.note, feedback.note)""",
+        (turn_id, _now(), _now(), kind, intent, action,
          json.dumps(variables) if variables is not None else None,
          json.dumps(location) if location is not None else None,
          json.dumps(time_raw) if time_raw is not None else None, model, error_type, note),
     )
     connection.commit()
-    return cursor.lastrowid
+    row = connection.execute("SELECT id FROM feedback WHERE turn_id = ?", (turn_id,)).fetchone()
+    return row["id"]
+
+
+def feedback_for(connection, turn_id: int) -> dict | None:
+    """The current verdict on a turn, so the UI can show what was already said."""
+    row = connection.execute("SELECT * FROM feedback WHERE turn_id = ?", (turn_id,)).fetchone()
+    return dict(row) if row else None
 
 
 def attach_payload(connection, turn_id: int, payload: dict) -> None:
@@ -331,8 +382,17 @@ def demo():
                            action="COMPARE", confidence=0.25,
                            location=["angara", "hyderbad"], time_raw=[], time_norm=[],
                            outcome="clarified", detail="low confidence")
+        record_feedback(connection, turn, "down", model="v1")
         record_feedback(connection, turn, "choice", intent="RAIN", action="COMPARE",
                         error_type="intent_confusion")
+
+        # one opinion per turn: the down was refined into a choice, not appended to
+        rows_for_turn = connection.execute(
+            "SELECT COUNT(*) n FROM feedback WHERE turn_id = ?", (turn,)).fetchone()["n"]
+        assert rows_for_turn == 1, rows_for_turn
+        current = feedback_for(connection, turn)
+        assert current["kind"] == "choice" and current["revisions"] == 1, current
+        assert current["model"] == "v1", current      # untouched fields survive the update
 
         rows = training_rows(connection)
         assert len(rows) == 1, rows

@@ -11,8 +11,11 @@ import { ThumbsDownIcon } from "@/components/ui/thumbs-down-icon";
 import { ThumbsUpIcon } from "@/components/ui/thumbs-up-icon";
 import { TriangleAlertIcon } from "@/components/ui/triangle-alert-icon";
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Correction } from "@/components/correction";
 import { useFeedback } from "@/lib/use-feedback";
+
+const API = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8787";
 import { ResultChart } from "@/components/result-chart";
 import { ResultTable } from "@/components/result-table";
 import { Badge } from "@/components/ui/badge";
@@ -165,6 +168,18 @@ function Rate({
   // an answer restored from an older build may predate stored turn ids
   const rateable = Number.isInteger(turnId);
 
+  // what the user already said about this turn - a reopened chat shows its own ratings
+  const existing = useQuery({
+    queryKey: ["feedback", turnId],
+    queryFn: async () =>
+      (await fetch(`${API}/api/feedback/${turnId}`)).json() as Promise<{
+        feedback: { kind: string; revisions: number } | null;
+      }>,
+    enabled: rateable && sent === null,
+    staleTime: 60_000,
+  });
+  const stored = existing.data?.feedback ?? null;
+
   if (correcting) {
     return (
       <Correction
@@ -189,18 +204,30 @@ function Rate({
       </span>
     );
   }
-  if (sent) {
+  const verdict = sent ?? (stored ? (stored.kind === "up" ? "up" : stored.kind === "down" ? "down" : "corrected") : null);
+  if (verdict) {
     // only claimed once the request actually succeeded - a silent 422 used to read as "saved"
     const saved = !feedback.isPending;
     return (
-      <span className="mt-2 block text-[11px] text-muted-foreground">
+      <span className="mt-2 flex items-center gap-2 text-[11px] text-muted-foreground">
         {!saved
           ? "Saving…"
-          : sent === "up"
+          : verdict === "up"
             ? "Marked correct - thanks."
-            : sent === "corrected"
+            : verdict === "corrected"
               ? "Correction saved - it joins the next training run."
               : "Marked wrong."}
+        {saved && (
+          <button
+            onClick={() => {
+              setSent(null);
+              setCorrecting(verdict !== "up");   // changing a correction reopens the form
+            }}
+            className="underline decoration-dotted underline-offset-2 hover:text-foreground"
+          >
+            change
+          </button>
+        )}
       </span>
     );
   }
