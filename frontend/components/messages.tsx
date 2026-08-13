@@ -162,6 +162,8 @@ function Rate({
   const feedback = useFeedback();
   const [sent, setSent] = useState<"up" | "down" | "corrected" | null>(null);
   const [correcting, setCorrecting] = useState(false);
+  // an answer restored from an older build may predate stored turn ids
+  const rateable = Number.isInteger(turnId);
 
   if (correcting) {
     return (
@@ -180,17 +182,29 @@ function Rate({
     );
   }
 
-  if (sent) {
+  if (feedback.isError) {
     return (
-      <span className="mt-2 block text-[11px] text-muted-foreground">
-        {sent === "up"
-          ? "Marked correct - thanks."
-          : sent === "corrected"
-            ? "Correction saved - it joins the next training run."
-            : "Marked wrong."}
+      <span className="mt-2 block text-[11px] text-destructive">
+        Could not record that: {(feedback.error as Error).message}
       </span>
     );
   }
+  if (sent) {
+    // only claimed once the request actually succeeded - a silent 422 used to read as "saved"
+    const saved = !feedback.isPending;
+    return (
+      <span className="mt-2 block text-[11px] text-muted-foreground">
+        {!saved
+          ? "Saving…"
+          : sent === "up"
+            ? "Marked correct - thanks."
+            : sent === "corrected"
+              ? "Correction saved - it joins the next training run."
+              : "Marked wrong."}
+      </span>
+    );
+  }
+  if (!rateable) return null;
 
   return (
     <div className="mt-2 flex items-center gap-1">

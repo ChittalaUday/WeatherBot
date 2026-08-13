@@ -350,6 +350,9 @@ Not all feedback is equal, and the store treats it that way:
 | `up` | thumbs up | only above 0.9 confidence, and only with `--include-approved` |
 | `down` | thumbs down | no - says something is wrong, not what |
 
+Every answer is rateable, including one reopened from history: the stored payload carries
+its own `turn_id`, and the UI only reports success once the request actually succeeded.
+
 **Thumbs-down opens a correction form** rather than just registering displeasure, because a
 bare "wrong" cannot be trained on. The form is pre-filled with the model's own reading, so
 fixing it is usually one tap:

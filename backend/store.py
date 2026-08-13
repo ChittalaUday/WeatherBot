@@ -131,6 +131,17 @@ def record_feedback(connection, turn_id, kind, *, intent=None, action=None, vari
     return cursor.lastrowid
 
 
+def attach_payload(connection, turn_id: int, payload: dict) -> None:
+    """Store the answer once its turn_id exists, so a replayed answer can still be rated.
+
+    The payload has to carry the turn_id it belongs to; without it, a thumbs-up on a chat
+    reopened from history has nothing to attach itself to.
+    """
+    connection.execute("UPDATE turns SET payload = ? WHERE id = ?",
+                       (json.dumps(payload), turn_id))
+    connection.commit()
+
+
 def list_chats(connection, limit: int = 40) -> list[dict]:
     """Recent conversations, newest first, titled by their opening question."""
     rows = connection.execute(

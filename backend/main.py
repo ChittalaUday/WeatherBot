@@ -151,7 +151,9 @@ async def handle_query(socket: WebSocket, text: str, coords: dict | None, sessio
     # classifier ranked first is how you get RAIN one turn and TEMPERATURE the next.
     confidence = understanding.confidence
     log = lambda outcome, detail, **extra: store.record_turn(
-        db, session, f"[{understanding.version}] {text}", chat_id=chat_id, turn=state.turns,
+        # state.turns counts turns taken, so the index of *this* one is one less
+        db, session, f"[{understanding.version}] {text}", chat_id=chat_id,
+        turn=max(state.turns - 1, 0),
         intent=intent, action=action,
         confidence=confidence, location=understanding.locations, time_raw=understanding.times,
         time_norm=understanding.times_normalized,
@@ -361,13 +363,13 @@ async def handle_query(socket: WebSocket, text: str, coords: dict | None, sessio
         ],
     }
 
-    # the rendered answer is stored with the turn, so reopening the chat replays exactly what
-    # was shown rather than re-querying a forecast that has since moved on
+    # Log first to mint the turn_id, complete the answer with it, then store the finished
+    # payload: a replayed answer needs its own turn_id to be rateable.
     turn_id = log("uncertain" if uncertain else "answered", summary, places=places,
-                  unresolved=unknown, operation=operation.value,
-                  payload=answer, state=state.model_dump())
+                  unresolved=unknown, operation=operation.value, state=state.model_dump())
     answer.update({"type": "result", "turn_id": turn_id, "chat_id": chat_id,
                    "turn": max(state.turns - 1, 0)})
+    store.attach_payload(db, turn_id, answer)
     await socket.send_json(answer)
 
 
