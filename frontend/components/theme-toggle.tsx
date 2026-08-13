@@ -6,21 +6,27 @@ import { Button } from "@/components/ui/button";
 import { MoonIcon } from "@/components/ui/moon-icon";
 import { SunIcon } from "@/components/ui/sun-icon";
 
-/** Light / dark, remembered by next-themes. Renders nothing until mounted, because the
- *  resolved theme is unknown on the server and a wrong first paint is worse than a beat of
- *  empty space. */
+/**
+ * Light / dark, remembered by next-themes.
+ *
+ * Everything theme-derived - icon, label, title - waits for mount. The server cannot know
+ * the resolved theme, so rendering "Switch to light mode" there and "Switch to dark mode"
+ * on the client is a hydration mismatch, not just a wrong-looking icon.
+ */
 export function ThemeToggle() {
   const { resolvedTheme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
-  const dark = resolvedTheme === "dark";
+  const dark = mounted && resolvedTheme === "dark";
+  const label = mounted ? (dark ? "Switch to light mode" : "Switch to dark mode") : "Toggle theme";
+
   return (
     <Button
       variant="ghost"
       size="sm"
-      aria-label={dark ? "Switch to light mode" : "Switch to dark mode"}
-      title={dark ? "Light mode" : "Dark mode"}
+      aria-label={label}
+      title={label}
       onClick={() => setTheme(dark ? "light" : "dark")}
       className="h-8 w-8 px-0 text-muted-foreground"
     >
