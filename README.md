@@ -410,10 +410,18 @@ The difference on the query v1 cannot express:
   v2  FORECAST, [RAIN, TEMPERATURE], 83%   -> one table, both columns
 ```
 
-**Chats.** Every turn belongs to a `chat_id` the browser owns (localStorage), so a reload
-resumes the same conversation with its slots intact; **New** starts a fresh one and clears
-the server-side state. Turns are stored with `chat_id` and `turn`, and
-`GET /api/chats/{chat_id}` returns a conversation end to end.
+**Chats and history.** Every turn belongs to a `chat_id` the browser owns (localStorage), so
+a reload resumes the same conversation with its slots intact; **New** starts a fresh one.
+**History** lists past conversations and reopens any of them.
+
+- `GET /api/chats` - recent conversations, titled by their opening question
+- `GET /api/chats/{chat_id}` - one conversation, with each answer as it was rendered
+
+Each answered turn stores its **rendered payload** (summary, table, chart, insights) and the
+slot state that produced it. Reopening a chat replays what was actually shown rather than
+re-querying a forecast that has since moved on, and the restored chat keeps its context, so
+"what about tomorrow?" still works after the reload - even across a backend restart, because
+the state is rebuilt from the stored turns.
 
 **Choosing a model.** `GET /api/models` lists what is deployed with each version's metrics;
 every WebSocket query takes an optional `"model": "v1" | "v2"`; the UI has a v1/v2 switch in

@@ -57,9 +57,15 @@ def health():
     return {"status": "ok", "model": True, "models": registry.available()}
 
 
+@app.get("/api/chats")
+def chats(limit: int = 40):
+    """Recent conversations, newest first, for the history panel."""
+    return {"chats": store.list_chats(db, limit)}
+
+
 @app.get("/api/chats/{chat_id}")
 def chat_history(chat_id: str):
-    """Every turn of one conversation, for debugging or for rehydrating a client."""
+    """Every turn of one conversation, with the answers as they were rendered."""
     return {"chat_id": chat_id, "turns": store.conversation(db, chat_id)}
 
 
@@ -115,7 +121,12 @@ async def handle_query(socket: WebSocket, text: str, coords: dict | None, sessio
     reference = context.detect_reference(cleaned.normalized)
     follow_up = context.is_follow_up(cleaned.normalized)
     chat_id = chat_id or session
-    state = CHATS.get(chat_id, ConversationState())
+    state = CHATS.get(chat_id)
+    if state is None:
+        # the chat may predate this process; rebuild its slots from the stored turns so a
+        # resumed conversation still knows where "there" is
+        stored = store.last_state(db, chat_id)
+        state = ConversationState(**stored) if stored else ConversationState()
 
     await socket.send_json({
         "type": "nlu",
@@ -318,13 +329,8 @@ async def handle_query(socket: WebSocket, text: str, coords: dict | None, sessio
 
     CHATS[chat_id] = state                          # only a turn that answered updates state
     uncertain = confidence < CONFIDENT
-    turn_id = log("uncertain" if uncertain else "answered", summary, places=places,
-                  unresolved=unknown, operation=operation.value)
-    await socket.send_json({
-        "type": "result",
-        "turn_id": turn_id,
-        "chat_id": chat_id,
-        "turn": max(state.turns - 1, 0),
+    # type / turn_id / chat_id / turn are added after logging, which is what mints turn_id
+    answer = {
         "model": understanding.version,
         # what the answer was actually built from: on a follow-up these are inherited, and
         # reporting the raw prediction here would contradict the columns in the table
@@ -353,7 +359,16 @@ async def handle_query(socket: WebSocket, text: str, coords: dict | None, sessio
              "points": [{"t": row["Date_time"], "v": row.get(fields[0])} for row in rows]}
             for place, rows in zip(places, selected)
         ],
-    })
+    }
+
+    # the rendered answer is stored with the turn, so reopening the chat replays exactly what
+    # was shown rather than re-querying a forecast that has since moved on
+    turn_id = log("uncertain" if uncertain else "answered", summary, places=places,
+                  unresolved=unknown, operation=operation.value,
+                  payload=answer, state=state.model_dump())
+    answer.update({"type": "result", "turn_id": turn_id, "chat_id": chat_id,
+                   "turn": max(state.turns - 1, 0)})
+    await socket.send_json(answer)
 
 
 class Feedback(BaseModel):

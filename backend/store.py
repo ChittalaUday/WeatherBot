@@ -49,7 +49,9 @@ CREATE TABLE IF NOT EXISTS turns (
     latency_ms    INTEGER,
     scores        TEXT,           -- json: full intent probability vector
     operation     TEXT,           -- SET | REPLACE | MODIFY | INHERIT | COMPARE
-    normalized    TEXT            -- what the model actually saw, after src/normalize.py
+    normalized    TEXT,           -- what the model actually saw, after src/normalize.py
+    payload       TEXT,           -- json: the answer as rendered, so history replays exactly
+    state         TEXT            -- json: ConversationState after the turn, to resume context
 );
 CREATE TABLE IF NOT EXISTS feedback (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -89,18 +91,21 @@ def record_turn(connection, session, text, *, chat_id=None, turn=None, intent=No
                 action=None, confidence=None,
                 location=None, time_raw=None, time_norm=None, places=None, unresolved=None,
                 outcome="answered", detail=None, latency_ms=None, scores=None,
-                operation=None, normalized=None) -> int:
+                operation=None, normalized=None, payload=None, state=None) -> int:
     """One turn, with the full score vector - knowing *which* intents competed is what makes
     a failed prediction useful later."""
     cursor = connection.execute(
         """INSERT INTO turns (ts, session, chat_id, turn, text, intent, action, confidence,
                               location, time_raw, time_norm, places, unresolved, outcome,
-                              detail, latency_ms, scores, operation, normalized)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                              detail, latency_ms, scores, operation, normalized,
+                              payload, state)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (_now(), session, chat_id, turn, text, intent, action, confidence,
          json.dumps(location or []), json.dumps(time_raw or []), json.dumps(time_norm or []),
          json.dumps(places or []), json.dumps(unresolved or []), outcome, detail, latency_ms,
-         json.dumps(scores or {}), operation, normalized),
+         json.dumps(scores or {}), operation, normalized,
+         json.dumps(payload) if payload is not None else None,
+         json.dumps(state) if state is not None else None),
     )
     connection.commit()
     return cursor.lastrowid
@@ -120,10 +125,65 @@ def record_feedback(connection, turn_id, kind, *, intent=None, action=None,
     return cursor.lastrowid
 
 
+def list_chats(connection, limit: int = 40) -> list[dict]:
+    """Recent conversations, newest first, titled by their opening question."""
+    rows = connection.execute(
+        """SELECT chat_id,
+                  COUNT(*)                                   AS turns,
+                  MIN(ts)                                    AS started,
+                  MAX(ts)                                    AS last_active,
+                  SUM(outcome IN ('answered', 'uncertain'))  AS answered
+           FROM turns
+           WHERE chat_id IS NOT NULL
+           GROUP BY chat_id
+           ORDER BY MAX(ts) DESC
+           LIMIT ?""", (limit,)).fetchall()
+
+    chats = []
+    for row in rows:
+        opener = connection.execute(
+            "SELECT text FROM turns WHERE chat_id = ? ORDER BY id LIMIT 1",
+            (row["chat_id"],)).fetchone()
+        title = (opener["text"] if opener else "").strip()
+        model = "v1"
+        if title.startswith("[") and "]" in title:            # logged as "[v2] question"
+            model, title = title[1:title.index("]")], title[title.index("]") + 1:].strip()
+        chats.append({
+            "chat_id": row["chat_id"], "title": title[:80] or "(empty)",
+            "turns": row["turns"], "answered": row["answered"],
+            "started": row["started"], "last_active": row["last_active"], "model": model,
+        })
+    return chats
+
+
+def last_state(connection, chat_id: str) -> dict | None:
+    """The slot state after the most recent answered turn - used to resume a chat whose
+    in-memory state died with a restart."""
+    row = connection.execute(
+        """SELECT state FROM turns
+           WHERE chat_id = ? AND state IS NOT NULL
+           ORDER BY id DESC LIMIT 1""", (chat_id,)).fetchone()
+    return json.loads(row["state"]) if row and row["state"] else None
+
+
 def conversation(connection, chat_id: str) -> list[dict]:
     """Every turn of one chat, in order - what the user actually asked, end to end."""
-    return [dict(row) for row in connection.execute(
-        "SELECT * FROM turns WHERE chat_id = ? ORDER BY turn, id", (chat_id,))]
+    turns = []
+    for row in connection.execute(
+            "SELECT * FROM turns WHERE chat_id = ? ORDER BY id", (chat_id,)):
+        record = dict(row)
+        for column in ("payload", "scores", "state", "location", "time_raw", "time_norm"):
+            if record.get(column):
+                try:
+                    record[column] = json.loads(record[column])
+                except (TypeError, ValueError):
+                    pass
+        text = record.get("text") or ""
+        if text.startswith("[") and "]" in text:              # strip the logged model tag
+            record["model"] = text[1:text.index("]")]
+            record["text"] = text[text.index("]") + 1:].strip()
+        turns.append(record)
+    return turns
 
 
 def stats(connection) -> dict:

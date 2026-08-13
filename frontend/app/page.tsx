@@ -2,6 +2,7 @@
 
 import { LazyMotion, domAnimation, m } from "motion/react";
 import { useEffect, useRef, useState } from "react";
+import { ChatHistory } from "@/components/chat-history";
 import { Composer } from "@/components/composer";
 import { HealthBadge } from "@/components/health-badge";
 import { Messages } from "@/components/messages";
@@ -22,7 +23,8 @@ const EXAMPLES = [
 ];
 
 export default function Page() {
-  const { connected, busy, messages, chatId, ask, sendLocation, newChat } = useWeatherSocket();
+  const { connected, busy, messages, chatId, ask, sendLocation, newChat, openChat } =
+    useWeatherSocket();
   const [model, setModel] = useState("v1");
   const bottom = useRef<HTMLDivElement>(null);
   const started = messages.length > 0;
@@ -50,6 +52,7 @@ export default function Page() {
               </span>
             </div>
             <div className="flex shrink-0 items-center gap-1.5">
+              <ChatHistory currentChatId={chatId} onOpenChat={openChat} />
               <Button
                 variant="ghost"
                 size="sm"
@@ -80,7 +83,10 @@ export default function Page() {
                 <div ref={bottom} className="h-2" />
               </div>
             </div>
-            <div className="sticky bottom-0 border-t bg-background/95 px-4 backdrop-blur">
+            {/* a fade instead of a rule: the transcript should look like it runs under the
+                composer, not like it stops at a line */}
+            <div className="pointer-events-none h-6 shrink-0 bg-gradient-to-t from-background to-transparent" />
+            <div className="sticky bottom-0 bg-background px-4">
               <Composer
                 model={model}
                 onModelChange={setModel}
