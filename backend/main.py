@@ -120,6 +120,8 @@ async def handle_query(socket: WebSocket, text: str, coords: dict | None, sessio
     # cheap rules before anything else: a follow-up fragment leans on the previous turn
     reference = context.detect_reference(cleaned.normalized)
     follow_up = context.is_follow_up(cleaned.normalized)
+    # v3 commits to a reading rather than stopping to ask (registry.NEVER_ASKS)
+    asks = understanding.version not in models.NEVER_ASKS
     chat_id = chat_id or session
     state = CHATS.get(chat_id)
     if state is None:
@@ -163,7 +165,7 @@ async def handle_query(socket: WebSocket, text: str, coords: dict | None, sessio
 
     # An inherited follow-up is allowed to be low confidence: "there?" carries no signal on
     # its own, and the state already holds what it means.
-    if confidence < MIN_CONFIDENCE and not (follow_up or reference != context.Reference.NONE):
+    if asks and confidence < MIN_CONFIDENCE and not (follow_up or reference != context.Reference.NONE):
         turn_id = log("clarified", "low confidence")
         await socket.send_json({
             "type": "clarify",
@@ -205,7 +207,7 @@ async def handle_query(socket: WebSocket, text: str, coords: dict | None, sessio
 
     # A comparison with one place is not a comparison; ask instead of quietly answering
     # about whichever place happened to be extracted.
-    if action == "COMPARE" and len(named) + len(relative) < 2 and not state.resolved:
+    if asks and action == "COMPARE" and len(named) + len(relative) < 2 and not state.resolved:
         turn_id = log("clarified", "comparison with one place")
         await socket.send_json({
             "type": "clarify",
@@ -258,6 +260,11 @@ async def handle_query(socket: WebSocket, text: str, coords: dict | None, sessio
         # One name, several real places ("Angara" is in Jharkhand and in Andhra Pradesh):
         # the resolver hands back every match and the user picks, rather than us guessing.
         ambiguous = next((p for p in places if p.get("ambiguous") and len(named) == 1), None)
+        if ambiguous and not asks:
+            # commit to the ranked best and say which one, instead of interrupting
+            understanding.assumed.append(
+                f"{ambiguous['raw']} = {ambiguous['normalized']}, {ambiguous['state']}")
+            ambiguous = None
         if ambiguous:
             turn_id = log("clarified", f"ambiguous location: {ambiguous['raw']}", places=places)
             await socket.send_json({
@@ -279,6 +286,12 @@ async def handle_query(socket: WebSocket, text: str, coords: dict | None, sessio
 
         # time resolver + validator: absolute window, then answer-or-ask
         query = planner.plan(state, places=places, operation=operation, aggregation=aggregation)
+        if query.verdict is Verdict.CLARIFY and not asks:
+            # answer for what we have and say so, rather than asking
+            understanding.assumed.append(
+                "compared against the one place named" if "second_location" in query.missing
+                else "used the place already in context")
+            query.verdict = Verdict.READY
         if query.verdict is Verdict.CLARIFY:
             turn_id = log("clarified", f"missing {', '.join(query.missing)}", places=places)
             await socket.send_json({
@@ -299,16 +312,10 @@ async def handle_query(socket: WebSocket, text: str, coords: dict | None, sessio
             await socket.send_json({"type": "error", "message": f"WeatherSnap API failed: {exc}"})
             return
 
-    # v2 can ask for several variables at once; the table gets a column group per variable
-    # the state owns the variables: a follow-up that named none keeps the previous ones
-    keys = [models.VARIABLE_TO_FIELDS_KEY.get(v, v) for v in state.variables] or [intent]
-    fields, seen = [], set()
-    for key in keys:
-        for name in respond.INTENT_FIELDS.get(key, []):
-            if name not in seen:
-                seen.add(name)
-                fields.append(name)
-    fields = fields[:6] or respond.INTENT_FIELDS.get(intent, ["Tavg"])
+    # v3 decides how wide the table is (its detail head); v1/v2 use the fixed field map.
+    # Either way the variables come from the state, so a follow-up keeps them.
+    understanding.variables = state.variables or understanding.variables
+    fields = understanding.fields()
     selected = [respond.select_rows(feed, normalized)[0] for feed in feeds]
     when = respond.select_rows(feeds[0], normalized)[1]
 
@@ -320,8 +327,10 @@ async def handle_query(socket: WebSocket, text: str, coords: dict | None, sessio
     reduced = insights.apply_aggregation(selected[0], fields[0], aggregation)
     if reduced:                                     # lead with the number that was asked for
         summary = f"{reduced['text']}. {summary}"
-    chart = insights.build_chart(selected, places, fields[0], hourly)
-    notes = insights.build_insights(selected, places, fields, aggregation, hourly)
+    chart = insights.build_chart(selected, places, fields[0], hourly,
+                                 kind=understanding.chart or None, fields=fields)
+    notes = insights.build_insights(selected, places, fields, aggregation, hourly,
+                                    wanted=understanding.insights or None)
     if unknown:
         summary += f" (Could not find {', '.join(unknown)} - showing the rest.)"
     for place in places:
@@ -354,6 +363,11 @@ async def handle_query(socket: WebSocket, text: str, coords: dict | None, sessio
         "insights": notes,
         # never drop a place silently: a comparison missing one side is a wrong answer
         "unresolved": unknown,
+        # what the model chose, and what it committed to instead of asking
+        "presentation": ({"detail": understanding.detail, "chart": understanding.chart,
+                          "insights": understanding.insights}
+                         if understanding.detail else None),
+        "assumed": understanding.assumed,
         "table": table,
         # tidy series for the chart: one line per place
         "series": [

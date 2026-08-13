@@ -388,6 +388,11 @@ export function Messages({
                       <span>· {result.granularity}</span>
                       <span>· {result.when}</span>
                     </div>
+                    {result.assumed && result.assumed.length > 0 && (
+                      <p className="mt-1.5 text-[11px] text-muted-foreground">
+                        Assumed: {result.assumed.join(" · ")}
+                      </p>
+                    )}
                     {result.chart && <ResultChart chart={result.chart} />}
                     <ResultTable data={result.table} />
                     {result.insights.length > 0 && (
@@ -399,6 +404,13 @@ export function Messages({
                           </li>
                         ))}
                       </ul>
+                    )}
+                    {result.presentation && (
+                      <p className="mt-2 text-[10px] text-muted-foreground">
+                        model chose: {result.presentation.detail.toLowerCase()} detail ·{" "}
+                        {result.presentation.chart.toLowerCase().replace("_", " ")} ·{" "}
+                        {result.presentation.insights.join(", ").toLowerCase() || "no insights"}
+                      </p>
                     )}
                     {result.uncertain && (
                       <p className="mt-2 text-[11px] text-amber-600 dark:text-amber-500">

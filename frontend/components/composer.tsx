@@ -49,7 +49,8 @@ export function Composer({
     .filter((entry: { present: boolean }) => entry.present)
     .map((entry: { version: string; description: string }) => ({
       id: entry.version,
-      label: entry.version === "v1" ? "NLU v1" : "NLU v2",
+      // label from the version itself: hardcoding v1/v2 made v3 show up as "NLU v2"
+      label: `NLU ${entry.version}`,
       description: entry.description,
       icon: Layers,
     }));

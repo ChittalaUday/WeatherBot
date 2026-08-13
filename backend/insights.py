@@ -104,8 +104,27 @@ def _trend(rows: list[dict], field: str) -> dict | None:
             "peak_at": peak_at, "low_at": low_at}
 
 
-def build_chart(selected: list[list[dict]], places: list[dict], field: str, hourly: bool) -> dict | None:
-    """Line for a series over time, grouped bars for a short comparison, nothing for one point."""
+def build_chart(selected: list[list[dict]], places: list[dict], field: str, hourly: bool,
+                kind: str | None = None, fields: list[str] | None = None) -> dict | None:
+    """Line for a series over time, grouped bars for a short comparison, nothing for one point.
+
+    `kind` is v3's decision and wins when given: the model read the question, whereas this
+    function only ever saw row counts. MULTI_LINE plots several variables for one place,
+    which the row-count heuristic could not express at all.
+    """
+    if kind == "NONE":
+        return None
+    if kind == "MULTI_LINE" and fields and len(places) == 1 and selected:
+        multi = [{"name": LABELS.get(name, name),
+                  "points": [{"t": row["Date_time"], "v": float(row[name])}
+                             for row in selected[0] if row.get(name) is not None]}
+                 for name in fields[:3]]
+        multi = [entry for entry in multi if len(entry["points"]) > 1]
+        if multi:
+            return {"type": "line", "field": field, "label": "Readings",
+                    "unit": UNITS.get(field, ""),
+                    "granularity": "hourly" if hourly else "daily", "series": multi}
+
     series = []
     for place, rows in zip(places, selected):
         points = [{"t": r["Date_time"], "v": float(r[field])} for r in rows if r.get(field) is not None]
@@ -113,9 +132,14 @@ def build_chart(selected: list[list[dict]], places: list[dict], field: str, hour
             series.append({"name": place["name"], "points": points})
     if not series or all(len(s["points"]) < 2 for s in series):
         return None
-    kind = "bar" if len(series) > 1 and max(len(s["points"]) for s in series) <= 8 else "line"
+    if kind in {"GROUPED_BAR", "STAT"}:
+        shape = "bar"
+    elif kind in {"LINE", "MULTI_LINE"}:
+        shape = "line"
+    else:
+        shape = "bar" if len(series) > 1 and max(len(s["points"]) for s in series) <= 8 else "line"
     return {
-        "type": kind,
+        "type": shape,
         "field": field,
         "label": LABELS.get(field, field),
         "unit": UNITS.get(field, ""),
@@ -125,8 +149,14 @@ def build_chart(selected: list[list[dict]], places: list[dict], field: str, hour
 
 
 def build_insights(selected: list[list[dict]], places: list[dict], fields: list[str],
-                   aggregation: str, hourly: bool) -> list[str]:
-    """Two to four things worth saying that the table does not say by itself."""
+                   aggregation: str, hourly: bool, wanted: list[str] | None = None) -> list[str]:
+    """Two to four things worth saying that the table does not say by itself.
+
+    `wanted` is v3's selection. Without it every applicable observation is emitted, which is
+    what v1 and v2 do.
+    """
+    allow = set(wanted) if wanted else None
+    keep = lambda kind: allow is None or kind in allow
     field = fields[0]
     label = LABELS.get(field, field).lower()
     unit = UNITS.get(field, "")
@@ -139,24 +169,25 @@ def build_insights(selected: list[list[dict]], places: list[dict], fields: list[
         where = place["name"] if len(places) > 1 else ""
         prefix = f"{where}: " if where else ""
 
-        if len(values) > 1 and aggregation == "RAW":
+        if len(values) > 1 and aggregation == "RAW" and keep("RANGE"):
             total = sum(values) if field in ADDITIVE else sum(values) / len(values)
             word = "total" if field in ADDITIVE else "average"
             out.append(f"{prefix}{word} {label} {total:.1f}{unit}, "
                        f"range {min(values):.1f}-{max(values):.1f}{unit}")
 
-        if (threshold := NOTABLE.get(field)) and (crossings := [v for v in values if v >= threshold[0]]):
+        if keep("THRESHOLD") and (threshold := NOTABLE.get(field)) and \
+                (crossings := [v for v in values if v >= threshold[0]]):
             unit_word = "readings" if hourly else "days"
             out.append(f"{prefix}{threshold[1]} on {len(crossings)} of {len(values)} {unit_word} "
                        f"(peak {max(crossings):.1f}{threshold[2]})")
 
-        if field == "Rainfall" and len(values) > 2:
+        if keep("DRY_SPELL") and field == "Rainfall" and len(values) > 2:
             dry = sum(1 for v in values if v < 1.0)
             if dry:
                 out.append(f"{prefix}{dry} of {len(values)} dry {'hours' if hourly else 'days'} (<1mm)")
 
     # comparisons only make sense once both sides are in hand
-    if len(places) > 1:
+    if len(places) > 1 and keep("COMPARISON"):
         totals = []
         for place, rows in zip(places, selected):
             values = _values(rows, field)

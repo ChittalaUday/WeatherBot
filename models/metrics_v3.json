@@ -1,0 +1,39 @@
+{
+  "train_rows": 13533,
+  "test": {
+    "intent": 0.9643,
+    "aggregation": 0.9917,
+    "detail": 0.9995,
+    "chart": 0.9805,
+    "variables": 0.9611,
+    "locations": 0.9573,
+    "times": 0.9555,
+    "everything": 0.8391,
+    "rows": 2157,
+    "insights_f1": 0.9352
+  },
+  "detail_phrasings": {
+    "intent": 1.0,
+    "aggregation": 1.0,
+    "detail": 1.0,
+    "chart": 1.0,
+    "variables": 1.0,
+    "locations": 1.0,
+    "times": 0.9,
+    "everything": 0.9,
+    "rows": 270,
+    "insights_f1": 0.9761
+  },
+  "eval_utterances": {
+    "intent": 0.9589,
+    "aggregation": 0.9543,
+    "detail": 1.0,
+    "chart": 0.8402,
+    "variables": 0.9224,
+    "locations": 0.9452,
+    "times": 0.9589,
+    "everything": 0.6804,
+    "rows": 219,
+    "insights_f1": 0.907
+  }
+}

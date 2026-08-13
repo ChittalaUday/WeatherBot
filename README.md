@@ -470,7 +470,51 @@ the header and tags each answer with the version that produced it. `backend/regi
 adapts both into one `Understanding`, so the context engine, resolvers and response builder
 never learn which model answered.
 
-### 11. Using Jupyter Notebooks
+### 11. Model v3 - the model decides how to answer
+
+v1 and v2 extract; Python then decided the presentation from lookup tables. v3 predicts
+those decisions too, because they live in the wording:
+
+| head | labels | replaces |
+| :-- | :-- | :-- |
+| `detail` | MINIMAL / NORMAL / FULL | `INTENT_FIELDS[intent]`, a fixed column list |
+| `chart` | NONE / STAT / LINE / MULTI_LINE / GROUPED_BAR | a branch on how many series came back |
+| `insights` | 9 labels, multi-label | computing every observation, every time |
+
+```bash
+python -m src.v3.dataset --build     # relabels the v2 turns + detail-bearing phrasings
+python -m src.v3.model --export      # -> models/nlu_v3.joblib   (~18 s)
+python -m src.v3.model "temperature in Guntur tomorrow in detail"
+```
+
+What that buys, on the same query:
+
+```text
+"temperature in Guntur tomorrow"            v2  Avg temp                    v3  Avg temp
+"temperature in Guntur tomorrow in detail"  v2  Avg temp                    v3  Min, Max, Avg
+"full temperature breakdown this week"      v2  Avg temp, line              v3  Min, Max, Avg, line,
+                                                                                peak + low + threshold
+"rain, temperature and humidity next week"  v2  5 columns, 1 line           v3  3 columns, 3-series
+                                                (incl. humidity max/min)        multi-line
+"just the rainfall in Nokha this week"      v2  asks which Nokha            v3  answers, one column,
+                                                                                no chart
+```
+
+Test split: detail 100%, chart 98.0%, insights F1 0.935, every target at once 83.9%. On the
+detail-bearing phrasings specifically: 100% / 100% / 0.976.
+
+**v3 never asks.** Below the confidence floor, on a one-sided comparison, or on an ambiguous
+place name it commits and reports the assumption - `Assumed: angara = Angara, Jharkhand` -
+rather than interrupting. v1 and v2 keep asking; the behaviour is per-model
+(`registry.NEVER_ASKS`).
+
+Stated plainly: the chart and insight labels start as rules distilled into the model, so v3
+begins no smarter than the teacher. What it gains immediately is generalisation over
+phrasing - "in detail", "full breakdown" and "all the numbers" all widen the table without
+any of them being enumerated - and a wrong chart becomes a labelled example instead of an
+argument about an if-statement. Beating the teacher needs the correction loop in Section 9.
+
+### 12. Using Jupyter Notebooks
 
 1. Open `notebooks/exploration.ipynb` in your IDE.
 2. In the top right corner, select the kernel **`Python (WeatherBot)`**.

@@ -20,6 +20,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from backend import locations as locations_module          # re-exported for replay tests
 from src.nlu import BUNDLE_PATH as V1_PATH, NLUModel
 from src.v2.model import BUNDLE_PATH as V2_PATH, V2Model
+from src.v3.model import BUNDLE_PATH as V3_PATH, V3Model
+from src.v3.schema import fields_for
 
 DEFAULT_VERSION = "v1"
 
@@ -42,6 +44,31 @@ class Understanding:
     times_normalized: list[str]
     confidence: float
     scores: dict = field(default_factory=dict)
+    # v3 only: the presentation decisions the model makes instead of Python
+    detail: str = ""
+    chart: str = ""
+    insights: list = field(default_factory=list)
+    assumed: list = field(default_factory=list)
+
+    @property
+    def decides_presentation(self) -> bool:
+        return bool(self.detail)
+
+    def fields(self) -> list:
+        """Columns to fetch. v3 picks the width; v1/v2 fall back to the fixed field map."""
+        from backend import respond
+
+        if self.decides_presentation:
+            from src.v3.schema import Detail
+
+            return fields_for(self.variables, Detail(self.detail))
+        chosen, seen = [], set()
+        for key in self.field_keys or [self.intent]:
+            for name in respond.INTENT_FIELDS.get(key, []):
+                if name not in seen:
+                    seen.add(name)
+                    chosen.append(name)
+        return chosen[:6] or ["Tavg"]
 
     @property
     def field_keys(self) -> list[str]:
@@ -83,13 +110,33 @@ def _from_v2(model, text: str) -> Understanding:
     )
 
 
+def _from_v3(model, text: str) -> Understanding:
+    parsed = model.predict(text)
+    action = {"COMPARE": "COMPARE", "ALERT": "ALERT"}.get(parsed.intent.value, "GET")
+    return Understanding(
+        text=text, version="v3",
+        intent=parsed.intent.value,
+        action=action,
+        aggregation=parsed.aggregation.value,
+        variables=[variable.value for variable in parsed.slots.variables],
+        locations=list(parsed.slots.locations),
+        times=list(parsed.slots.times),
+        times_normalized=list(parsed.slots.times_normalized),
+        confidence=parsed.confidence.get("intent", 0.0),
+        scores=parsed.scores,
+        detail=parsed.presentation.detail.value,
+        chart=parsed.presentation.chart.value,
+        insights=[insight.value for insight in parsed.presentation.insights],
+    )
+
+
 class Registry:
     """Lazy-loads each bundle once. A missing v2 simply means v2 is not offered."""
 
     def __init__(self):
         self._models: dict[str, object] = {}
-        self._adapters = {"v1": _from_v1, "v2": _from_v2}
-        self._paths = {"v1": V1_PATH, "v2": V2_PATH}
+        self._adapters = {"v1": _from_v1, "v2": _from_v2, "v3": _from_v3}
+        self._paths = {"v1": V1_PATH, "v2": V2_PATH, "v3": V3_PATH}
 
     def available(self) -> list[dict]:
         return [
@@ -106,7 +153,7 @@ class Registry:
         if version not in self._models:
             if not self._paths[version].exists():
                 raise FileNotFoundError(f"{version} bundle missing at {self._paths[version]}")
-            loader = NLUModel.load if version == "v1" else V2Model.load
+            loader = {"v1": NLUModel.load, "v2": V2Model.load, "v3": V3Model.load}[version]
             self._models[version] = loader(self._paths[version])
         return self._models[version]
 
@@ -118,7 +165,10 @@ class Registry:
 DESCRIPTIONS = {
     "v1": "14-class intent, one variable per query (MODEL_RULES v1)",
     "v2": "coarse intent + multi-label variables, multi-value slots",
+    "v3": "v2 plus detail, chart and insight selection - decides, never asks",
 }
+# v3 commits to a reading rather than asking; v1/v2 still clarify below MIN_CONFIDENCE
+NEVER_ASKS = {"v3"}
 
 
 def demo():
