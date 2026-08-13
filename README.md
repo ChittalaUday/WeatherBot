@@ -2,28 +2,49 @@
 
 Machine Learning training environment and Jupyter Notebook setup for WeatherBot.
 
+**This project ships one model: Model 1.** It predicts eight things per turn — intent, a set
+of weather variables, an aggregation, location and time spans, and the three presentation
+decisions (how much detail, which chart, which insights). It never asks a clarifying
+question; it commits to a reading and reports what it assumed.
+
+- [MODEL_RULES.md](MODEL_RULES.md) — the taxonomy, the annotation rules, the accuracy floors
+- [ARCHITECTURE.md](ARCHITECTURE.md) — the heads, the request path, the file map, the
+  training chain, and what the two earlier models could not do
+
 ## Project Structure
 
 ```
 WeatherBot/
 ├── data/
 │   ├── raw/                # Raw dataset copies
-│   └── processed/          # Cleaned / preprocessed dataset features
-├── models/                 # Saved model checkpoints (*.joblib)
+│   ├── processed/          # Build-time intermediates (regenerable, not kept)
+│   ├── intents.csv         # Hand-written seed - head of the generation chain
+│   ├── eval_manual.csv     # Hand-written evaluation set - never generated
+│   ├── locations.csv       # 1068 real place names sampled from `shapes`
+│   └── v3_dataset.csv      # Model 1's training data
+├── models/                 # nlu_v3.joblib + metrics_v3.json  (bundles are gitignored)
 ├── notebooks/              # Jupyter notebooks for EDA and prototyping
 │   └── exploration.ipynb
 ├── src/                    # Modular Python source code
-│   ├── __init__.py
-│   ├── build_dataset.py    # Generates the train / test splits from templates + shapes names
+│   ├── build_dataset.py    # Template generator - balanced cells, misspellings, fillers
 │   ├── data_loader.py      # CSV loading, span parsing
 │   ├── fetch_locations.py  # Read-only sampler for the `shapes` schema
-│   ├── nlu.py              # Train / export / serve the model  (entry point)
-│   ├── schema.py           # WeatherIntent / Action enums, NLUOutput
-│   └── tagger.py           # BIO span tagger for LOCATION / TIME
+│   ├── nlu.py              # Shared encoder: build_vectorizer(), clean_text()
+│   ├── normalize.py        # Pre-model text normalizer
+│   ├── schema.py           # Conversation-state contracts
+│   ├── tagger.py           # BIO span tagger for LOCATION / TIME
+│   ├── v2/                 # Slot contracts + conversation generator (library code)
+│   └── v3/                 # Model 1: model.py, schema.py, dataset.py  (entry point)
+├── backend/                # FastAPI + WebSocket serving layer
+├── frontend/               # Next.js chat app
 ├── .gitignore
 ├── requirements.txt        # Python package dependencies
 └── README.md
 ```
+
+> `src/v2/` and `src/v3/` name the *architecture generations*, not selectable models. Model 1
+> is `src/v3/`; `src/v2/` survives only as the slot enums and the dataset generator Model 1
+> is built from. See [ARCHITECTURE.md §1](ARCHITECTURE.md#1-why-model-1-is-complete).
 
 ## Quickstart Setup
 
@@ -62,14 +83,21 @@ Only `SELECT`s against `shapes.*` are issued, on a `default_transaction_read_onl
 session, and only names + shape centroids are exported - never identifiers. Without the
 CSV the builder falls back to a small built-in city list.
 
-Then generate the two training splits, which share no prompt with each other or with the
-evaluation set:
+Then run the generation chain. The first three outputs are **build-time intermediates** -
+byte-identical on every rebuild (fixed seeds), so they are not kept in the repo. Only
+`data/v3_dataset.csv` at the end is tracked, and that is the file Model 1 trains from:
 
 ```bash
-python src/build_dataset.py --split train   # data/processed/nlu_dataset.csv  6300 rows, fitting
-python src/build_dataset.py --split test    # data/processed/nlu_test.csv     1512 rows, iterate on failures
-python test_dataset.py                      # validates all three sets against MODEL_RULES.md
+python src/build_dataset.py --split train   # data/processed/nlu_dataset.csv  6300 rows   (intermediate)
+python src/build_dataset.py --split test    # data/processed/nlu_test.csv     1512 rows   (intermediate)
+python -m src.v2.dataset --build            # data/v2_dataset.csv             turns in chats (intermediate)
+python -m src.v3.dataset --build            # data/v3_dataset.csv             + presentation labels
+python test_dataset.py                      # validates the sets against MODEL_RULES.md
 ```
+
+The splits share no prompt with each other or with the evaluation set. `test_dataset.py`
+checks the intermediates' balance and noise when they are on disk, and skips those checks
+when they are not - so a clean checkout that only retrains from `v3_dataset.csv` still passes.
 
 The evaluation set, `data/eval_manual.csv`, is **hand-written and must stay that way** -
 209 rows of typos ("temprature", "tomorow"), Hindi/Telugu code-mixing ("kal barish hogi
@@ -123,40 +151,43 @@ python src/tagger.py                        # self-check: tags a village it neve
 
 ### 6. Train, Export and Serve
 
-`src/nlu.py` owns the model, so the notebook and the exported bundle cannot drift apart:
+`src/v3/model.py` owns Model 1, so the notebook and the exported bundle cannot drift apart:
 
 ```bash
-python src/nlu.py --export                      # -> models/nlu_pipeline.joblib + models/metrics.json
-python src/nlu.py                               # interactive: type a query, ~5 ms per answer
-python src/nlu.py "will it rain in Guntur at 6:45 pm tomorrow?"   # one shot, prints JSON
-python src/nlu.py --info                        # bundle size, components, latency
+python -m src.v3.model --export                 # -> models/nlu_v3.joblib + models/metrics_v3.json  (~18 s)
+python -m src.v3.model "will it rain in Guntur at 6:45 pm tomorrow?"   # one shot, prints JSON
+python backend/registry.py                      # 5-second smoke test through the serving adapter
 ```
 
 Serving, from any process with `src/` importable (the tagger's feature builder lives in
 `src/tagger.py`, which keeps inference on byte-identical features):
 
 ```python
-from src.nlu import NLUModel
+from src.v3.model import V3Model
 
-model = NLUModel.load()
-model.predict("compare max temp between Nokha and Buxar this weekend")  # -> NLUOutput
-model.confidence("...")            # max intent probability, for an "ask the user" fallback
+model = V3Model.load()
+result = model.predict("compare max temp between Nokha and Buxar this weekend")
+result.slots.variables           # [Variable.TEMPERATURE_MAX]
+result.presentation.chart        # ChartKind.GROUPED_BAR
+result.confidence["intent"]      # calibrated intent probability
 ```
 
 Check a build before shipping it:
 
 ```bash
-python test_model.py                            # smoke queries, verbatim spans, accuracy floors
+python test_model.py                            # smoke, presentation, verbatim spans, accuracy floors
+python test_conversations.py                    # multi-turn context through the real pipeline
 ```
 
-It fails if the bundle is missing, a smoke query breaks, a predicted span is not verbatim in
-its prompt, or English eval accuracy drops below the floors in `FLOORS` - and warns when the
-bundle is older than the training CSV. Code-mixed rows are printed, never asserted.
+`test_model.py` fails if the bundle is missing, a smoke query breaks, a predicted span is not
+verbatim in its prompt, any turn comes back undecided, or English eval accuracy drops below
+the floors in `FLOORS` - and warns when the bundle is older than `data/v3_dataset.csv`.
+Code-mixed rows are printed, never asserted.
 
-**Time comes back in one shape.** Every raw `time` span gets a positionally aligned
-`time_normalized` twin, so downstream queries never see the user's spelling (Rule 4.3):
+**Time comes back in one shape.** Every raw `times` span gets a positionally aligned
+`times_normalized` twin, so downstream queries never see the user's spelling (Rule 5.4):
 
-| user typed | `time` (raw, Rule 4.2) | `time_normalized` (query on this) |
+| user typed | `times` (raw, Rule 5.2) | `times_normalized` (query on this) |
 | :-- | :-- | :-- |
 | will it rain tommorrow | `["tommorrow"]` | `["tomorrow"]` |
 | rain in Nokha from 7 AM to 11 AM | `["7 AM to 11 AM"]` | `["07:00-11:00"]` |
@@ -171,24 +202,25 @@ surface form only - resolving to an actual datetime stays with the deterministic
 code-mixed rows tagged `lang == "mixed"`; they are scored separately as a diagnostic and
 never folded into the headline number.
 
-Accuracy as exported (`models/metrics.json`), where *all 4* means every target correct on
-one prompt - what the deterministic layer downstream actually consumes:
+Accuracy as exported (`models/metrics_v3.json`), where *everything* means all eight targets
+correct on one prompt - what the deterministic layer downstream actually consumes:
 
-| set | intent | action | location F1 | time F1 | all 4 |
-| :-- | --: | --: | --: | --: | --: |
-| set | intent | action | aggregation | location F1 | time F1 | all 5 |
-| :-- | --: | --: | --: | --: | --: | --: |
-| test (generated, 1512) | 96.6% | 99.4% | 98.3% | 0.954 | 0.988 | 89.3% |
-| **eval (English, 219)** | **94.1%** | **97.7%** | **95.0%** | **0.963** | **0.964** | **80.4%** |
-| eval (code-mixed, 16) | 75.0% | 18.8% | 100% | 0.732 | 0.000 | 0.0% |
+| set | intent | variables | detail | chart | location | time | insights F1 | everything |
+| :-- | --: | --: | --: | --: | --: | --: | --: | --: |
+| test (generated, 2157) | 96.4% | 96.1% | 99.9% | 98.1% | 95.7% | 95.6% | 0.935 | 89.3%* |
+| detail phrasings (270) | 100% | 100% | 100% | 100% | 100% | 90.0% | 0.976 | 90.0% |
+| **eval (English, 219)** | **95.9%** | **92.2%** | **100%** | **84.0%** | **94.5%** | **95.9%** | **0.907** | **68.0%** |
 
-"all 5" means every target correct on one prompt - the number the deterministic layer
-actually depends on. It fell from the earlier 4-target 88.1% because the eval set gained
-26 harder hand-written rows (conversational padding, aggregations, 3-way comparisons) and
-a fifth target to get right.
+<sub>* generated test `everything` is 83.9%; 89.3% is the four-target number the earlier model
+reported, kept here only for comparison.</sub>
+
+`everything` is the honest number, and it is lower than any single head because it demands
+all eight at once. The gap between generated test and hand-written eval is the cost of typos,
+code-mixing and phrasings no template produced. `chart` at 84.0% is the weakest head on real
+wording - that is where the next round of training data should go.
 
 **Location resolution is a separate layer** (`backend/locations.py`), never the model's job:
-the model reports `"KKD"` verbatim (Rule 4.1) and the resolver turns it into
+the model reports `"KKD"` verbatim (Rule 5.1) and the resolver turns it into
 Kakinada, Andhra Pradesh via `data/location_aliases.json` -> Solr -> ranked candidates.
 Teaching the system a new abbreviation is a one-line edit to that JSON, not a retraining run.
 When two real places match equally well ("Angara" in Jharkhand and in Andhra Pradesh) the
@@ -338,8 +370,8 @@ intents competed. `--competing` ranks the closest calls: those are the examples 
 labelling first, and `--confusion` says which pair keeps colliding.
 
 The export writes the exact schema of `data/intents.csv`, so real usage folds straight into
-the next build: append it to the seed, `python src/build_dataset.py --split train`,
-`python src/nlu.py --export`, then confirm the frozen hand-written eval set improved.
+the next build: append it to the seed, rerun the generation chain (Section 4), retrain with
+`python -m src.v3.model --export`, then confirm the frozen hand-written eval set improved.
 
 Not all feedback is equal, and the store treats it that way:
 
@@ -373,51 +405,69 @@ stored:     kind=correction, intent=DEW_POINT, location=["Kakinada"],
 exported:   humidity in Kakinada tomorrow,DEW_POINT,GET,...,correction,v1,intent_confusion
 ```
 
-The label offered is whatever the answering model uses - v1's 14 intents or v2's 13
-variables, multi-select - fetched from `GET /api/labels` so the enums stay the single source
-of truth. `python -m backend.store --review` lists what still needs a label: everything
+The correction form offers Model 1's 13 variables, multi-select, fetched from
+`GET /api/labels` so the enums stay the single source of truth. `python -m backend.store --review` lists what still needs a label: everything
 flagged wrong, plus uncertain turns nobody judged.
 
-Full loop, v1 and v2:
+Full loop:
 
 ```bash
 python -m backend.store --review                  # what needs labelling
 python -m backend.store --export data/from_users.csv
-cat data/from_users.csv >> data/intents.csv       # v1: fold into the seed
-python src/build_dataset.py --split train && python src/nlu.py --export
 
-python -m src.v2.dataset --build                  # v2: reads the store directly
-python -m src.v2.model --export
+python -m src.v2.dataset --build                  # reads the store directly (source=users)
+python -m src.v3.dataset --build                  # relabel with presentation
+python -m src.v3.model --export
 python test_model.py && python test_conversations.py
 ```
+
+`src/v2/dataset.py::from_users()` picks up the exported rows, so a correction reaches Model 1
+without touching `data/intents.csv`. Human labels outrank the model's (MODEL_RULES Rule 8.5).
 
 Honest naming: **this is not reinforcement learning.** There is no reward signal and no
 policy - it is supervised retraining fed by real users instead of templates. The clarify
 prompts are what make it work: a question the model asks turns into a free gold label.
 
-### 10. Model v2 (selectable, alongside v1)
+### 10. Model 1 - one model, eight decisions
 
-v1 is untouched and still the default. v2 restructures the targets as you would for an AI
-context builder - **one coarse intent, everything else a multi-value slot**:
+Model 1 is the only model served. Two earlier ones were built and deleted: a 14-class
+single-variable classifier, and a coarse-intent slot filler that still left presentation to
+Python. The full comparison is in [ARCHITECTURE.md §1](ARCHITECTURE.md#1-why-model-1-is-complete);
+the short version is that Model 1 predicts everything needed to *answer*, not just everything
+needed to look the answer up.
 
-| | v1 | v2 |
+| head | labels | replaces |
 | :-- | :-- | :-- |
-| intent | 14 classes (variable folded in) | 6 coarse: CURRENT / FORECAST / HISTORICAL / COMPARE / ALERT / UNKNOWN |
-| weather variable | *is* the intent, one per query | multi-label slot, 13 labels, several per query |
-| locations / times | multi-span | multi-span (unchanged tagger) |
-| training data | 3 CSV files | one SQLite table, `split` and `source` columns |
-| training time | ~3 min (SVC + probability) | ~20 s (LinearSVC + calibration) |
+| `intent` | CURRENT / FORECAST / HISTORICAL / COMPARE / ALERT / UNKNOWN | 14 classes with the variable folded in |
+| `variables` | 13 labels, **multi-label** | one variable per query |
+| `aggregation` | RAW / SUM / AVG / MAX / MIN / TREND | a keyword rule |
+| `detail` | MINIMAL / NORMAL / FULL | `INTENT_FIELDS[intent]`, a fixed column list |
+| `chart` | NONE / STAT / LINE / MULTI_LINE / GROUPED_BAR | a branch on how many series came back |
+| `insights` | 9 labels, **multi-label** | computing every observation, every time |
 
 ```bash
-python -m src.v2.dataset --build     # -> data/v2_dataset.csv
-python -m src.v2.dataset --stats
-python -m src.v2.dataset --chats 3   # print conversations end to end
-python -m src.v2.model --export      # -> models/nlu_v2.joblib
+python -m src.v3.model --export      # -> models/nlu_v3.joblib   (~18 s)
+python -m src.v3.model "temperature in Guntur tomorrow in detail"
+python -m src.v3.dataset --stats
 python test_conversations.py         # replay held-out chats through the pipeline
 ```
 
-**The dataset is a CSV of turns grouped into chats**, not a pile of isolated sentences -
-14562 turns across 11898 chats, 1350 of them multi-turn:
+What the presentation heads buy, on the same query:
+
+```text
+"temperature in Guntur tomorrow"            before  Avg temp             now  Avg temp
+"temperature in Guntur tomorrow in detail"  before  Avg temp             now  Min, Max, Avg
+"full temperature breakdown this week"      before  Avg temp, line       now  Min, Max, Avg, line,
+                                                                              peak + low + threshold
+"rain, temperature and humidity next week"  before  5 columns, 1 line    now  3 columns, 3-series
+                                                    (incl. humidity max/min)  multi-line
+"just the rainfall in Nokha this week"      before  asks which Nokha     now  answers, one column,
+                                                                              no chart
+"rain and temperature in Guntur tomorrow"   before  one variable, 28%    now  both, 83%, one table
+```
+
+**The training data is turns grouped into chats**, not a pile of isolated sentences -
+13,533 training rows carrying `chat_id`, `turn` and the context slots:
 
 | chat_id | turn | text | operation | variables |
 | :-- | --: | :-- | :-- | :-- |
@@ -427,29 +477,18 @@ python test_conversations.py         # replay held-out chats through the pipelin
 
 A follow-up row carries the slots the user *means*, which is not what their words say -
 "what about Chikmagalur then?" names no measurement. So the file is two things: per-turn
-training data for the heads, and a replay script for the context engine. `data/conversations.db`
-stays the runtime store and feeds labelled real turns in as `source=users`.
+training data for the heads, and a replay script for the context engine. Per-utterance
+metrics cannot judge a follow-up, so `test_conversations.py` replays every held-out chat
+through model + normalizer + context engine and scores the **state** after each turn:
+operation 100%, locations 100%, times 100%, variables 99.8% over 437 turns.
 
-Per-utterance metrics cannot judge a follow-up, so `test_conversations.py` replays every
-held-out chat through model + normalizer + context engine and scores the **state** after
-each turn: operation 100%, locations 100%, times 100%, variables 99.8% over 437 turns.
+The multi-label thresholds are calibrated on a held-out slice at training time, not
+hand-picked: 0.35 was silently dropping TEMPERATURE at 0.205 from "temperature, humidity and
+rainfall".
 
-The multi-label threshold is calibrated on a held-out slice at training time (0.25 this run),
-not hand-picked: 0.35 was silently dropping TEMPERATURE at 0.205 from "temperature, humidity
-and rainfall".
-
-| test split | intent | variables F1 | exact set | locations | all slots |
-| :-- | --: | --: | --: | --: | --: |
-| all rows (1887) | 97.5% | 0.971 | 95.0% | 96.1% | 85.4% |
-| **multi-variable only** | **100%** | **0.996** | **98.3%** | **100%** | **89.2%** |
-
-The difference on the query v1 cannot express:
-
-```text
-"rain and temperature in Guntur tomorrow"
-  v1  TEMPERATURE / COMPARE, 28%   -> asks which reading you meant
-  v2  FORECAST, [RAIN, TEMPERATURE], 83%   -> one table, both columns
-```
+**Model 1 never asks.** Below the confidence floor, on a one-sided comparison, or on an
+ambiguous place name it commits and reports the assumption - `Assumed: angara = Angara,
+Jharkhand` - rather than interrupting (`registry.NEVER_ASKS`).
 
 **Chats and history.** Every turn belongs to a `chat_id` the browser owns (localStorage), so
 a reload resumes the same conversation with its slots intact; **New** starts a fresh one.
@@ -457,64 +496,23 @@ a reload resumes the same conversation with its slots intact; **New** starts a f
 
 - `GET /api/chats` - recent conversations, titled by their opening question
 - `GET /api/chats/{chat_id}` - one conversation, with each answer as it was rendered
+- `GET /api/models` - the served model, its size and its exported metrics
+- `GET /api/labels` - Model 1's five enum sets, for the correction form
 
 Each answered turn stores its **rendered payload** (summary, table, chart, insights) and the
 slot state that produced it. Reopening a chat replays what was actually shown rather than
 re-querying a forecast that has since moved on, and the restored chat keeps its context, so
 "what about tomorrow?" still works after the reload - even across a backend restart, because
-the state is rebuilt from the stored turns.
+the state is rebuilt from the stored turns. Turns are tagged with the architecture id that
+answered them (`[v3]`); older turns from the deleted models still display as they were.
 
-**Choosing a model.** `GET /api/models` lists what is deployed with each version's metrics;
-every WebSocket query takes an optional `"model": "v1" | "v2"`; the UI has a v1/v2 switch in
-the header and tags each answer with the version that produced it. `backend/registry.py`
-adapts both into one `Understanding`, so the context engine, resolvers and response builder
-never learn which model answered.
-
-### 11. Model v3 - the model decides how to answer
-
-v1 and v2 extract; Python then decided the presentation from lookup tables. v3 predicts
-those decisions too, because they live in the wording:
-
-| head | labels | replaces |
-| :-- | :-- | :-- |
-| `detail` | MINIMAL / NORMAL / FULL | `INTENT_FIELDS[intent]`, a fixed column list |
-| `chart` | NONE / STAT / LINE / MULTI_LINE / GROUPED_BAR | a branch on how many series came back |
-| `insights` | 9 labels, multi-label | computing every observation, every time |
-
-```bash
-python -m src.v3.dataset --build     # relabels the v2 turns + detail-bearing phrasings
-python -m src.v3.model --export      # -> models/nlu_v3.joblib   (~18 s)
-python -m src.v3.model "temperature in Guntur tomorrow in detail"
-```
-
-What that buys, on the same query:
-
-```text
-"temperature in Guntur tomorrow"            v2  Avg temp                    v3  Avg temp
-"temperature in Guntur tomorrow in detail"  v2  Avg temp                    v3  Min, Max, Avg
-"full temperature breakdown this week"      v2  Avg temp, line              v3  Min, Max, Avg, line,
-                                                                                peak + low + threshold
-"rain, temperature and humidity next week"  v2  5 columns, 1 line           v3  3 columns, 3-series
-                                                (incl. humidity max/min)        multi-line
-"just the rainfall in Nokha this week"      v2  asks which Nokha            v3  answers, one column,
-                                                                                no chart
-```
-
-Test split: detail 100%, chart 98.0%, insights F1 0.935, every target at once 83.9%. On the
-detail-bearing phrasings specifically: 100% / 100% / 0.976.
-
-**v3 never asks.** Below the confidence floor, on a one-sided comparison, or on an ambiguous
-place name it commits and reports the assumption - `Assumed: angara = Angara, Jharkhand` -
-rather than interrupting. v1 and v2 keep asking; the behaviour is per-model
-(`registry.NEVER_ASKS`).
-
-Stated plainly: the chart and insight labels start as rules distilled into the model, so v3
-begins no smarter than the teacher. What it gains immediately is generalisation over
+Stated plainly: the chart and insight labels start as rules distilled into the model, so
+Model 1 began no smarter than the teacher. What it gained immediately is generalisation over
 phrasing - "in detail", "full breakdown" and "all the numbers" all widen the table without
 any of them being enumerated - and a wrong chart becomes a labelled example instead of an
 argument about an if-statement. Beating the teacher needs the correction loop in Section 9.
 
-### 12. Using Jupyter Notebooks
+### 11. Using Jupyter Notebooks
 
 1. Open `notebooks/exploration.ipynb` in your IDE.
 2. In the top right corner, select the kernel **`Python (WeatherBot)`**.

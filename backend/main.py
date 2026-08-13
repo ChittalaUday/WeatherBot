@@ -40,7 +40,7 @@ app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"],
 )
 
-registry = models.Registry()         # v1 and v2, chosen per request
+registry = models.Registry()         # Model 1, the only model
 db = store.connect()                 # every turn is logged for the retraining loop
 # Slot state is keyed by chat, not by socket: a reload reconnects with the same chat_id and
 # the conversation continues where it left off.
@@ -49,7 +49,7 @@ CHATS: dict[str, ConversationState] = {}
 
 @app.on_event("startup")
 def load_model():
-    registry.get(models.DEFAULT_VERSION)      # warm the default; v2 loads on first use
+    registry.get()                            # warm Model 1 so the first turn is not slow
 
 
 @app.get("/api/health")
@@ -71,13 +71,13 @@ def chat_history(chat_id: str):
 
 @app.get("/api/models")
 def list_models():
-    """Which NLU versions this deployment can answer with, and how they differ."""
+    """The model this deployment answers with, and how it scored at export time."""
     import json as _json
 
     report = {}
-    for name, path in (("v1", ROOT / "models/metrics.json"), ("v2", ROOT / "models/metrics_v2.json")):
-        if path.exists():
-            report[name] = _json.loads(path.read_text())
+    metrics_path = ROOT / "models/metrics_v3.json"
+    if metrics_path.exists():
+        report[models.NAME] = _json.loads(metrics_path.read_text())
     return {"available": registry.available(), "default": models.DEFAULT_VERSION,
             "metrics": report}
 
@@ -120,7 +120,7 @@ async def handle_query(socket: WebSocket, text: str, coords: dict | None, sessio
     # cheap rules before anything else: a follow-up fragment leans on the previous turn
     reference = context.detect_reference(cleaned.normalized)
     follow_up = context.is_follow_up(cleaned.normalized)
-    # v3 commits to a reading rather than stopping to ask (registry.NEVER_ASKS)
+    # Model 1 commits to a reading rather than stopping to ask (registry.NEVER_ASKS)
     asks = understanding.version not in models.NEVER_ASKS
     chat_id = chat_id or session
     state = CHATS.get(chat_id)
@@ -312,8 +312,8 @@ async def handle_query(socket: WebSocket, text: str, coords: dict | None, sessio
             await socket.send_json({"type": "error", "message": f"WeatherSnap API failed: {exc}"})
             return
 
-    # v3 decides how wide the table is (its detail head); v1/v2 use the fixed field map.
-    # Either way the variables come from the state, so a follow-up keeps them.
+    # Model 1's detail head decides how wide the table is. The variables come from the
+    # state, so a follow-up keeps them.
     understanding.variables = state.variables or understanding.variables
     fields = understanding.fields()
     selected = [respond.select_rows(feed, normalized)[0] for feed in feeds]
@@ -423,13 +423,16 @@ def feedback_for_turn(turn_id: int):
 
 @app.get("/api/labels")
 def labels():
-    """The label sets a correction form has to offer, straight from the enums."""
-    from src.schema import Action as V1Action, WeatherIntent
-    from src.v2.schema import Intent as V2Intent, Variable
+    """The label sets a correction form has to offer, straight from Model 1's enums."""
+    from src.v2.schema import Intent, Variable
+    from src.v3.schema import ChartKind, Detail, Insight
 
     return {
-        "v1": {"intents": [i.value for i in WeatherIntent], "actions": [a.value for a in V1Action]},
-        "v2": {"intents": [i.value for i in V2Intent], "variables": [v.value for v in Variable]},
+        "intents": [i.value for i in Intent],
+        "variables": [v.value for v in Variable],
+        "detail": [d.value for d in Detail],
+        "chart": [c.value for c in ChartKind],
+        "insights": [i.value for i in Insight],
     }
 
 

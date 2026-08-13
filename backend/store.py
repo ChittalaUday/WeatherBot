@@ -23,6 +23,7 @@ import argparse
 import csv
 import json
 import sqlite3
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -213,8 +214,8 @@ def list_chats(connection, limit: int = 40) -> list[dict]:
             "SELECT text FROM turns WHERE chat_id = ? ORDER BY id LIMIT 1",
             (row["chat_id"],)).fetchone()
         title = (opener["text"] if opener else "").strip()
-        model = "v1"
-        if title.startswith("[") and "]" in title:            # logged as "[v2] question"
+        model = "legacy"          # pre-dates the version tag; every new turn carries one
+        if title.startswith("[") and "]" in title:            # logged as "[v3] question"
             model, title = title[1:title.index("]")], title[title.index("]") + 1:].strip()
         chats.append({
             "chat_id": row["chat_id"], "title": title[:80] or "(empty)",

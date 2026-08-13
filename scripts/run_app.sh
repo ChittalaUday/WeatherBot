@@ -4,7 +4,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-[ -f models/nlu_pipeline.joblib ] || { echo "no model bundle - run: python src/nlu.py --export"; exit 1; }
+[ -f models/nlu_v3.joblib ] || { echo "no Model 1 bundle - run: python -m src.v3.model --export"; exit 1; }
 
 .venv/bin/uvicorn backend.main:app --host 0.0.0.0 --port 8787 &
 BACKEND=$!

@@ -17,8 +17,8 @@ type ModelItem = { id: string; label: string; description: string; icon: typeof 
  *
  * Its own AIInput manages an internal message list and fakes a reply, which would fight the
  * real transcript above; the dropdown and pill primitives are reused instead so the look is
- * the component's and the state stays ours. The model dropdown offers our two NLU bundles -
- * there is no third-party LLM anywhere in this app.
+ * the component's and the state stays ours. The dropdown lists whatever /api/models serves -
+ * today that is Model 1 alone. There is no third-party LLM anywhere in this app.
  */
 export function Composer({
   model,
@@ -47,10 +47,10 @@ export function Composer({
 
   const models: ModelItem[] = (data?.available ?? [])
     .filter((entry: { present: boolean }) => entry.present)
-    .map((entry: { version: string; description: string }) => ({
+    .map((entry: { version: string; name?: string; description: string }) => ({
       id: entry.version,
-      // label from the version itself: hardcoding v1/v2 made v3 show up as "NLU v2"
-      label: `NLU ${entry.version}`,
+      // name comes from the backend, so the pill never drifts from what is actually served
+      label: entry.name ?? entry.version,
       description: entry.description,
       icon: Layers,
     }));

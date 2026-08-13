@@ -1,6 +1,6 @@
 """Replays generated conversations through the real pipeline. Run: python test_conversations.py
 
-The per-turn model scores in models/metrics_v2.json cannot judge a follow-up: "and there?"
+The per-turn model scores in models/metrics_v3.json cannot judge a follow-up: "and there?"
 contains no place, no time and no measurement, so any per-utterance metric over it is noise.
 What matters is the state the pipeline holds *after* the turn, which is what this replays -
 model, then normalizer, then the context engine, exactly as the socket does it.
@@ -12,18 +12,19 @@ from backend import registry as models
 from backend import state as context
 from src.normalize import normalize
 from src.schema import ConversationState
-from src.v2 import dataset as v2_dataset
+from src.v2 import dataset as v2_dataset      # chats() - grouping helper, version-neutral
+from src.v3 import dataset as v3_dataset
 
 FLOORS = {"operation": 0.85, "locations": 0.90, "times": 0.85, "variables": 0.80}
 MIN_CONFIDENCE = 0.45          # same gate the socket uses
 
 
-def replay(registry, chat_turns, version="v2"):
+def replay(registry, chat_turns):
     """Run one conversation and report what the pipeline believed after each turn."""
     state, results = ConversationState(), []
     for turn in chat_turns:
         cleaned = normalize(turn["text"])
-        understanding = registry.understand(cleaned.normalized, version)
+        understanding = registry.understand(cleaned.normalized)
         reference = context.detect_reference(cleaned.normalized)
         follow_up = context.is_follow_up(cleaned.normalized)
 
@@ -52,7 +53,7 @@ def replay(registry, chat_turns, version="v2"):
 
 def main():
     registry = models.Registry()
-    rows = [r for r in v2_dataset.load(split="eval") if r["source"] == "chats"]
+    rows = [r for r in v3_dataset.load(split="eval") if r["source"] == "chats"]
     conversations = [turns for turns in v2_dataset.chats(rows).values() if len(turns) > 1]
     assert conversations, "no multi-turn conversations in the eval split"
 

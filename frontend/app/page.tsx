@@ -25,7 +25,7 @@ const EXAMPLES = [
 export default function Page() {
   const { connected, busy, messages, chatId, ask, sendLocation, newChat, openChat } =
     useWeatherSocket();
-  const [model, setModel] = useState("v1");
+  const [model, setModel] = useState("v3");   // Model 1 - the only one served
   const bottom = useRef<HTMLDivElement>(null);
   const started = messages.length > 0;
 

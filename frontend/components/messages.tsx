@@ -185,7 +185,6 @@ function Rate({
       <Correction
         turnId={turnId}
         model={model}
-        intent={intent}
         variables={variables}
         locations={locations}
         times={times}

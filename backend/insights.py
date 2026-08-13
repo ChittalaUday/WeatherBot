@@ -153,7 +153,7 @@ def build_insights(selected: list[list[dict]], places: list[dict], fields: list[
     """Two to four things worth saying that the table does not say by itself.
 
     `wanted` is v3's selection. Without it every applicable observation is emitted, which is
-    what v1 and v2 do.
+    the old behaviour before the model chose for itself.
     """
     allow = set(wanted) if wanted else None
     keep = lambda kind: allow is None or kind in allow

@@ -1,42 +1,49 @@
-"""Self-check for the exported model. Run: python test_model.py
+"""Self-check for Model 1. Run: python test_model.py
 
 Fails if the bundle is missing, if a smoke query breaks, if a predicted span is not verbatim
 in its prompt (Rules 4.1 / 4.2), or if accuracy on the hand-written English evaluation set
-drops below the floors below. Retrain with `python src/nlu.py --export` first.
+drops below the floors below. Retrain with `python -m src.v3.model --export` first.
+
+Model 1 predicts eight things per turn: intent, aggregation, a set of variables, location and
+time spans, and the three presentation decisions (detail, chart, insights). This checks all
+of them - a model that reads the question right but picks the wrong chart is still wrong.
 """
 
 from pathlib import Path
 
-from src.build_dataset import EVAL_MANUAL, SPLITS
-from src.data_loader import load_intents_csv
-from src.nlu import BUNDLE_PATH, NLUModel, evaluate
+from src.v3.dataset import CSV_PATH
+from src.v3.model import BUNDLE_PATH, V3Model, evaluate
+from src.v3.schema import Detail
 
 ROOT = Path(__file__).parent
 
 # Floors, not targets: set below the measured numbers so this catches regressions without
 # going red on run-to-run noise. Raise them when the model genuinely improves.
+# Measured on the English eval utterances at export time (models/metrics_v3.json).
 FLOORS = {
-    "weather_intent_accuracy": 0.92,   # measured 0.953
-    "action_accuracy": 0.95,           # measured 0.979
-    "aggregation_accuracy": 0.90,      # measured 0.950
-    "location_f1": 0.90,               # measured 0.949
-    "time_f1": 0.94,                   # measured 0.976
-    "all_targets": 0.70,               # measured 0.753 - now 5 targets, harder eval rows
+    "intent": 0.92,          # measured 0.959
+    "aggregation": 0.92,     # measured 0.954
+    "detail": 0.97,          # measured 1.000
+    "chart": 0.80,           # measured 0.840
+    "variables": 0.88,       # measured 0.922
+    "locations": 0.90,       # measured 0.945
+    "times": 0.92,           # measured 0.959
+    "everything": 0.62,      # measured 0.680 - all eight targets right on the same turn
+    "insights_f1": 0.86,     # measured 0.907
 }
 
-# (query, intent, action, locations, times) - unambiguous English, the V1 target language.
+# (query, intent, variables, locations, times) - unambiguous English.
 SMOKE = [
     ("Will it rain in Rajahmundry tomorrow morning?",
-     "RAIN", "GET", ["Rajahmundry"], ["tomorrow morning"]),
+     "FORECAST", ["RAIN"], ["Rajahmundry"], ["tomorrow morning"]),
     ("Compare the maximum temperature in Hyderabad and Vizag next week",
-     "TEMPERATURE_MAX", "COMPARE", ["Hyderabad", "Vizag"], ["next week"]),
+     "COMPARE", ["TEMPERATURE_MAX"], ["Hyderabad", "Vizag"], ["next week"]),
     ("Alert me if the wind speed crosses 40 kmph in Kakinada tonight",
-     "WIND_SPEED", "ALERT", ["Kakinada"], ["tonight"]),
+     "ALERT", ["WIND_SPEED"], ["Kakinada"], ["tonight"]),
     ("What is the soil moisture in my field right now?",
-     "SOIL_MOISTURE", "GET", ["my field"], ["right now"]),
-    ("whats the temprature in Peddapuram, East Godavari at 6:45 pm",
-     "TEMPERATURE", "GET", ["Peddapuram, East Godavari"], ["6:45 pm"]),
-    ("humidity", "HUMIDITY", "GET", [], []),
+     "CURRENT", ["SOIL_MOISTURE"], ["my field"], ["right now"]),
+    ("rain and temperature in Guntur tomorrow",
+     "FORECAST", ["RAIN", "TEMPERATURE"], ["Guntur"], ["tomorrow"]),
 ]
 
 # (query, aggregation) - the model, not a keyword rule, decides the reduction (Rule 2.3)
@@ -49,32 +56,67 @@ AGGREGATION_SMOKE = [
     ("will it rain in Guntur tomorrow?", "RAW"),
 ]
 
+# (query, detail, chart) - the presentation decisions Python used to make (Rules 7.1 / 7.2).
+# "just tell me" asks for one number, so it gets no chart; a range gets a line; two places
+# side by side get grouped bars.
+PRESENTATION_SMOKE = [
+    ("just tell me the temperature in Guntur tomorrow", "MINIMAL", "NONE"),
+    ("full details of the weather in Guntur next 5 days", "FULL", "LINE"),
+    ("compare rainfall in Guntur and Vizag next 3 days", "NORMAL", "GROUPED_BAR"),
+    ("rainfall in Guntur next 7 days", "NORMAL", "LINE"),
+]
+
 
 def check_freshness():
     """A bundle older than the training data is a stale export - warn, do not fail."""
-    train_csv = ROOT / SPLITS["train"][2]
-    if train_csv.exists() and train_csv.stat().st_mtime > BUNDLE_PATH.stat().st_mtime:
-        print("WARNING: data/processed/nlu_dataset.csv is newer than the bundle - "
-              "rerun python src/nlu.py --export")
+    if CSV_PATH.exists() and CSV_PATH.stat().st_mtime > BUNDLE_PATH.stat().st_mtime:
+        print(f"WARNING: {CSV_PATH.name} is newer than the bundle - "
+              "rerun python -m src.v3.model --export")
 
 
 def check_smoke(model):
-    for text, intent, action, locations, times in SMOKE:
+    for text, intent, variables, locations, times in SMOKE:
         out = model.predict(text)
-        assert out.weather_intent.value == intent, f"{text!r} -> {out.weather_intent.value}, want {intent}"
-        assert out.action.value == action, f"{text!r} -> {out.action.value}, want {action}"
-        assert out.entities.location == locations, f"{text!r} -> location {out.entities.location}, want {locations}"
-        assert sorted(out.entities.time) == sorted(times), f"{text!r} -> time {out.entities.time}, want {times}"
+        got_variables = sorted(v.value for v in out.slots.variables)
+        assert out.intent.value == intent, f"{text!r} -> {out.intent.value}, want {intent}"
+        assert got_variables == sorted(variables), \
+            f"{text!r} -> variables {got_variables}, want {sorted(variables)}"
+        assert out.slots.locations == locations, \
+            f"{text!r} -> location {out.slots.locations}, want {locations}"
+        assert sorted(out.slots.times) == sorted(times), \
+            f"{text!r} -> time {out.slots.times}, want {times}"
     print(f"OK smoke   : {len(SMOKE)} queries predicted exactly")
 
 
-def check_time_normalized(model, df):
-    """Every raw time span gets exactly one canonical twin, in the same order (Rule 6.1)."""
-    for text in df["text"]:
-        entities = model.predict(text).entities
-        assert len(entities.time_normalized) == len(entities.time), \
-            f"{text!r} -> {len(entities.time)} spans but {len(entities.time_normalized)} normalized"
-        for value in entities.time_normalized:
+def check_presentation(model):
+    """Model 1's job is to decide, not to ask: every turn gets a detail level and a chart."""
+    for text, detail, chart in PRESENTATION_SMOKE:
+        presentation = model.predict(text).presentation
+        if detail:
+            assert presentation.detail.value == detail, \
+                f"{text!r} -> detail {presentation.detail.value}, want {detail}"
+        if chart:
+            assert presentation.chart.value == chart, \
+                f"{text!r} -> chart {presentation.chart.value}, want {chart}"
+    print(f"OK present : {len(PRESENTATION_SMOKE)} detail/chart decisions correct")
+
+
+def check_always_decides(model, rows):
+    """No turn may come back undecided - that is the whole point of Model 1."""
+    for row in rows:
+        presentation = model.predict(row["text"]).presentation
+        assert isinstance(presentation.detail, Detail), row["text"]
+        assert presentation.chart is not None, row["text"]
+    print(f"OK decides : a detail level and a chart on all {len(rows)} prompts, none deferred")
+
+
+def check_time_normalized(model, rows):
+    """Every raw time span gets exactly one canonical twin, in the same order (Rule 4.3)."""
+    for row in rows:
+        slots = model.predict(row["text"]).slots
+        assert len(slots.times_normalized) == len(slots.times), \
+            f"{row['text']!r} -> {len(slots.times)} spans but {len(slots.times_normalized)} normalized"
+        for value in slots.times_normalized:
             assert value == value.strip().lower(), f"{value!r} is not canonical-cased"
 
     canonical = {
@@ -86,61 +128,63 @@ def check_time_normalized(model, df):
         "forecast for the next 3 days": ["next 3 days"],
     }
     for query, expected in canonical.items():
-        actual = model.predict(query).entities.time_normalized
+        actual = model.predict(query).slots.times_normalized
         assert actual == expected, f"{query!r} -> {actual}, want {expected}"
     print(f"OK time    : {len(canonical)} spellings folded to canonical form, "
-          f"aligned 1:1 across {len(df)} prompts")
+          f"aligned 1:1 across {len(rows)} prompts")
 
 
-def check_spans_verbatim(model, df):
+def check_spans_verbatim(model, rows):
     """Rules 4.1 / 4.2: every returned span must be raw text lifted from the prompt."""
-    for text in df["text"]:
-        out = model.predict(text)
-        for span in out.entities.location + out.entities.time:
-            assert span in text, f"span {span!r} is not verbatim in {text!r}"
-    print(f"OK spans   : every predicted span verbatim across {len(df)} prompts")
+    for row in rows:
+        slots = model.predict(row["text"]).slots
+        for span in list(slots.locations) + list(slots.times):
+            assert span in row["text"], f"span {span!r} is not verbatim in {row['text']!r}"
+    print(f"OK spans   : every predicted span verbatim across {len(rows)} prompts")
 
 
-def check_accuracy(model, df, label):
-    scores = evaluate(model, df)
-    actual = {
-        "weather_intent_accuracy": scores["weather_intent_accuracy"],
-        "action_accuracy": scores["action_accuracy"],
-        "aggregation_accuracy": scores["aggregation_accuracy"],
-        "location_f1": scores["location_span"]["f1"],
-        "time_f1": scores["time_span"]["f1"],
-        "all_targets": scores["all_targets"],
-    }
+def check_accuracy(model, rows, label):
+    scores = evaluate(model, rows)
     for metric, floor in FLOORS.items():
-        assert actual[metric] >= floor, f"[{label}] {metric} {actual[metric]:.3f} below floor {floor}"
-    print(f"OK accuracy: {label} ({len(df)} rows) " +
-          "  ".join(f"{k.replace('_accuracy', '').replace('_', ' ')} {v:.3f}" for k, v in actual.items()))
+        assert scores[metric] >= floor, \
+            f"[{label}] {metric} {scores[metric]:.3f} below floor {floor}"
+    print(f"OK accuracy: {label} ({scores['rows']} rows) " +
+          "  ".join(f"{k} {scores[k]:.3f}" for k in FLOORS))
     return scores
 
 
 def main():
-    assert BUNDLE_PATH.exists(), f"{BUNDLE_PATH} missing - run: python src/nlu.py --export"
+    assert BUNDLE_PATH.exists(), \
+        f"{BUNDLE_PATH} missing - run: python -m src.v3.model --export"
     check_freshness()
 
-    model = NLUModel.load()
+    model = V3Model.load()
     print(f"OK loaded  : {BUNDLE_PATH.name} ({BUNDLE_PATH.stat().st_size / 1e6:.1f} MB)")
 
     check_smoke(model)
+    check_presentation(model)
     for query, wanted in AGGREGATION_SMOKE:
         got = model.predict(query).aggregation.value
         assert got == wanted, f"{query!r} -> {got}, want {wanted}"
     print(f"OK agg     : {len(AGGREGATION_SMOKE)} reductions chosen correctly")
 
-    evaluation = load_intents_csv(EVAL_MANUAL)
-    english = evaluation[evaluation["lang"] == "en"]
-    check_spans_verbatim(model, evaluation)
-    check_time_normalized(model, evaluation)
+    from src.v3 import dataset as v3_dataset
+
+    # single utterances only - the multi-turn chats are test_conversations.py's job
+    english = [r for r in v3_dataset.load(split="eval", lang="en") if r["source"] != "chats"]
+    assert english, f"no English eval rows in {CSV_PATH.name}"
+    check_spans_verbatim(model, english)
+    check_time_normalized(model, english)
+    check_always_decides(model, english)
     check_accuracy(model, english, "eval English")
 
     # Code-mixed rows are a diagnostic, not a gate: reported, never asserted.
-    mixed = evaluate(model, evaluation[evaluation["lang"] == "mixed"])
-    print(f"INFO       : code-mixed ({mixed['rows']} rows) intent {mixed['weather_intent_accuracy']:.3f}  "
-          f"action {mixed['action_accuracy']:.3f}  all 4 {mixed['all_targets']:.3f}  (not a V1 target)")
+    mixed = [r for r in v3_dataset.load(split="eval", lang="mixed") if r["source"] != "chats"]
+    if mixed:
+        scores = evaluate(model, mixed)
+        print(f"INFO       : code-mixed ({scores['rows']} rows) intent {scores['intent']:.3f}  "
+              f"variables {scores['variables']:.3f}  everything {scores['everything']:.3f}  "
+              "(not a Model 1 target)")
 
 
 if __name__ == "__main__":

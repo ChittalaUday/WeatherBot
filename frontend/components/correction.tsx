@@ -20,7 +20,6 @@ const API = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8787";
 export function Correction({
   turnId,
   model,
-  intent,
   variables,
   locations,
   times,
@@ -28,7 +27,6 @@ export function Correction({
 }: {
   turnId: number;
   model: string;
-  intent: string;
   variables: string[];
   locations: string[];
   times: string[];
@@ -41,22 +39,18 @@ export function Correction({
     staleTime: 10 * 60_000,
   });
 
-  const options: string[] = model === "v2"
-    ? data?.v2?.variables ?? []
-    : data?.v1?.intents ?? [];
-  const [picked, setPicked] = useState<string[]>(model === "v2" ? variables : [intent]);
+  // Model 1 predicts a set of variables, never a single intent, so this is always multi-select
+  const options: string[] = data?.variables ?? [];
+  const [picked, setPicked] = useState<string[]>(variables);
   const [place, setPlace] = useState(locations.join(", "));
   const [when, setWhen] = useState(times.join(", "));
   const [note, setNote] = useState("");
 
-  const multi = model === "v2";
   const toggle = (label: string) =>
     setPicked((current) =>
-      multi
-        ? current.includes(label)
-          ? current.filter((entry) => entry !== label)
-          : [...current, label]
-        : [label],
+      current.includes(label)
+        ? current.filter((entry) => entry !== label)
+        : [...current, label],
     );
 
   const submit = () => {
@@ -66,11 +60,10 @@ export function Correction({
       turn_id: turnId,
       kind: "correction",
       model,
-      intent: multi ? undefined : picked[0],
-      variables: multi ? picked : undefined,
+      variables: picked,
       location: split(place),
       time: split(when),
-      error_type: picked.join("|") !== (multi ? variables : [intent]).join("|")
+      error_type: picked.join("|") !== variables.join("|")
         ? "intent_confusion"
         : split(place).join("|") !== locations.join("|")
           ? "location_resolution"

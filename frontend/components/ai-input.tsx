@@ -82,10 +82,10 @@ interface UploadedFile {
 // CONSTANTS & DEFAULTS
 // =============================================================================
 
-// Our own NLU bundles - no third-party LLMs are involved anywhere in this app.
+// Our own NLU bundle - no third-party LLMs are involved anywhere in this app.
+// Fallback only; the live list comes from /api/models.
 const DEFAULT_MODELS: Model[] = [
-  { id: "v1", name: "NLU v1", label: "NLU v1 · 14 intents", icon: Layers },
-  { id: "v2", name: "NLU v2", label: "NLU v2 · multi-variable", icon: Layers },
+  { id: "v3", name: "Model 1", label: "Model 1 · multi-variable, decides its own presentation", icon: Layers },
 ];
 
 const DEFAULT_PLUS_MENU: MenuItem[] = [

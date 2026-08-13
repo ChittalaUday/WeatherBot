@@ -72,14 +72,12 @@ def spans(rows):
     return {s.lower() for r in rows for s in r["location"] + r["time"]}
 
 
-def main():
-    rows = {name: load_seed(ROOT / path) for name, (_, _, path, _) in SPLITS.items()}
-    for name in SPLITS:
-        check_generated(name, rows[name])
+def check_split_quality(rows):
+    """Properties of the generated splits: balance, noise, geography, clock variety.
 
-    rows["eval"] = load_seed(EVAL_MANUAL)
-    check_manual(rows["eval"])
-
+    These feed Model 1 through src/v2/dataset.py, so they still matter - but the CSVs are
+    build-time intermediates, not shipped data, so this only runs when they are on disk.
+    """
     for a, b in combinations(rows, 2):
         shared = {r["text"].strip().lower() for r in rows[a]} & {r["text"].strip().lower() for r in rows[b]}
         assert not shared, f"{a}/{b} share {len(shared)} prompts: {sorted(shared)[:3]}"
@@ -91,21 +89,12 @@ def main():
           f"{len(unseen)}/{len(spans(rows['eval']))} eval entity spans unseen in train/test")
 
     if not INDIA_NAMES:  # built-in fallback vocabulary, nothing geographic to assert
-        print("SKIP: data/locations.csv absent - run python src/fetch_locations.py")
         return
 
     for name in SPLITS:  # generated splits draw from the sampled vocabulary
         share = india_share(rows[name])
         assert share >= 0.8, f"[{name}] only {share:.1%} of location spans inside India"
         print(f"OK {name:5s}: {share:.1%} of location spans inside India")
-
-    vocab = list(csv.DictReader(LOCATIONS_CSV.open()))
-    levels = Counter(row["level"] for row in vocab)
-    inside = sum(row["in_india"] == "1" for row in vocab)
-    assert len(vocab) >= 1000, f"location vocabulary is only {len(vocab)} names"
-    assert levels.most_common(1)[0][0] == "village", f"vocabulary is not village-led: {levels}"
-    assert inside / len(vocab) >= 0.8, f"only {inside / len(vocab):.1%} of the vocabulary is in India"
-    print(f"OK: {len(vocab)} DB locations ({inside / len(vocab):.1%} in India), {dict(levels)}")
 
     # Addresses ("Angara, East Godavari"), not only bare names.
     addressed = {s for r in rows["train"] for s in r["location"] if "," in s}
@@ -139,6 +128,40 @@ def main():
     assert len(minutes) >= 5, f"clock minutes barely vary: {minutes}"
     assert set(minutes) - {"00", "30"}, "no odd-minute clock times"
     print(f"OK: {len(addressed)} address forms in train, clock minutes {sorted(minutes)}")
+
+
+def main():
+    rows = {name: load_seed(ROOT / path) for name, (_, _, path, _) in SPLITS.items()}
+    generated = all(rows.values())
+
+    if generated:
+        for name in SPLITS:
+            check_generated(name, rows[name])
+    else:
+        rows = {}
+        print("SKIP: generated splits absent - build-time intermediates on the way to "
+              "data/v3_dataset.csv, not shipped. Rebuild the chain with:\n"
+              "      python src/build_dataset.py --split train && "
+              "python src/build_dataset.py --split test\n"
+              "      python -m src.v2.dataset --build && python -m src.v3.dataset --build")
+
+    rows["eval"] = load_seed(EVAL_MANUAL)
+    check_manual(rows["eval"])
+
+    if generated:
+        check_split_quality(rows)
+
+    if not INDIA_NAMES:  # built-in fallback vocabulary, nothing geographic to assert
+        print("SKIP: data/locations.csv absent - run python src/fetch_locations.py")
+        return
+
+    vocab = list(csv.DictReader(LOCATIONS_CSV.open()))
+    levels = Counter(row["level"] for row in vocab)
+    inside = sum(row["in_india"] == "1" for row in vocab)
+    assert len(vocab) >= 1000, f"location vocabulary is only {len(vocab)} names"
+    assert levels.most_common(1)[0][0] == "village", f"vocabulary is not village-led: {levels}"
+    assert inside / len(vocab) >= 0.8, f"only {inside / len(vocab):.1%} of the vocabulary is in India"
+    print(f"OK: {len(vocab)} DB locations ({inside / len(vocab):.1%} in India), {dict(levels)}")
 
 
 if __name__ == "__main__":
