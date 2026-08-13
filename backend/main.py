@@ -30,8 +30,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from backend import insights, locations, respond, store, weather
+from backend import insights, locations, planner, respond, state as context, store, weather
+from src.normalize import normalize
 from src.nlu import NLUModel
+from src.schema import ConversationState, Operation, Verdict
 
 app = FastAPI(title="WeatherBot", version="1.0")
 app.add_middleware(
@@ -40,6 +42,7 @@ app.add_middleware(
 
 model: NLUModel | None = None
 db = store.connect()                 # every turn is logged for the retraining loop
+SESSIONS: dict[str, ConversationState] = {}   # slot state per socket, deterministic
 
 
 @app.on_event("startup")
@@ -60,20 +63,38 @@ async def suggest(q: str):
         return {"suggestions": await weather.suggest_locations(http, q)}
 
 
-# Below this the model is guessing, and a confident-looking table would be a lie.
+# Confidence routing, from `python src/nlu.py --calibrate` on the hand-written eval set:
+#   >= 0.95   98.9% accurate over 83% of turns   -> answer
+#   0.45-0.95 ~75% accurate                      -> answer, but mark it and queue for review
+#   < 0.45    0-67% accurate                     -> ask instead of guessing
+# Re-run the calibration after every retrain rather than trusting these numbers forever.
 MIN_CONFIDENCE = 0.45
+CONFIDENT = 0.95
 
 
 async def handle_query(socket: WebSocket, text: str, coords: dict | None, session: str):
-    """One user turn: understand -> locate -> fetch -> table, all of it logged."""
+    """One turn through the pipeline:
+
+        normalize -> model -> context -> location resolver -> time resolver -> validator
+                  -> weather API -> aggregation -> insights -> template
+
+    Everything except the model is deterministic, and every stage is logged.
+    """
     started = time.perf_counter()
     await socket.send_json({"type": "status", "stage": "understanding"})
-    parsed = model.predict(text)
+
+    cleaned = normalize(text)                      # shorthand and typos folded, audit kept
+    parsed = model.predict(cleaned.normalized)
     intent, action = parsed.weather_intent.value, parsed.action.value
     # the model picks the reduction (Rule 2.3); the guard drops it when the prompt contains
     # no word that could have meant it - "weather in KKD" is not a request for a maximum
-    aggregation = insights.confirm_aggregation(text, parsed.aggregation.value)
+    aggregation = insights.confirm_aggregation(cleaned.normalized, parsed.aggregation.value)
     spans = parsed.entities
+
+    # cheap rules before anything else: a follow-up fragment leans on the previous turn
+    reference = context.detect_reference(cleaned.normalized)
+    follow_up = context.is_follow_up(cleaned.normalized)
+    state = SESSIONS.get(session, ConversationState())
 
     await socket.send_json({
         "type": "nlu",
@@ -85,19 +106,26 @@ async def handle_query(socket: WebSocket, text: str, coords: dict | None, sessio
             "time": spans.time,
             "time_normalized": spans.time_normalized,
         },
-        "confidence": round(model.confidence(text), 4),
+        "confidence": round(model.confidence(cleaned.normalized), 4),
+        "normalized": cleaned.normalized if cleaned.replacements else None,
+        "replacements": cleaned.replacements,
+        "reference": reference.value,
+        "follow_up": follow_up,
     })
 
     # "angara vs hyderbad" names no metric at all - answering it with whatever the
     # classifier ranked first is how you get RAIN one turn and TEMPERATURE the next.
-    confidence = model.confidence(text)
+    confidence = model.confidence(cleaned.normalized)
     log = lambda outcome, detail, **extra: store.record_turn(
         db, session, text, intent=intent, action=action, confidence=confidence,
         location=spans.location, time_raw=spans.time, time_norm=spans.time_normalized,
-        outcome=outcome, detail=detail,
+        outcome=outcome, detail=detail, normalized=cleaned.normalized,
+        scores=dict(model.top_intents(cleaned.normalized, k=5)),
         latency_ms=int((time.perf_counter() - started) * 1000), **extra)
 
-    if confidence < MIN_CONFIDENCE:
+    # An inherited follow-up is allowed to be low confidence: "there?" carries no signal on
+    # its own, and the state already holds what it means.
+    if confidence < MIN_CONFIDENCE and not (follow_up or reference != context.Reference.NONE):
         turn_id = log("clarified", "low confidence")
         await socket.send_json({
             "type": "clarify",
@@ -116,9 +144,26 @@ async def handle_query(socket: WebSocket, text: str, coords: dict | None, sessio
              if not locations.is_relative(name) and not locations.is_probably_not_a_place(name)]
     relative = [name for name in spans.location if locations.is_relative(name)]
 
+    # fold this turn into the conversation: SET / REPLACE / MODIFY / INHERIT / COMPARE
+    state, operation = context.apply(
+        state,
+        weather_intent=parsed.weather_intent, action=parsed.action, aggregation=parsed.aggregation,
+        location=named or relative, time_raw=spans.time[0] if spans.time else None,
+        time_normalized=spans.time_normalized[0] if spans.time_normalized else None,
+        reference=reference, follow_up=follow_up,
+        confident=model.confidence(cleaned.normalized) >= MIN_CONFIDENCE,
+    )
+    # the state is the source of truth from here on: it holds the inherited intent
+    intent, action = state.weather_intent.value, state.action.value
+    if coords:
+        state.coords = coords
+    # inherited turns reuse the places already resolved, so nothing is looked up twice
+    if operation == Operation.INHERIT and state.resolved:
+        named, relative = [], []
+
     # A comparison with one place is not a comparison; ask instead of quietly answering
     # about whichever place happened to be extracted.
-    if action == "COMPARE" and len(named) + len(relative) < 2:
+    if action == "COMPARE" and len(named) + len(relative) < 2 and not state.resolved:
         turn_id = log("clarified", "comparison with one place")
         await socket.send_json({
             "type": "clarify",
@@ -132,7 +177,7 @@ async def handle_query(socket: WebSocket, text: str, coords: dict | None, sessio
 
     # No usable place in the text and no coordinates yet -> ask the browser (Rule 4.1 keeps
     # "near me" as raw text; resolving it is this layer's job).
-    if not named and not coords:
+    if not named and not state.resolved and not (coords or state.coords):
         log("need_location", relative[0] if relative else "no place named")
         await socket.send_json({
             "type": "need_location",
@@ -161,8 +206,12 @@ async def handle_query(socket: WebSocket, text: str, coords: dict | None, sessio
                     "message": f"I could not find {', '.join(unknown)} in the location index.",
                 })
                 return
-        if not places and coords:
-            places = [await weather.reverse_geocode(http, coords["lat"], coords["lon"])]
+        if not places and state.resolved:
+            places = state.resolved                     # inherited from the previous turn
+        if not places and (coords or state.coords):
+            point = coords or state.coords
+            places = [await weather.reverse_geocode(http, point["lat"], point["lon"])]
+        state.resolved = places
 
         # One name, several real places ("Angara" is in Jharkhand and in Andhra Pradesh):
         # the resolver hands back every match and the user picks, rather than us guessing.
@@ -186,8 +235,20 @@ async def handle_query(socket: WebSocket, text: str, coords: dict | None, sessio
 
         await socket.send_json({"type": "status", "stage": "fetching", "places": places})
 
-        normalized = spans.time_normalized[0] if spans.time_normalized else ""
-        hourly = respond.needs_hourly(normalized, aggregation)
+        # time resolver + validator: absolute window, then answer-or-ask
+        query = planner.plan(state, places=places, operation=operation, aggregation=aggregation)
+        if query.verdict is Verdict.CLARIFY:
+            turn_id = log("clarified", f"missing {', '.join(query.missing)}", places=places)
+            await socket.send_json({
+                "type": "clarify", "turn_id": turn_id, "options": [], "text": text,
+                "message": ("Which other place should I compare with?"
+                            if "second_location" in query.missing
+                            else "Which place should I check?"),
+            })
+            return
+
+        normalized = state.time_normalized or ""
+        hourly = query.granularity == "hourly"
         fetch = weather.hourly_forecast if hourly else weather.daily_forecast
         try:
             feeds = await asyncio.gather(*(fetch(http, p["lat"], p["lon"]) for p in places))
@@ -217,16 +278,24 @@ async def handle_query(socket: WebSocket, text: str, coords: dict | None, sessio
             summary += (f" (No exact match for \"{place['raw']}\" - showing the closest, "
                         f"{place['normalized']}, {place['state']}.)")
 
-    turn_id = log("answered", summary, places=places, unresolved=unknown)
+    SESSIONS[session] = state                       # only a turn that answered updates state
+    uncertain = confidence < CONFIDENT
+    turn_id = log("uncertain" if uncertain else "answered", summary, places=places,
+                  unresolved=unknown, operation=operation.value)
     await socket.send_json({
         "type": "result",
         "turn_id": turn_id,
         "intent": intent,
         "action": action,
-        "when": when,
+        "when": query.time_label or when,
+        "operation": operation.value,
+        "window": {"start": query.start, "end": query.end},
         "places": places,
         "granularity": "hourly" if hourly else "daily",
         "summary": summary,
+        # answered from the middle band: shown, but flagged so a wrong one gets corrected
+        "uncertain": uncertain,
+        "confidence": round(confidence, 3),
         "aggregation": aggregation,
         "reduced": reduced,
         "chart": chart,

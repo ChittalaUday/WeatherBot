@@ -40,6 +40,15 @@ NOT_PLACES = {
 }
 LEADING_JUNK = {"than", "or", "and", "the", "a", "an", "i", "we", "you", "should", "is", "of"}
 
+# Words that point at the previous turn rather than naming a place. Without this, "and
+# there?" gets fuzzy-matched to a village called Thera. backend/state.py owns the meaning;
+# here they only need to be kept away from Solr.
+REFERENCE_WORDS = {
+    "there", "that place", "same place", "that city", "that town", "same location",
+    "that village", "the same", "over there", "same spot", "that area", "then",
+    "same day", "that day", "same date", "that time", "it", "this",
+}
+
 # Relative locations (Rule 4.1) carry no coordinates - the browser has to supply them.
 RELATIVE_LOCATIONS = {
     "near me", "nearby", "near by", "here", "my location", "this area", "my area",
@@ -75,7 +84,7 @@ def is_relative(name: str) -> bool:
 def is_probably_not_a_place(name: str) -> bool:
     """True for ordinary English that only looks like a place to a fuzzy index."""
     cleaned = " ".join(name.lower().split()).strip(" ,.?!")
-    if cleaned in NOT_PLACES or len(cleaned) < 3:
+    if cleaned in NOT_PLACES or cleaned in REFERENCE_WORDS or len(cleaned) < 3:
         return True
     return cleaned.split()[0] in LEADING_JUNK
 
@@ -260,6 +269,7 @@ def demo():
     assert canonical_state("andhrapradesh") == "Andhra Pradesh"
     assert canonical_state("Kakinada") is None
     assert is_probably_not_a_place("I expect") and is_probably_not_a_place("skies")
+    assert is_probably_not_a_place("there") and is_probably_not_a_place("that place")
     assert not is_probably_not_a_place("Kakinada")
     assert is_relative("my field") and not is_relative("Guntur")
     print(f"locations demo OK: {len(ALIASES)} aliases, {len(STATE_ALIASES)} state aliases")

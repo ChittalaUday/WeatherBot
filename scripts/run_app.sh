@@ -6,7 +6,7 @@ cd "$(dirname "$0")/.."
 
 [ -f models/nlu_pipeline.joblib ] || { echo "no model bundle - run: python src/nlu.py --export"; exit 1; }
 
-.venv/bin/uvicorn backend.main:app --port 8787 &
+.venv/bin/uvicorn backend.main:app --host 0.0.0.0 --port 8787 &
 BACKEND=$!
 trap 'kill $BACKEND 2>/dev/null || true' EXIT
 

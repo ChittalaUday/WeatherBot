@@ -303,6 +303,12 @@ export function Messages({
                         ))}
                       </ul>
                     )}
+                    {result.uncertain && (
+                      <p className="mt-2 text-[11px] text-amber-600 dark:text-amber-500">
+                        Not fully sure I read that right ({Math.round(result.confidence * 100)}%) -
+                        the thumbs below correct it.
+                      </p>
+                    )}
                     <Rate turnId={result.turn_id} intent={result.intent} action={result.action} />
                   </div>
                 </div>

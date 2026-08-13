@@ -252,7 +252,64 @@ with its canonical form (`tommorrow → tomorrow`) - then the summary and the ta
 browser for coordinates and replays the original question with them attached. Deny the
 permission and it tells you to name a place instead.
 
-### 8. Conversation Store & Retraining Loop
+### 8. Pipeline
+
+Every stage is deterministic except the two model calls, and each one can be tested alone:
+
+```text
+USER TEXT
+   │
+   ▼  src/normalize.py        "What's da wthr in KKD tmrw?" -> "what is the weather in KKD tomorrow?"
+Normalizer                    every substitution recorded; place names never rewritten
+   │
+   ▼  backend/state.py        "there", "what about ..." matched by rules, not a model
+Cheap rules
+   │
+   ▼  src/nlu.py              intent + action + aggregation + LOCATION/TIME spans + scores
+Small NLU model
+   │
+   ▼  backend/state.py        SET / REPLACE / MODIFY / INHERIT / COMPARE
+Context engine                a low-confidence fragment inherits the previous intent
+   │
+   ▼  backend/locations.py    alias table -> Solr -> ranked candidates -> ambiguity asked
+Location resolver
+   │
+   ▼  backend/planner.py      canonical wording -> absolute window, by arithmetic
+Time resolver
+   │
+   ▼  backend/planner.py      READY / CLARIFY / REJECT
+Validator
+   │
+   ▼  backend/weather.py      WeatherSnap
+Weather API
+   │
+   ▼  backend/respond.py + insights.py   table, chart, aggregation, insights - templates only
+Response
+```
+
+No generative model anywhere. The contracts (`Normalized`, `NLUResult`, `ConversationState`,
+`ResolvedQuery` in `src/schema.py`) are frozen, so TF-IDF can be swapped for fastText or a
+MiniLM encoder without touching a single resolver.
+
+**Multi-turn**, all deterministic:
+
+| turn | operation | state after |
+| :-- | :-- | :-- |
+| "What's da wthr in KKD?" | SET | Kakinada, near term |
+| "what about tomorrow?" | MODIFY | Kakinada, tomorrow |
+| "what about Rajahmundry?" | REPLACE | Rajahmundry, tomorrow |
+| "and there?" | INHERIT | Rajahmundry, tomorrow |
+| "total rainfall there next 3 days" | MODIFY | Rajahmundry, next 3 days, SUM |
+
+**Confidence routing** comes from `python src/nlu.py --calibrate`, not from taste:
+
+| band | measured accuracy | share of turns | behaviour |
+| :-- | --: | --: | :-- |
+| >= 0.95 | 98.9% | 83% | answer |
+| 0.45 - 0.95 | ~75% | 15% | answer, flag it, queue for review |
+| < 0.45 | 0-67% | 2% | ask instead of guessing |
+
+### 9. Conversation Store & Retraining Loop
 
 Every turn lands in SQLite (`data/conversations.db`, gitignored) - text, the 4 predicted
 targets, confidence, resolved places, outcome and latency:
@@ -262,7 +319,14 @@ python -m backend.store --stats           # volume, outcomes, feedback counts
 python -m backend.store --recent 20       # last 20 turns
 python -m backend.store --export data/from_users.csv
 python -m backend.store --selfcheck       # label in -> training row out
+python -m backend.store --confusion       # predicted vs actual, from labels
+python -m backend.store --competing       # turns where two intents were close
+python src/nlu.py --calibrate             # accuracy per confidence band
 ```
+
+Each turn stores the **full score vector**, not just the winner, so you can see which
+intents competed. `--competing` ranks the closest calls: those are the examples worth
+labelling first, and `--confusion` says which pair keeps colliding.
 
 The export writes the exact schema of `data/intents.csv`, so real usage folds straight into
 the next build: append it to the seed, `python src/build_dataset.py --split train`,
@@ -281,7 +345,7 @@ Honest naming: **this is not reinforcement learning.** There is no reward signal
 policy - it is supervised retraining fed by real users instead of templates. The clarify
 prompts are what make it work: a question the model asks turns into a free gold label.
 
-### 9. Using Jupyter Notebooks
+### 10. Using Jupyter Notebooks
 
 1. Open `notebooks/exploration.ipynb` in your IDE.
 2. In the top right corner, select the kernel **`Python (WeatherBot)`**.

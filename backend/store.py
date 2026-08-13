@@ -44,7 +44,10 @@ CREATE TABLE IF NOT EXISTS turns (
     unresolved    TEXT,           -- json: names the location index could not find
     outcome       TEXT NOT NULL,  -- answered | clarified | need_location | error
     detail        TEXT,           -- summary, clarify message, or error text
-    latency_ms    INTEGER
+    latency_ms    INTEGER,
+    scores        TEXT,           -- json: full intent probability vector
+    operation     TEXT,           -- SET | REPLACE | MODIFY | INHERIT | COMPARE
+    normalized    TEXT            -- what the model actually saw, after src/normalize.py
 );
 CREATE TABLE IF NOT EXISTS feedback (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -55,6 +58,8 @@ CREATE TABLE IF NOT EXISTS feedback (
     action        TEXT,
     location      TEXT,
     time_raw      TEXT,
+    error_type    TEXT,           -- intent_confusion | vocabulary_gap | context_required |
+                                  -- location_resolution | time_resolution | other
     note          TEXT
 );
 CREATE INDEX IF NOT EXISTS turns_session ON turns(session);
@@ -79,27 +84,33 @@ def _now() -> str:
 
 def record_turn(connection, session, text, *, intent=None, action=None, confidence=None,
                 location=None, time_raw=None, time_norm=None, places=None, unresolved=None,
-                outcome="answered", detail=None, latency_ms=None) -> int:
+                outcome="answered", detail=None, latency_ms=None, scores=None,
+                operation=None, normalized=None) -> int:
+    """One turn, with the full score vector - knowing *which* intents competed is what makes
+    a failed prediction useful later."""
     cursor = connection.execute(
         """INSERT INTO turns (ts, session, text, intent, action, confidence, location,
-                              time_raw, time_norm, places, unresolved, outcome, detail, latency_ms)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                              time_raw, time_norm, places, unresolved, outcome, detail,
+                              latency_ms, scores, operation, normalized)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (_now(), session, text, intent, action, confidence,
          json.dumps(location or []), json.dumps(time_raw or []), json.dumps(time_norm or []),
-         json.dumps(places or []), json.dumps(unresolved or []), outcome, detail, latency_ms),
+         json.dumps(places or []), json.dumps(unresolved or []), outcome, detail, latency_ms,
+         json.dumps(scores or {}), operation, normalized),
     )
     connection.commit()
     return cursor.lastrowid
 
 
 def record_feedback(connection, turn_id, kind, *, intent=None, action=None,
-                    location=None, time_raw=None, note=None) -> int:
+                    location=None, time_raw=None, note=None, error_type=None) -> int:
     cursor = connection.execute(
-        """INSERT INTO feedback (turn_id, ts, kind, intent, action, location, time_raw, note)
-           VALUES (?,?,?,?,?,?,?,?)""",
+        """INSERT INTO feedback (turn_id, ts, kind, intent, action, location, time_raw,
+                                 error_type, note)
+           VALUES (?,?,?,?,?,?,?,?,?)""",
         (turn_id, _now(), kind, intent, action,
          json.dumps(location) if location is not None else None,
-         json.dumps(time_raw) if time_raw is not None else None, note),
+         json.dumps(time_raw) if time_raw is not None else None, error_type, note),
     )
     connection.commit()
     return cursor.lastrowid
@@ -119,6 +130,36 @@ def stats(connection) -> dict:
         "mean_latency_ms": round(row["latency"]) if row["latency"] else None,
         "outcomes": outcomes, "feedback": kinds,
     }
+
+
+def confusion(connection) -> dict:
+    """Predicted-vs-actual counts over human-labelled turns.
+
+    Accuracy alone hides which pair is the problem; this shows whether FORECAST keeps
+    swallowing CURRENT_CONDITIONS, which is what tells you what to write next.
+    """
+    pairs = Counter()
+    for row in connection.execute(
+            """SELECT t.intent predicted, f.intent actual FROM feedback f
+               JOIN turns t ON t.id = f.turn_id
+               WHERE f.kind IN ('choice', 'correction') AND f.intent IS NOT NULL"""):
+        pairs[(row["actual"], row["predicted"])] += 1
+    return {"pairs": pairs,
+            "worst": [f"{actual} -> {predicted} ({count}x)"
+                      for (actual, predicted), count in pairs.most_common(5)
+                      if actual != predicted]}
+
+
+def competing_intents(connection, limit: int = 10) -> list[tuple[str, float, str]]:
+    """Turns where two intents were close - the boundary cases worth labelling first."""
+    out = []
+    for row in connection.execute(
+            "SELECT text, scores FROM turns WHERE scores IS NOT NULL AND scores != '{}'"):
+        scores = sorted(json.loads(row["scores"]).items(), key=lambda kv: -kv[1])
+        if len(scores) > 1 and scores[0][1] - scores[1][1] < 0.25:
+            out.append((row["text"], scores[0][1] - scores[1][1],
+                        f"{scores[0][0]} {scores[0][1]:.2f} vs {scores[1][0]} {scores[1][1]:.2f}"))
+    return sorted(out, key=lambda item: item[1])[:limit]
 
 
 def training_rows(connection, include_approved=False, min_confidence=0.9) -> list[dict]:
@@ -175,7 +216,8 @@ def demo():
                            action="COMPARE", confidence=0.25,
                            location=["angara", "hyderbad"], time_raw=[], time_norm=[],
                            outcome="clarified", detail="low confidence")
-        record_feedback(connection, turn, "choice", intent="RAIN", action="COMPARE")
+        record_feedback(connection, turn, "choice", intent="RAIN", action="COMPARE",
+                        error_type="intent_confusion")
 
         rows = training_rows(connection)
         assert len(rows) == 1, rows
@@ -200,6 +242,8 @@ def main():
                         help="also export thumbs-up turns the model was already confident about")
     parser.add_argument("--recent", type=int, metavar="N", help="print the last N turns")
     parser.add_argument("--selfcheck", action="store_true")
+    parser.add_argument("--confusion", action="store_true", help="predicted vs actual, from labels")
+    parser.add_argument("--competing", action="store_true", help="turns where intents were close")
     args = parser.parse_args()
 
     if args.selfcheck:
@@ -215,6 +259,17 @@ def main():
                 "SELECT * FROM turns ORDER BY id DESC LIMIT ?", (args.recent,)):
             print(f"  [{row['id']}] {row['outcome']:13s} {row['intent'] or '-':18s} "
                   f"conf {row['confidence'] or 0:.2f}  {row['text'][:52]!r}")
+    if args.confusion:
+        report = confusion(connection)
+        print("\nconfusion (actual -> predicted):")
+        for (actual, predicted), count in sorted(report["pairs"].items(), key=lambda kv: -kv[1]):
+            mark = "  " if actual == predicted else " <-"
+            print(f"  {actual:20s} -> {predicted:20s} {count:3d}{mark}")
+        print("worst pairs:", report["worst"] or "none")
+    if args.competing:
+        print("\nclosest calls (label these first):")
+        for text, margin, detail in competing_intents(connection):
+            print(f"  margin {margin:.2f}  {text[:48]!r}  {detail}")
     if args.export:
         print(f"\nwrote {export(connection, args.export, args.include_approved)} labelled rows "
               f"-> {args.export}")

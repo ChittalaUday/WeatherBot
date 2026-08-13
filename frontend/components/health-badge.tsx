@@ -3,14 +3,13 @@
 import { useQuery } from "@tanstack/react-query";
 import { Wifi, WifiOff } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-
-const API = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8787";
+import { getApiUrl } from "@/lib/utils";
 
 /** Backend + model health over TanStack Query; socket state comes from the socket itself. */
 export function HealthBadge({ connected }: { connected: boolean }) {
   const { data } = useQuery({
     queryKey: ["health"],
-    queryFn: async () => (await fetch(`${API}/api/health`)).json(),
+    queryFn: async () => (await fetch(`${getApiUrl()}/api/health`)).json(),
     refetchInterval: 15_000,
   });
 

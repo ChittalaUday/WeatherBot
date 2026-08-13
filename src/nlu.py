@@ -225,15 +225,57 @@ def repl(model):
         print(f"  {out.model_dump_json()}   [{elapsed:.0f} ms]\n")
 
 
+def calibrate(model, df, buckets=(0.0, 0.3, 0.45, 0.6, 0.75, 0.85, 0.95)) -> dict:
+    """Accuracy per confidence band, so the routing thresholds come from data.
+
+    Picking 0.45 because it sounds cautious is guessing; this shows where the classifier
+    actually stops being trustworthy on held-out, hand-written text.
+    """
+    rows = []
+    for text, gold in zip(df["text"], df["weather_intent"]):
+        prediction = model.predict(text)
+        rows.append((model.confidence(text), prediction.weather_intent.value == gold))
+
+    report = {}
+    for low, high in zip(buckets, list(buckets[1:]) + [1.01]):
+        band = [correct for confidence, correct in rows if low <= confidence < high]
+        if band:
+            report[f"{low:.2f}-{high:.2f}"] = {
+                "n": len(band), "accuracy": round(sum(band) / len(band), 3),
+                "share": round(len(band) / len(rows), 3),
+            }
+
+    # lowest cut where everything above it is at least 95% right
+    accept = next((low for low in buckets
+                   if (above := [c for conf, c in rows if conf >= low]) and
+                   sum(above) / len(above) >= 0.95), buckets[-1])
+    clarify = next((low for low in buckets
+                    if (band := [c for conf, c in rows if conf < low]) and
+                    sum(band) / len(band) < 0.6), 0.45)
+    return {"bands": report, "recommended": {"accept": accept, "clarify_below": clarify}}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("text", nargs="*", help="predict this query (no arguments: interactive)")
     parser.add_argument("--export", action="store_true", help="train, evaluate and save models/")
     parser.add_argument("--info", action="store_true", help="describe the exported bundle")
+    parser.add_argument("--calibrate", action="store_true",
+                        help="accuracy per confidence band, and the thresholds it implies")
     args = parser.parse_args()
 
     if args.info:
         describe(NLUModel.load())
+        return
+
+    if args.calibrate:
+        evaluation = load_intents_csv(EVAL_MANUAL)
+        report = calibrate(NLUModel.load(), evaluation[evaluation["lang"] == "en"])
+        for band, numbers in report["bands"].items():
+            print(f"  confidence {band}  n={numbers['n']:4d}  "
+                  f"accuracy {numbers['accuracy']:.1%}  ({numbers['share']:.0%} of turns)")
+        print(f"\n  recommended: accept >= {report['recommended']['accept']}, "
+              f"clarify below {report['recommended']['clarify_below']}")
         return
 
     if not args.export:
