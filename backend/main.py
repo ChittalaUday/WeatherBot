@@ -170,9 +170,8 @@ async def handle_query(socket: WebSocket, text: str, coords: dict | None, sessio
                          if understanding.times_normalized else None),
         reference=reference, follow_up=follow_up,
         confident=confidence >= MIN_CONFIDENCE,
+        text=cleaned.normalized, variables=understanding.variables,
     )
-    if understanding.variables:
-        state.variables = understanding.variables
     # the state is the source of truth from here on: it holds the inherited intent
     intent, action = state.weather_intent, state.action
     if coords:
@@ -278,7 +277,8 @@ async def handle_query(socket: WebSocket, text: str, coords: dict | None, sessio
             return
 
     # v2 can ask for several variables at once; the table gets a column group per variable
-    keys = understanding.field_keys or [intent]
+    # the state owns the variables: a follow-up that named none keeps the previous ones
+    keys = [models.VARIABLE_TO_FIELDS_KEY.get(v, v) for v in state.variables] or [intent]
     fields, seen = [], set()
     for key in keys:
         for name in respond.INTENT_FIELDS.get(key, []):

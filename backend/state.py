@@ -18,7 +18,39 @@ from __future__ import annotations
 
 import re
 
+from src.build_dataset import NOUNS
 from src.schema import Aggregation, ConversationState, Operation, Reference
+
+# Every word that names a measurement, from both model vocabularies. A follow-up that
+# contains none of them is not asking about a new variable, whatever the classifier says -
+# "what about Vizag?" came back as ALERT at 95%, and confidence alone cannot catch that.
+# NOUNS holds whole phrases ("what's the weather like", "how hot it is"), so the function
+# words have to be stripped out - otherwise "what about Vizag?" counts as naming a variable
+# because of the word "what".
+_FUNCTION_WORDS = {
+    "what", "whats", "how", "will", "going", "the", "like", "right", "now", "today", "and",
+    "for", "with", "you", "your", "get", "got", "there", "here", "that", "this", "kind",
+    "much", "level", "levels", "when", "where", "which", "does", "did", "are", "was", "its",
+    "current", "currently", "actual", "feels", "outside", "next", "days", "day", "week",
+    "ahead", "upcoming", "future", "daily", "weekly", "long", "range", "probability", "amount",
+}
+VARIABLE_WORDS = {word.lower()
+                  for nouns in NOUNS.values() for noun in nouns for word in noun.split()
+                  if len(word) > 2 and word.lower() not in _FUNCTION_WORDS}
+ACTION_WORDS = {"compare", "vs", "versus", "against", "difference", "between", "alert",
+                "warn", "notify", "remind", "ping", "watch", "tell"}
+
+
+def mentions_variable(text: str) -> bool:
+    """Does the message name a measurement at all?"""
+    words = {word.strip(" ,.?!").lower() for word in text.split()}
+    return bool(words & VARIABLE_WORDS)
+
+
+def mentions_action(text: str) -> bool:
+    """Does it explicitly ask to compare or to be alerted?"""
+    words = {word.strip(" ,.?!").lower() for word in text.split()}
+    return bool(words & ACTION_WORDS)
 
 # Closed sets: cheap to match, impossible to get wrong.
 LOCATION_REFERENCES = {
@@ -47,11 +79,12 @@ def is_follow_up(text: str) -> bool:
 
 def classify_operation(state: ConversationState, has_location: bool, has_time: bool,
                        reference: Reference, action: str, follow_up: bool,
-                       confident: bool = True) -> Operation:
+                       confident: bool = True, explicit_compare: bool = True) -> Operation:
     """What this turn does to the state. Order matters: the most specific case wins."""
-    # COMPARE has to be believed to be acted on: "and there?" is not a comparison just
-    # because a 36%-confidence classifier said so.
-    if action == "COMPARE" and confident and (has_location or reference != Reference.NONE):
+    # A comparison needs evidence: either the message says so ("compare", "vs") or it names
+    # two places. "and there next week?" is one reference and a date, whatever the
+    # classifier ranked first.
+    if action == "COMPARE" and confident and explicit_compare:
         return Operation.COMPARE
     if not state.turns:
         return Operation.SET
@@ -73,27 +106,38 @@ def classify_operation(state: ConversationState, has_location: bool, has_time: b
 
 def apply(state: ConversationState, *, weather_intent, action, aggregation,
           location: list[str], time_raw: str | None, time_normalized: str | None,
-          reference: Reference, follow_up: bool, confident: bool = True
+          reference: Reference, follow_up: bool, confident: bool = True,
+          text: str = "", variables: list[str] | None = None
           ) -> tuple[ConversationState, Operation]:
     """Fold one turn into the state and report which operation it was.
 
     Returns a new state; the caller decides whether to keep it (a rejected turn should not
     poison the next one).
 
-    A low-confidence follow-up keeps the previous intent instead of adopting a guess:
-    "what about tomorrow?" carries no weather word, so whatever the classifier ranks first
-    is noise. The question is still the previous question, asked about a new day.
+    A follow-up that names no measurement keeps the previous intent and variables, however
+    confident the classifier is: "what about Vizag?" contains no weather word, so a 95%
+    ALERT is 95% confidence in noise. The question is still the previous question, asked
+    about a new place.
     """
+    explicit_compare = len(location) >= 2 or (bool(text) and mentions_action(text))
     operation = classify_operation(state, bool(location), bool(time_normalized or time_raw),
-                                   reference, action, follow_up, confident)
+                                   reference, action, follow_up, confident, explicit_compare)
 
     merged = state.model_copy(deep=True)
     merged.turns += 1
-    inherit_intent = (not confident and state.weather_intent is not None
-                      and operation in {Operation.MODIFY, Operation.REPLACE, Operation.INHERIT})
+
+    fragment = operation in {Operation.MODIFY, Operation.REPLACE, Operation.INHERIT}
+    silent = bool(text) and not mentions_variable(text)      # says nothing about a measurement
+    inherit_intent = (state.weather_intent is not None and fragment
+                      and (silent or not confident))
     merged.weather_intent = state.weather_intent if inherit_intent else weather_intent
-    merged.action = state.action if inherit_intent else action
+    merged.action = (state.action if inherit_intent and not mentions_action(text) else action)
     merged.aggregation = aggregation or Aggregation.RAW
+
+    # v2 carries several variables; a silent follow-up keeps all of them, so "rain and
+    # temperature in Guntur" -> "what about Vizag?" still answers with both columns
+    if variables is not None:
+        merged.variables = list(state.variables) if inherit_intent and state.variables else list(variables)
 
     if operation in {Operation.SET, Operation.COMPARE, Operation.REPLACE} and location:
         merged.location = list(location)
@@ -150,6 +194,32 @@ def demo():
                                     follow_up=True), confident=False)
     assert state.weather_intent == "CURRENT_CONDITIONS", state.weather_intent
     assert state.action == "GET", state.action
+
+    # a CONFIDENT fragment that names no measurement is inherited too - this is the v2 case
+    # where "what about Vizag?" arrived as ALERT at 95% and dropped one of two variables
+    multi = ConversationState(location=["Guntur"], weather_intent="FORECAST", action="GET",
+                              variables=["RAIN", "TEMPERATURE"], turns=1)
+    multi, op = apply(multi, **turn(weather_intent="ALERT", action="ALERT",
+                                    location=["Vizag"], follow_up=True),
+                      confident=True, text="what about Vizag?", variables=["TEMPERATURE"])
+    assert op == Operation.REPLACE, op
+    assert multi.weather_intent == "FORECAST", multi.weather_intent
+    assert multi.variables == ["RAIN", "TEMPERATURE"], multi.variables
+    assert multi.location == ["Vizag"], multi.location
+
+    # a bare reference plus a date is not a comparison, however the classifier reads it
+    multi, op = apply(multi, **turn(weather_intent="CURRENT_CONDITIONS", action="COMPARE",
+                                    reference=Reference.LOCATION, time_raw="next week",
+                                    time_normalized="next week", follow_up=True),
+                      confident=True, text="and there next week?", variables=["GENERAL"])
+    assert op == Operation.MODIFY, op
+    assert multi.action == "GET", multi.action
+    assert multi.time_normalized == "next week", multi.time_normalized
+
+    # but naming a measurement replaces it, as it should
+    multi, op = apply(multi, **turn(weather_intent="HUMIDITY", action="GET", follow_up=True),
+                      confident=True, text="what about humidity there?", variables=["HUMIDITY"])
+    assert multi.variables == ["HUMIDITY"], multi.variables
 
     assert detect_reference("what about there?") == Reference.LOCATION
     assert detect_reference("same day please") == Reference.DATE
