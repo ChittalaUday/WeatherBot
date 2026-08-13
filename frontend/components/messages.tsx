@@ -52,10 +52,21 @@ function NluChips({ nlu }: { nlu: Nlu }) {
   const { entities } = nlu;
   return (
     <div className="flex flex-wrap items-center gap-1.5 px-1 text-xs">
+      {nlu.model && (
+        <Badge variant="outline" className="font-mono text-[10px] uppercase">
+          {nlu.model}
+        </Badge>
+      )}
       <Badge variant="secondary" className="gap-1 font-mono text-[11px]">
         <Sparkles className="h-3 w-3" />
         {nlu.intent}
       </Badge>
+      {(nlu.variables ?? []).length > 1 &&
+        nlu.variables!.map((variable) => (
+          <Badge key={variable} variant="secondary" className="font-mono text-[11px]">
+            {variable}
+          </Badge>
+        ))}
       <Badge variant="outline" className="font-mono text-[11px]">
         {nlu.action}
       </Badge>

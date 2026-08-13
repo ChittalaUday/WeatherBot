@@ -29,10 +29,10 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from backend import insights, locations, planner, respond, state as context, store, weather
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+from backend import insights, locations, planner, registry as models, respond, state as context, store, weather
 from src.normalize import normalize
-from src.nlu import NLUModel
 from src.schema import ConversationState, Operation, Verdict
 
 app = FastAPI(title="WeatherBot", version="1.0")
@@ -40,20 +40,32 @@ app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"],
 )
 
-model: NLUModel | None = None
+registry = models.Registry()         # v1 and v2, chosen per request
 db = store.connect()                 # every turn is logged for the retraining loop
 SESSIONS: dict[str, ConversationState] = {}   # slot state per socket, deterministic
 
 
 @app.on_event("startup")
 def load_model():
-    global model
-    model = NLUModel.load()          # ~14 MB, loaded once for the process
+    registry.get(models.DEFAULT_VERSION)      # warm the default; v2 loads on first use
 
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "model": model is not None}
+    return {"status": "ok", "model": True, "models": registry.available()}
+
+
+@app.get("/api/models")
+def list_models():
+    """Which NLU versions this deployment can answer with, and how they differ."""
+    import json as _json
+
+    report = {}
+    for name, path in (("v1", ROOT / "models/metrics.json"), ("v2", ROOT / "models/metrics_v2.json")):
+        if path.exists():
+            report[name] = _json.loads(path.read_text())
+    return {"available": registry.available(), "default": models.DEFAULT_VERSION,
+            "metrics": report}
 
 
 @app.get("/api/suggest")
@@ -72,7 +84,8 @@ MIN_CONFIDENCE = 0.45
 CONFIDENT = 0.95
 
 
-async def handle_query(socket: WebSocket, text: str, coords: dict | None, session: str):
+async def handle_query(socket: WebSocket, text: str, coords: dict | None, session: str,
+                       version: str | None = None):
     """One turn through the pipeline:
 
         normalize -> model -> context -> location resolver -> time resolver -> validator
@@ -84,12 +97,11 @@ async def handle_query(socket: WebSocket, text: str, coords: dict | None, sessio
     await socket.send_json({"type": "status", "stage": "understanding"})
 
     cleaned = normalize(text)                      # shorthand and typos folded, audit kept
-    parsed = model.predict(cleaned.normalized)
-    intent, action = parsed.weather_intent.value, parsed.action.value
+    understanding = registry.understand(cleaned.normalized, version)
+    intent, action = understanding.intent, understanding.action
     # the model picks the reduction (Rule 2.3); the guard drops it when the prompt contains
     # no word that could have meant it - "weather in KKD" is not a request for a maximum
-    aggregation = insights.confirm_aggregation(cleaned.normalized, parsed.aggregation.value)
-    spans = parsed.entities
+    aggregation = insights.confirm_aggregation(cleaned.normalized, understanding.aggregation)
 
     # cheap rules before anything else: a follow-up fragment leans on the previous turn
     reference = context.detect_reference(cleaned.normalized)
@@ -101,12 +113,14 @@ async def handle_query(socket: WebSocket, text: str, coords: dict | None, sessio
         "intent": intent,
         "action": action,
         "aggregation": aggregation,
+        "model": understanding.version,
+        "variables": understanding.variables,
         "entities": {
-            "location": spans.location,
-            "time": spans.time,
-            "time_normalized": spans.time_normalized,
+            "location": understanding.locations,
+            "time": understanding.times,
+            "time_normalized": understanding.times_normalized,
         },
-        "confidence": round(model.confidence(cleaned.normalized), 4),
+        "confidence": round(understanding.confidence, 4),
         "normalized": cleaned.normalized if cleaned.replacements else None,
         "replacements": cleaned.replacements,
         "reference": reference.value,
@@ -115,12 +129,13 @@ async def handle_query(socket: WebSocket, text: str, coords: dict | None, sessio
 
     # "angara vs hyderbad" names no metric at all - answering it with whatever the
     # classifier ranked first is how you get RAIN one turn and TEMPERATURE the next.
-    confidence = model.confidence(cleaned.normalized)
+    confidence = understanding.confidence
     log = lambda outcome, detail, **extra: store.record_turn(
-        db, session, text, intent=intent, action=action, confidence=confidence,
-        location=spans.location, time_raw=spans.time, time_norm=spans.time_normalized,
+        db, session, f"[{understanding.version}] {text}", intent=intent, action=action,
+        confidence=confidence, location=understanding.locations, time_raw=understanding.times,
+        time_norm=understanding.times_normalized,
         outcome=outcome, detail=detail, normalized=cleaned.normalized,
-        scores=dict(model.top_intents(cleaned.normalized, k=5)),
+        scores=understanding.scores,
         latency_ms=int((time.perf_counter() - started) * 1000), **extra)
 
     # An inherited follow-up is allowed to be low confidence: "there?" carries no signal on
@@ -134,27 +149,32 @@ async def handle_query(socket: WebSocket, text: str, coords: dict | None, sessio
             "options": [
                 {"intent": intent_name, "confidence": round(probability, 3),
                  "label": intent_name.replace("_", " ").lower()}
-                for intent_name, probability in model.top_intents(text)
+                for intent_name, probability in sorted(understanding.scores.items(),
+                                                       key=lambda kv: -kv[1])[:3]
             ],
             "text": text,
         })
         return
 
-    named = [name for name in spans.location
+    named = [name for name in understanding.locations
              if not locations.is_relative(name) and not locations.is_probably_not_a_place(name)]
-    relative = [name for name in spans.location if locations.is_relative(name)]
+    relative = [name for name in understanding.locations if locations.is_relative(name)]
 
     # fold this turn into the conversation: SET / REPLACE / MODIFY / INHERIT / COMPARE
     state, operation = context.apply(
         state,
-        weather_intent=parsed.weather_intent, action=parsed.action, aggregation=parsed.aggregation,
-        location=named or relative, time_raw=spans.time[0] if spans.time else None,
-        time_normalized=spans.time_normalized[0] if spans.time_normalized else None,
+        weather_intent=understanding.intent, action=understanding.action,
+        aggregation=understanding.aggregation,
+        location=named or relative, time_raw=understanding.times[0] if understanding.times else None,
+        time_normalized=(understanding.times_normalized[0]
+                         if understanding.times_normalized else None),
         reference=reference, follow_up=follow_up,
-        confident=model.confidence(cleaned.normalized) >= MIN_CONFIDENCE,
+        confident=confidence >= MIN_CONFIDENCE,
     )
+    if understanding.variables:
+        state.variables = understanding.variables
     # the state is the source of truth from here on: it holds the inherited intent
-    intent, action = state.weather_intent.value, state.action.value
+    intent, action = state.weather_intent, state.action
     if coords:
         state.coords = coords
     # inherited turns reuse the places already resolved, so nothing is looked up twice
@@ -257,7 +277,15 @@ async def handle_query(socket: WebSocket, text: str, coords: dict | None, sessio
             await socket.send_json({"type": "error", "message": f"WeatherSnap API failed: {exc}"})
             return
 
-    fields = respond.INTENT_FIELDS[intent]
+    # v2 can ask for several variables at once; the table gets a column group per variable
+    keys = understanding.field_keys or [intent]
+    fields, seen = [], set()
+    for key in keys:
+        for name in respond.INTENT_FIELDS.get(key, []):
+            if name not in seen:
+                seen.add(name)
+                fields.append(name)
+    fields = fields[:6] or respond.INTENT_FIELDS.get(intent, ["Tavg"])
     selected = [respond.select_rows(feed, normalized)[0] for feed in feeds]
     when = respond.select_rows(feeds[0], normalized)[1]
 
@@ -285,6 +313,8 @@ async def handle_query(socket: WebSocket, text: str, coords: dict | None, sessio
     await socket.send_json({
         "type": "result",
         "turn_id": turn_id,
+        "model": understanding.version,
+        "variables": understanding.variables,
         "intent": intent,
         "action": action,
         "when": query.time_label or when,
@@ -351,11 +381,13 @@ async def chat(socket: WebSocket):
             kind = message.get("type")
             try:
                 if kind == "query":
-                    await handle_query(socket, message["text"], message.get("coords"), session)
+                    await handle_query(socket, message["text"], message.get("coords"), session,
+                                       message.get("model"))
                 elif kind == "location":
                     # browser answered the geolocation prompt: rerun the pending query
                     await handle_query(socket, message["text"],
-                                       {"lat": message["lat"], "lon": message["lon"]}, session)
+                                       {"lat": message["lat"], "lon": message["lon"]}, session,
+                                       message.get("model"))
                 elif kind == "ping":
                     await socket.send_json({"type": "pong"})
             except Exception as exc:                               # noqa: BLE001 - one bad turn must not kill the socket

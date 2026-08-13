@@ -1,0 +1,39 @@
+{
+  "train_rows": 8426,
+  "test": {
+    "rows": 1887,
+    "intent_accuracy": 0.9751,
+    "aggregation_accuracy": 0.9905,
+    "variables_exact_set": 0.9502,
+    "variables_precision": 0.9593,
+    "variables_recall": 0.9832,
+    "variables_f1": 0.9711,
+    "location_exact": 0.9608,
+    "time_exact": 0.9645,
+    "all_slots": 0.8537
+  },
+  "eval_english": {
+    "rows": 219,
+    "intent_accuracy": 0.9635,
+    "aggregation_accuracy": 0.9543,
+    "variables_exact_set": 0.9224,
+    "variables_precision": 0.9177,
+    "variables_recall": 0.968,
+    "variables_f1": 0.9422,
+    "location_exact": 0.9452,
+    "time_exact": 0.9589,
+    "all_slots": 0.7717
+  },
+  "multivariable_only": {
+    "rows": 231,
+    "intent_accuracy": 1.0,
+    "aggregation_accuracy": 1.0,
+    "variables_exact_set": 0.9827,
+    "variables_precision": 0.9982,
+    "variables_recall": 0.9945,
+    "variables_f1": 0.9964,
+    "location_exact": 1.0,
+    "time_exact": 0.9048,
+    "all_slots": 0.8918
+  }
+}

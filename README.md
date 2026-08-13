@@ -345,7 +345,50 @@ Honest naming: **this is not reinforcement learning.** There is no reward signal
 policy - it is supervised retraining fed by real users instead of templates. The clarify
 prompts are what make it work: a question the model asks turns into a free gold label.
 
-### 10. Using Jupyter Notebooks
+### 10. Model v2 (selectable, alongside v1)
+
+v1 is untouched and still the default. v2 restructures the targets as you would for an AI
+context builder - **one coarse intent, everything else a multi-value slot**:
+
+| | v1 | v2 |
+| :-- | :-- | :-- |
+| intent | 14 classes (variable folded in) | 6 coarse: CURRENT / FORECAST / HISTORICAL / COMPARE / ALERT / UNKNOWN |
+| weather variable | *is* the intent, one per query | multi-label slot, 13 labels, several per query |
+| locations / times | multi-span | multi-span (unchanged tagger) |
+| training data | 3 CSV files | one SQLite table, `split` and `source` columns |
+| training time | ~3 min (SVC + probability) | ~20 s (LinearSVC + calibration) |
+
+```bash
+python -m src.v2.dataset --build     # data/v2_dataset.db from v1 rows + multi-variable + user labels
+python -m src.v2.dataset --stats
+python -m src.v2.model --export      # -> models/nlu_v2.joblib
+python -m src.v2.model "rain and temperature in Guntur and Vizag tomorrow"
+```
+
+The multi-label threshold is calibrated on a held-out slice at training time (0.25 this run),
+not hand-picked: 0.35 was silently dropping TEMPERATURE at 0.205 from "temperature, humidity
+and rainfall".
+
+| test split | intent | variables F1 | exact set | locations | all slots |
+| :-- | --: | --: | --: | --: | --: |
+| all rows (1887) | 97.5% | 0.971 | 95.0% | 96.1% | 85.4% |
+| **multi-variable only** | **100%** | **0.996** | **98.3%** | **100%** | **89.2%** |
+
+The difference on the query v1 cannot express:
+
+```text
+"rain and temperature in Guntur tomorrow"
+  v1  TEMPERATURE / COMPARE, 28%   -> asks which reading you meant
+  v2  FORECAST, [RAIN, TEMPERATURE], 83%   -> one table, both columns
+```
+
+**Choosing a model.** `GET /api/models` lists what is deployed with each version's metrics;
+every WebSocket query takes an optional `"model": "v1" | "v2"`; the UI has a v1/v2 switch in
+the header and tags each answer with the version that produced it. `backend/registry.py`
+adapts both into one `Understanding`, so the context engine, resolvers and response builder
+never learn which model answered.
+
+### 11. Using Jupyter Notebooks
 
 1. Open `notebooks/exploration.ipynb` in your IDE.
 2. In the top right corner, select the kernel **`Python (WeatherBot)`**.

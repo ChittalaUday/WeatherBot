@@ -127,19 +127,24 @@ class ConversationState(BaseModel):
     resolved: List[dict] = Field(default_factory=list)  # what the location engine returned
     time_raw: Optional[str] = None
     time_normalized: Optional[str] = None
-    weather_intent: Optional[WeatherIntent] = None
-    action: Optional[Action] = None
+    weather_intent: Optional[str] = None      # v1 weather_intent or v2 coarse intent
+    action: Optional[str] = None
+    variables: List[str] = Field(default_factory=list)   # v2 can carry several
     aggregation: Aggregation = Aggregation.RAW
     coords: Optional[dict] = None                       # browser geolocation, once given
     turns: int = 0
 
 
 class ResolvedQuery(BaseModel):
-    """The canonical query handed to the weather service, after every resolver has run."""
+    """The canonical query handed to the weather service, after every resolver has run.
 
-    weather_intent: WeatherIntent
-    action: Action
-    aggregation: Aggregation
+    intent/action are plain strings: v1 puts its 14-class weather_intent here, v2 its coarse
+    intent, and the resolvers downstream care about neither.
+    """
+
+    weather_intent: str
+    action: str
+    aggregation: str
     places: List[dict] = Field(default_factory=list)    # resolved, with lat/lon
     start: Optional[str] = None                         # ISO date/datetime, inclusive
     end: Optional[str] = None

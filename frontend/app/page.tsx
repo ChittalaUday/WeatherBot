@@ -3,6 +3,7 @@
 import { CloudSunRain, CornerDownLeft, Loader2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { HealthBadge } from "@/components/health-badge";
+import { ModelSwitch } from "@/components/model-switch";
 import { Messages } from "@/components/messages";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,6 +20,7 @@ const EXAMPLES = [
 export default function Page() {
   const { connected, busy, messages, ask, sendLocation } = useWeatherSocket();
   const [draft, setDraft] = useState("");
+  const [model, setModel] = useState("v1");
   const bottom = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -27,7 +29,7 @@ export default function Page() {
 
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
-    ask(draft);
+    ask(draft, model);
     setDraft("");
   };
 
@@ -43,7 +45,10 @@ export default function Page() {
             <p className="text-xs text-muted-foreground">Ask in plain English</p>
           </div>
         </div>
-        <HealthBadge connected={connected} />
+        <div className="flex items-center gap-2">
+          <ModelSwitch value={model} onChange={setModel} />
+          <HealthBadge connected={connected} />
+        </div>
       </header>
 
       <div className="flex-1 overflow-y-auto py-5">
@@ -62,7 +67,7 @@ export default function Page() {
               {EXAMPLES.map((example) => (
                 <button
                   key={example}
-                  onClick={() => ask(example)}
+                  onClick={() => ask(example, model)}
                   className="rounded-full border px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-primary/40 hover:bg-muted hover:text-foreground"
                 >
                   {example}
@@ -71,7 +76,11 @@ export default function Page() {
             </div>
           </div>
         ) : (
-          <Messages messages={messages} onShareLocation={sendLocation} onAsk={ask} />
+          <Messages
+            messages={messages}
+            onShareLocation={(text, lat, lon) => sendLocation(text, lat, lon, model)}
+            onAsk={(text) => ask(text, model)}
+          />
         )}
         <div ref={bottom} />
       </div>
