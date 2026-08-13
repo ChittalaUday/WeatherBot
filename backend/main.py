@@ -377,8 +377,11 @@ class Feedback(BaseModel):
     kind: str                       # up | down | correction | choice
     intent: Optional[str] = None
     action: Optional[str] = None
+    variables: Optional[List[str]] = None
     location: Optional[List[str]] = None
     time: Optional[List[str]] = None
+    model: Optional[str] = None
+    error_type: Optional[str] = None
     note: Optional[str] = None
 
 
@@ -389,8 +392,28 @@ def feedback(body: Feedback):
     A `choice` is the cheapest gold label there is: the model was unsure, a human answered.
     """
     store.record_feedback(db, body.turn_id, body.kind, intent=body.intent, action=body.action,
-                          location=body.location, time_raw=body.time, note=body.note)
+                          variables=body.variables, location=body.location,
+                          time_raw=body.time, model=body.model, error_type=body.error_type,
+                          note=body.note)
     return {"ok": True, "labelled": len(store.training_rows(db))}
+
+
+@app.get("/api/labels")
+def labels():
+    """The label sets a correction form has to offer, straight from the enums."""
+    from src.schema import Action as V1Action, WeatherIntent
+    from src.v2.schema import Intent as V2Intent, Variable
+
+    return {
+        "v1": {"intents": [i.value for i in WeatherIntent], "actions": [a.value for a in V1Action]},
+        "v2": {"intents": [i.value for i in V2Intent], "variables": [v.value for v in Variable]},
+    }
+
+
+@app.get("/api/review")
+def review(limit: int = 50):
+    """Turns waiting for a human label - flagged wrong, or answered uncertainly and ignored."""
+    return {"queue": store.review_queue(db, limit)}
 
 
 @app.get("/api/stats")

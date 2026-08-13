@@ -11,6 +11,7 @@ import { ThumbsDownIcon } from "@/components/ui/thumbs-down-icon";
 import { ThumbsUpIcon } from "@/components/ui/thumbs-up-icon";
 import { TriangleAlertIcon } from "@/components/ui/triangle-alert-icon";
 import { useState } from "react";
+import { Correction } from "@/components/correction";
 import { useFeedback } from "@/lib/use-feedback";
 import { ResultChart } from "@/components/result-chart";
 import { ResultTable } from "@/components/result-table";
@@ -134,39 +135,87 @@ function LocationPrompt({
   );
 }
 
-/** Thumbs on an answer. Every click is a label the retraining loop can use. */
-function Rate({ turnId, intent, action }: { turnId: number; intent: string; action: string }) {
+/**
+ * Thumbs on an answer, and the correction form behind the thumbs-down.
+ *
+ * A bare "wrong" is triage, not training data: it says something failed without saying what
+ * the answer should have been. Thumbs-down therefore opens the form pre-filled with the
+ * model's own reading, so fixing it is usually one tap.
+ */
+function Rate({
+  turnId,
+  model,
+  intent,
+  action,
+  variables,
+  locations,
+  times,
+}: {
+  turnId: number;
+  model: string;
+  intent: string;
+  action: string;
+  variables: string[];
+  locations: string[];
+  times: string[];
+}) {
   const feedback = useFeedback();
-  const [sent, setSent] = useState<"up" | "down" | null>(null);
+  const [sent, setSent] = useState<"up" | "down" | "corrected" | null>(null);
+  const [correcting, setCorrecting] = useState(false);
 
-  const send = (kind: "up" | "down") => {
-    setSent(kind);
-    feedback.mutate({ turn_id: turnId, kind, intent, action });
-  };
+  if (correcting) {
+    return (
+      <Correction
+        turnId={turnId}
+        model={model}
+        intent={intent}
+        variables={variables}
+        locations={locations}
+        times={times}
+        onDone={() => {
+          setCorrecting(false);
+          setSent("corrected");
+        }}
+      />
+    );
+  }
 
   if (sent) {
     return (
       <span className="mt-2 block text-[11px] text-muted-foreground">
-        {sent === "up" ? "Marked correct - thanks." : "Marked wrong - it goes into the fix list."}
+        {sent === "up"
+          ? "Marked correct - thanks."
+          : sent === "corrected"
+            ? "Correction saved - it joins the next training run."
+            : "Marked wrong."}
       </span>
     );
   }
+
   return (
     <div className="mt-2 flex items-center gap-1">
       <button
-        onClick={() => send("up")}
+        onClick={() => {
+          setSent("up");
+          feedback.mutate({ turn_id: turnId, kind: "up", intent, action, model,
+                            variables, location: locations, time: times });
+        }}
         aria-label="Correct answer"
         className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-emerald-600"
       >
         <ThumbsUpIcon size={14} isAnimated />
       </button>
       <button
-        onClick={() => send("down")}
+        onClick={() => {
+          feedback.mutate({ turn_id: turnId, kind: "down", intent, action, model });
+          setCorrecting(true);      // ask what it should have been, while it is still on screen
+        }}
         aria-label="Wrong answer"
         className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-destructive"
       >
         <ThumbsDownIcon size={14} isAnimated />
       </button>
+      <span className="ml-1 text-[10px] text-muted-foreground">was this right?</span>
     </div>
   );
 }
@@ -316,7 +365,15 @@ export function Messages({
                         the thumbs below correct it.
                       </p>
                     )}
-                    <Rate turnId={result.turn_id} intent={result.intent} action={result.action} />
+                    <Rate
+                      turnId={result.turn_id}
+                      model={result.model}
+                      intent={result.intent}
+                      action={result.action}
+                      variables={result.variables}
+                      locations={result.places.map((place) => place.raw ?? place.name)}
+                      times={result.when ? [result.when] : []}
+                    />
                   </div>
                 </div>
               </Bubble>

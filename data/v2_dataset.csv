@@ -14560,4 +14560,4 @@ gen-ev-00148,1,what about the wind direction?,CURRENT,WIND_DIRECTION,RAW,[],[],I
 gen-ev-00148,2,what about Kalimpong?,CURRENT,WIND_DIRECTION,RAW,"[""Kalimpong""]",[],REPLACE,"[""Kalimpong""]","[""tonight""]",eval,chats,en
 gen-ev-00149,0,what is the cloud cover in Angara at 6 PM?,FORECAST,CLOUD_COVER,RAW,"[""Angara""]","[""at 6 PM""]",SET,"[""Angara""]","[""at 6 PM""]",eval,chats,en
 gen-ev-00149,1,how about Barpeta?,FORECAST,CLOUD_COVER,RAW,"[""Barpeta""]",[],REPLACE,"[""Barpeta""]","[""at 6 PM""]",eval,chats,en
-user-00000,0,my location,CURRENT,SUNSHINE,RAW,"[""my location""]",[],SET,"[""my location""]",[],train,users,en
+user-00000,0,humidity in Kakinada tomorrow,FORECAST,DEW_POINT,RAW,"[""Kakinada""]","[""day after tomorrow""]",SET,"[""Kakinada""]","[""day after tomorrow""]",train,users,en

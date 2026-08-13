@@ -60,8 +60,10 @@ CREATE TABLE IF NOT EXISTS feedback (
     kind          TEXT NOT NULL,  -- up | down | correction | choice
     intent        TEXT,
     action        TEXT,
+    variables     TEXT,           -- json list: what v2 should have extracted
     location      TEXT,
     time_raw      TEXT,
+    model         TEXT,           -- which version was corrected
     error_type    TEXT,           -- intent_confusion | vocabulary_gap | context_required |
                                   -- location_resolution | time_resolution | other
     note          TEXT
@@ -111,15 +113,19 @@ def record_turn(connection, session, text, *, chat_id=None, turn=None, intent=No
     return cursor.lastrowid
 
 
-def record_feedback(connection, turn_id, kind, *, intent=None, action=None,
-                    location=None, time_raw=None, note=None, error_type=None) -> int:
+def record_feedback(connection, turn_id, kind, *, intent=None, action=None, variables=None,
+                    location=None, time_raw=None, note=None, error_type=None,
+                    model=None) -> int:
+    """A label from a human. `correction` and `choice` carry what it *should* have been;
+    `down` on its own only says something was wrong, which is triage, not training data."""
     cursor = connection.execute(
-        """INSERT INTO feedback (turn_id, ts, kind, intent, action, location, time_raw,
-                                 error_type, note)
-           VALUES (?,?,?,?,?,?,?,?,?)""",
+        """INSERT INTO feedback (turn_id, ts, kind, intent, action, variables, location,
+                                 time_raw, model, error_type, note)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
         (turn_id, _now(), kind, intent, action,
+         json.dumps(variables) if variables is not None else None,
          json.dumps(location) if location is not None else None,
-         json.dumps(time_raw) if time_raw is not None else None, error_type, note),
+         json.dumps(time_raw) if time_raw is not None else None, model, error_type, note),
     )
     connection.commit()
     return cursor.lastrowid
@@ -234,10 +240,11 @@ def competing_intents(connection, limit: int = 10) -> list[tuple[str, float, str
 
 
 def training_rows(connection, include_approved=False, min_confidence=0.9) -> list[dict]:
-    """Human-labelled turns, in the exact schema of data/intents.csv.
+    """Human-labelled turns, ready to append to data/intents.csv (v1) or feed src.v2.dataset.
 
-    A `choice` or `correction` supplies the label. `up` is only taken when the model was
-    already confident, and never by default: approving a guess does not make it evidence.
+    A `choice` or `correction` supplies the label; the model's own prediction fills whatever
+    the human did not touch. `up` is only taken when the model was already confident, and
+    never by default: approving a guess does not make it evidence.
     """
     wanted = ["choice", "correction"] + (["up"] if include_approved else [])
     placeholders = ",".join("?" * len(wanted))
@@ -245,25 +252,49 @@ def training_rows(connection, include_approved=False, min_confidence=0.9) -> lis
     for record in connection.execute(
         f"""SELECT t.text, t.intent t_intent, t.action t_action, t.location t_location,
                    t.time_raw t_time, t.confidence,
-                   f.kind, f.intent f_intent, f.action f_action, f.location f_location,
-                   f.time_raw f_time
+                   f.kind, f.intent f_intent, f.action f_action, f.variables f_variables,
+                   f.location f_location, f.time_raw f_time, f.model, f.error_type, f.note
             FROM feedback f JOIN turns t ON t.id = f.turn_id
             WHERE f.kind IN ({placeholders})
             ORDER BY f.id""", wanted):
         if record["kind"] == "up" and (record["confidence"] or 0) < min_confidence:
             continue
-        key = record["text"].strip().lower()
-        if key in seen:
+        # the logged text carries a "[v2] " tag; training data must not
+        text = (record["text"] or "").strip()
+        if text.startswith("[") and "]" in text:
+            text = text[text.index("]") + 1:].strip()
+        key = text.lower()
+        if not text or key in seen:
             continue
         seen.add(key)
         rows.append({
-            "text": record["text"],
+            "text": text,
             "weather_intent": record["f_intent"] or record["t_intent"],
             "action": record["f_action"] or record["t_action"],
+            "variables": record["f_variables"] or None,
             "location": record["f_location"] or record["t_location"] or "[]",
             "time": record["f_time"] or record["t_time"] or "[]",
+            "source_kind": record["kind"],
+            "model": record["model"],
+            "error_type": record["error_type"],
         })
     return [r for r in rows if r["weather_intent"] and r["action"]]
+
+
+def review_queue(connection, limit: int = 50) -> list[dict]:
+    """Turns a human flagged wrong but did not correct, plus every uncertain turn nobody
+    judged. This is the labelling worklist."""
+    return [dict(row) for row in connection.execute(
+        """SELECT t.id, t.text, t.intent, t.action, t.confidence, t.outcome,
+                  MAX(CASE WHEN f.kind = 'down' THEN 1 ELSE 0 END) AS flagged
+           FROM turns t
+           LEFT JOIN feedback f ON f.turn_id = t.id
+           GROUP BY t.id
+           HAVING flagged = 1
+               OR (t.outcome IN ('uncertain', 'clarified')
+                   AND SUM(CASE WHEN f.kind IN ('choice','correction','up') THEN 1 ELSE 0 END) = 0)
+           ORDER BY flagged DESC, t.confidence ASC
+           LIMIT ?""", (limit,))]
 
 
 def export(connection, path: Path, include_approved=False) -> int:
@@ -271,7 +302,9 @@ def export(connection, path: Path, include_approved=False) -> int:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=["text", "weather_intent", "action", "location", "time"])
+        writer = csv.DictWriter(
+            handle, fieldnames=["text", "weather_intent", "action", "variables", "location",
+                                "time", "source_kind", "model", "error_type"])
         writer.writeheader()
         writer.writerows(rows)
     return len(rows)
@@ -315,6 +348,7 @@ def main():
     parser.add_argument("--selfcheck", action="store_true")
     parser.add_argument("--confusion", action="store_true", help="predicted vs actual, from labels")
     parser.add_argument("--competing", action="store_true", help="turns where intents were close")
+    parser.add_argument("--review", action="store_true", help="turns waiting to be labelled")
     args = parser.parse_args()
 
     if args.selfcheck:
@@ -341,6 +375,13 @@ def main():
         print("\nclosest calls (label these first):")
         for text, margin, detail in competing_intents(connection):
             print(f"  margin {margin:.2f}  {text[:48]!r}  {detail}")
+    if args.review:
+        queue = review_queue(connection)
+        print(f"\n{len(queue)} turns waiting for a label:")
+        for row in queue[:20]:
+            mark = "flagged" if row["flagged"] else row["outcome"]
+            print(f"  [{row['id']:4d}] {mark:9s} {row['intent'] or '-':18s} "
+                  f"conf {row['confidence'] or 0:.2f}  {row['text'][:46]!r}")
     if args.export:
         print(f"\nwrote {export(connection, args.export, args.include_approved)} labelled rows "
               f"-> {args.export}")

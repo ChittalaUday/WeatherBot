@@ -350,6 +350,36 @@ Not all feedback is equal, and the store treats it that way:
 | `up` | thumbs up | only above 0.9 confidence, and only with `--include-approved` |
 | `down` | thumbs down | no - says something is wrong, not what |
 
+**Thumbs-down opens a correction form** rather than just registering displeasure, because a
+bare "wrong" cannot be trained on. The form is pre-filled with the model's own reading, so
+fixing it is usually one tap:
+
+```text
+answer:     HUMIDITY in Kakinada tomorrow          <- the model's reading
+correction: DEW_POINT in Kakinada day after tomorrow
+stored:     kind=correction, intent=DEW_POINT, location=["Kakinada"],
+            time=["day after tomorrow"], error_type=intent_confusion, model=v1
+exported:   humidity in Kakinada tomorrow,DEW_POINT,GET,...,correction,v1,intent_confusion
+```
+
+The label offered is whatever the answering model uses - v1's 14 intents or v2's 13
+variables, multi-select - fetched from `GET /api/labels` so the enums stay the single source
+of truth. `python -m backend.store --review` lists what still needs a label: everything
+flagged wrong, plus uncertain turns nobody judged.
+
+Full loop, v1 and v2:
+
+```bash
+python -m backend.store --review                  # what needs labelling
+python -m backend.store --export data/from_users.csv
+cat data/from_users.csv >> data/intents.csv       # v1: fold into the seed
+python src/build_dataset.py --split train && python src/nlu.py --export
+
+python -m src.v2.dataset --build                  # v2: reads the store directly
+python -m src.v2.model --export
+python test_model.py && python test_conversations.py
+```
+
 Honest naming: **this is not reinforcement learning.** There is no reward signal and no
 policy - it is supervised retraining fed by real users instead of templates. The clarify
 prompts are what make it work: a question the model asks turns into a free gold label.

@@ -248,7 +248,11 @@ def from_v1(split: str) -> list[dict]:
 
 
 def from_users() -> list[dict]:
-    """Labelled turns from the runtime store - the retraining loop's input."""
+    """Labelled turns from the runtime store - the retraining loop's input.
+
+    A v2 correction names the variables directly; a v1 one names an intent, which maps to a
+    single variable. Either way the human's label wins over the model's.
+    """
     try:
         from backend import store
     except ImportError:
@@ -257,14 +261,19 @@ def from_users() -> list[dict]:
     connection = store.connect()
     rows = []
     for index, record in enumerate(store.training_rows(connection)):
-        variable = V1_TO_VARIABLE.get(record["weather_intent"])
-        if not variable:
+        if record.get("variables"):
+            variables = [Variable(name) for name in json.loads(record["variables"])]
+        else:
+            mapped = V1_TO_VARIABLE.get(record["weather_intent"])
+            variables = [mapped] if mapped else []
+        if not variables:
             continue
-        times = json.loads(record["time"])
+        times = json.loads(record["time"]) if isinstance(record["time"], str) else record["time"]
+        places = (json.loads(record["location"]) if isinstance(record["location"], str)
+                  else record["location"])
         rows.append(_row(f"user-{index:05d}", 0, record["text"],
-                         _intent_for(times[0] if times else "", record["action"]), [variable],
-                         json.loads(record["location"]), times, "SET",
-                         json.loads(record["location"]), times, "train", "users"))
+                         _intent_for(times[0] if times else "", record["action"]), variables,
+                         places, times, "SET", places, times, "train", "users"))
     return rows
 
 
