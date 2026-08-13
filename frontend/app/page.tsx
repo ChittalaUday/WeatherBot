@@ -1,115 +1,140 @@
 "use client";
 
-import { CloudSunRain, CornerDownLeft, Loader2, MessageSquarePlus } from "lucide-react";
+import { LazyMotion, domAnimation, m } from "motion/react";
 import { useEffect, useRef, useState } from "react";
+import { Composer } from "@/components/composer";
 import { HealthBadge } from "@/components/health-badge";
-import { ModelSwitch } from "@/components/model-switch";
 import { Messages } from "@/components/messages";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { CloudSunRainIcon } from "@/components/ui/cloud-sun-rain-icon";
+import { DropletsIcon } from "@/components/ui/droplets-icon";
+import { MessageSquarePlusIcon } from "@/components/ui/message-square-plus-icon";
+import { ThermometerIcon } from "@/components/ui/thermometer-icon";
+import { WindIcon } from "@/components/ui/wind-icon";
 import { useWeatherSocket } from "@/lib/use-weather-socket";
 
 const EXAMPLES = [
-  "will it rain in Nokha tommorrow?",
-  "compare max temp between Hyderabad and Vizag next 3 days",
-  "soil moisture in my field right now",
-  "humidity in Guntur at 6:45 pm",
-  "alert me if wind speed crosses 40 kmph in Kakinada tonight",
+  { icon: DropletsIcon, text: "will it rain in Nokha tommorrow?" },
+  { icon: ThermometerIcon, text: "rain and temperature in Guntur tomorrow" },
+  { icon: WindIcon, text: "compare max temp between Hyderabad and Vizag next 3 days" },
+  { icon: CloudSunRainIcon, text: "soil moisture in my field right now" },
 ];
 
 export default function Page() {
   const { connected, busy, messages, chatId, ask, sendLocation, newChat } = useWeatherSocket();
-  const [draft, setDraft] = useState("");
   const [model, setModel] = useState("v1");
   const bottom = useRef<HTMLDivElement>(null);
+  const started = messages.length > 0;
 
   useEffect(() => {
-    bottom.current?.scrollIntoView({ behavior: "smooth" });
+    bottom.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages]);
 
-  const submit = (event: React.FormEvent) => {
-    event.preventDefault();
-    ask(draft, model);
-    setDraft("");
-  };
-
   return (
-    <main className="mx-auto flex h-dvh max-w-3xl flex-col px-4">
-      <header className="flex items-center justify-between gap-3 border-b py-4">
-        <div className="flex items-center gap-2.5">
-          <div className="grid h-9 w-9 place-items-center rounded-xl bg-primary/10">
-            <CloudSunRain className="h-5 w-5 text-primary" />
+    <LazyMotion features={domAnimation}>
+      <main className="flex h-dvh flex-col bg-background">
+        <header className="sticky top-0 z-30 border-b bg-background/80 backdrop-blur">
+          <div className="mx-auto flex w-full max-w-3xl items-center justify-between gap-3 px-4 py-2.5">
+            <div className="flex min-w-0 items-center gap-2.5">
+              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-primary/10">
+                <CloudSunRainIcon size={19} isAnimated />
+              </span>
+              <span className="min-w-0">
+                <span className="block truncate text-sm font-semibold leading-tight">
+                  WeatherSnap
+                </span>
+                <span className="block truncate text-[11px] text-muted-foreground">
+                  {chatId ? `chat ${chatId.slice(5, 13)} · ${model}` : "NLU weather assistant"}
+                </span>
+              </span>
+            </div>
+            <div className="flex shrink-0 items-center gap-1.5">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={newChat}
+                title="New chat - forgets the remembered place and time"
+                className="h-8 gap-1.5 px-2 text-xs text-muted-foreground"
+              >
+                <MessageSquarePlusIcon size={15} isAnimated />
+                <span className="hidden sm:inline">New</span>
+              </Button>
+              <ThemeToggle />
+              <HealthBadge connected={connected} />
+            </div>
           </div>
-          <div>
-            <h1 className="text-sm font-semibold leading-tight">WeatherSnap</h1>
-            <p className="text-xs text-muted-foreground">
-              {chatId ? `chat ${chatId.slice(5, 13)}` : "Ask in plain English"}
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={newChat}
-            title="Start a new chat - forgets the remembered place and time"
-            className="h-8 gap-1.5 px-2 text-xs text-muted-foreground"
-          >
-            <MessageSquarePlus className="h-3.5 w-3.5" />
-            New
-          </Button>
-          <ModelSwitch value={model} onChange={setModel} />
-          <HealthBadge connected={connected} />
-        </div>
-      </header>
+        </header>
 
-      <div className="flex-1 overflow-y-auto py-5">
-        {messages.length === 0 ? (
-          <div className="flex h-full flex-col items-center justify-center gap-4 text-center">
-            <div className="grid h-14 w-14 place-items-center rounded-2xl bg-muted">
-              <CloudSunRain className="h-7 w-7 text-muted-foreground" />
+        {started ? (
+          <>
+            <div className="flex flex-1 flex-col overflow-y-auto">
+              {/* messages grow upward from the composer instead of stranding one answer at
+                  the top of a tall screen */}
+              <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col justify-end px-4 py-6">
+                <Messages
+                  messages={messages}
+                  onShareLocation={(text, lat, lon) => sendLocation(text, lat, lon, model)}
+                  onAsk={(text) => ask(text, model)}
+                />
+                <div ref={bottom} className="h-2" />
+              </div>
             </div>
-            <div>
-              <p className="text-sm font-medium">Rain, temperature, soil, wind - anywhere in India</p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Typos are fine. Say &ldquo;my field&rdquo; and it will ask for your location.
-              </p>
+            <div className="sticky bottom-0 border-t bg-background/95 px-4 backdrop-blur">
+              <Composer
+                model={model}
+                onModelChange={setModel}
+                onSubmit={(text) => ask(text, model)}
+                busy={busy}
+                connected={connected}
+              />
             </div>
-            <div className="flex flex-wrap justify-center gap-2">
-              {EXAMPLES.map((example) => (
-                <button
-                  key={example}
-                  onClick={() => ask(example, model)}
-                  className="rounded-full border px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-primary/40 hover:bg-muted hover:text-foreground"
-                >
-                  {example}
-                </button>
-              ))}
-            </div>
-          </div>
+          </>
         ) : (
-          <Messages
-            messages={messages}
-            onShareLocation={(text, lat, lon) => sendLocation(text, lat, lon, model)}
-            onAsk={(text) => ask(text, model)}
-          />
-        )}
-        <div ref={bottom} />
-      </div>
+          <div className="flex flex-1 flex-col items-center justify-center px-4">
+            <m.div
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.35 }}
+              className="w-full max-w-3xl"
+            >
+              <div className="mb-7 text-center">
+                <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
+                  What&rsquo;s the weather doing?
+                </h1>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  Rain, temperature, wind and soil for any village, block or district in India.
+                </p>
+              </div>
 
-      <form onSubmit={submit} className="sticky bottom-0 flex gap-2 border-t bg-background py-4">
-        <Input
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          placeholder={connected ? "will it rain in Guntur tomorrow?" : "connecting…"}
-          disabled={!connected}
-          className="flex-1"
-        />
-        <Button type="submit" disabled={!connected || busy || !draft.trim()} className="gap-1.5">
-          {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CornerDownLeft className="h-4 w-4" />}
-          Ask
-        </Button>
-      </form>
-    </main>
+              <Composer
+                model={model}
+                onModelChange={setModel}
+                onSubmit={(text) => ask(text, model)}
+                busy={busy}
+                connected={connected}
+                centered
+              />
+
+              <div className="mt-6 grid gap-2 sm:grid-cols-2">
+                {EXAMPLES.map(({ icon: Icon, text }) => (
+                  <button
+                    key={text}
+                    onClick={() => ask(text, model)}
+                    disabled={!connected}
+                    className="group flex items-center gap-2.5 rounded-2xl border bg-card px-3.5 py-3 text-left text-sm text-muted-foreground transition-colors hover:border-primary/30 hover:bg-muted hover:text-foreground disabled:opacity-50"
+                  >
+                    <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-muted transition-colors group-hover:bg-background">
+                      <Icon size={16} isAnimated />
+                    </span>
+                    <span className="min-w-0 truncate">{text}</span>
+                  </button>
+                ))}
+              </div>
+            </m.div>
+          </div>
+        )}
+      </main>
+    </LazyMotion>
   );
 }

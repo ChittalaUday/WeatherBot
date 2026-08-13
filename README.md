@@ -242,10 +242,19 @@ stage so the UI shows progress instead of a spinner:
   it asks rather than guessing rain one turn and temperature the next.
 - Login is deliberately unused: the collection's `/user/login` is never called.
 
-**Frontend** (`frontend/`) - Next.js App Router, shadcn/ui, Tailwind, lucide icons,
-TanStack Query (health + suggestions) and TanStack Table (sortable result tables). The chat
-shows what the NLU understood as chips - intent, action, each location, and each time span
-with its canonical form (`tommorrow → tomorrow`) - then the summary and the table.
+**Frontend** (`frontend/`) - Next.js App Router, shadcn/ui, Tailwind, TanStack Query
+(health + models) and TanStack Table (sortable result tables).
+
+- the composer is the `ai-input` component from chamaac.com, wired to our socket. Its own
+  `AIInput` keeps an internal message list and fakes a reply, which would fight the real
+  transcript, so `components/composer.tsx` reuses its dropdown and pill primitives and keeps
+  the state ours. Its stock model list (GPT-4o, Claude…) is replaced by our two NLU bundles -
+  there is no third-party LLM anywhere in this app
+- icons are the animated lucide set from animateicons.in, which animate on hover
+- one sky-blue accent across light and dark, `next-themes` toggle in the header, chart series
+  derived from the same tokens so nothing is tuned twice
+- messages grow up from the composer rather than stranding one answer at the top of a tall
+  screen; the empty state centres the composer under a short hero with example prompts
 
 **Location flow.** When the text names no place, or names a relative one ("my field",
 "near me"), the backend replies `need_location` instead of guessing. The UI then asks the
