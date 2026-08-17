@@ -127,6 +127,7 @@ export default function Page() {
                   <button
                     key={text}
                     onClick={() => ask(text, model)}
+                    suppressHydrationWarning
                     disabled={!connected}
                     className="group flex items-center gap-2.5 rounded-2xl border bg-card px-3.5 py-3 text-left text-sm text-muted-foreground transition-colors hover:border-primary/30 hover:bg-muted hover:text-foreground disabled:opacity-50"
                   >

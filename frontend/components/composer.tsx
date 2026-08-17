@@ -72,6 +72,7 @@ export function Composer({
       >
         <div className="p-4 pb-14">
           <textarea
+            suppressHydrationWarning
             ref={textarea}
             value={value}
             rows={1}
@@ -143,6 +144,7 @@ export function Composer({
             </span>
             <button
               onClick={submit}
+              suppressHydrationWarning
               disabled={!connected || busy || !value.trim()}
               aria-label="Send"
               className={cn(

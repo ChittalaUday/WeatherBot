@@ -64,6 +64,8 @@ data/conversations.db-wal
 data/conversations.db-shm
 data/processed/hard_cases.csv
 data/from_users.csv
+# GeoNames dumps, re-downloaded on demand by src/fetch_locations.py
+data/.geonames_cache/
 
 # --- Node / Next.js -------------------------------------------------------
 node_modules/

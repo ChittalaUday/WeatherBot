@@ -1,6 +1,6 @@
 "use client";
 
-import { Brain, HelpCircle, Radar, Search, Sigma } from "lucide-react";
+import { Brain, HelpCircle, Radar, Search, Sigma, Volume2, Square } from "lucide-react";
 import { AlarmClockIcon } from "@/components/ui/alarm-clock-icon";
 import { CloudSunRainIcon } from "@/components/ui/cloud-sun-rain-icon";
 import { LoaderCircleIcon } from "@/components/ui/loader-circle-icon";
@@ -10,7 +10,7 @@ import { SparklesIcon } from "@/components/ui/sparkles-icon";
 import { ThumbsDownIcon } from "@/components/ui/thumbs-down-icon";
 import { ThumbsUpIcon } from "@/components/ui/thumbs-up-icon";
 import { TriangleAlertIcon } from "@/components/ui/triangle-alert-icon";
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Correction } from "@/components/correction";
 import { useFeedback } from "@/lib/use-feedback";
@@ -260,6 +260,76 @@ function Rate({
   );
 }
 
+function TtsButton({ text }: { text: string }) {
+  const [loading, setLoading] = useState(false);
+  const [playing, setPlaying] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  const handlePlay = async () => {
+    if (playing && audioRef.current) {
+      audioRef.current.pause();
+      setPlaying(false);
+      return;
+    }
+
+    if (audioRef.current) {
+      audioRef.current.play();
+      setPlaying(true);
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const ttsUrl = process.env.NEXT_PUBLIC_TTS_URL;
+      if (!ttsUrl) {
+         console.warn("NEXT_PUBLIC_TTS_URL is not set");
+         return;
+      }
+
+      const response = await fetch(`${ttsUrl}/tts`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "audio/*"
+        },
+        body: JSON.stringify({
+          text,
+          language: "en",
+          gender: "female"
+        })
+      });
+
+      if (!response.ok) throw new Error("TTS failed");
+      
+      const arrayBuffer = await response.arrayBuffer();
+      const blob = new Blob([arrayBuffer], { type: "audio/wav" });
+      const url = URL.createObjectURL(blob);
+      
+      const audio = new Audio(url);
+      audio.onended = () => setPlaying(false);
+      audioRef.current = audio;
+      
+      audio.play();
+      setPlaying(true);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <button 
+      onClick={handlePlay} 
+      className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+      disabled={loading}
+      aria-label="Play audio"
+    >
+      {loading ? <LoaderCircleIcon size={14} isAnimated /> : (playing ? <Square size={14} fill="currentColor" /> : <Volume2 size={14} />)}
+    </button>
+  );
+}
+
 export function Messages({
   messages,
   onShareLocation,
@@ -364,7 +434,12 @@ export function Messages({
                     <CloudSunRainIcon size={17} isAnimated />
                   </span>
                   <div className="min-w-0">
-                    <p className="font-medium">{result.summary}</p>
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="font-medium">{result.summary}</p>
+                      <div className="shrink-0 pt-0.5">
+                        <TtsButton text={result.summary} />
+                      </div>
+                    </div>
                     {result.reduced && (
                       <p className="mt-1 text-2xl font-semibold tabular-nums">
                         {result.reduced.value}
