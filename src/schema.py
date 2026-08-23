@@ -1,5 +1,9 @@
 """
-Schema definitions for WeatherBot NLU system.
+Shared contracts: the conversation state, and the v1-era NLU output `src/nlu.py` still emits.
+
+`backend/nlu/context.py` reads `ConversationState`, `Operation` and `Reference`; nothing else
+in the serving path touches this file. The v4 taxonomy lives in `src/v4/schema.py` and the v3
+one in `src/v3/schema.py` - this is not the place for a new label.
 """
 
 from enum import Enum
@@ -91,33 +95,12 @@ class Reference(str, Enum):
     NONE = "NONE"
 
 
-class Verdict(str, Enum):
-    """Query validator outcome - the only three ways a turn can end."""
-
-    READY = "READY"
-    CLARIFY = "CLARIFY"
-    REJECT = "REJECT"
-
-
 class Normalized(BaseModel):
     """Text normalizer output. The original is kept so every rewrite stays auditable."""
 
     original: str
     normalized: str
     replacements: List[List[str]] = Field(default_factory=list)   # [[before, after], ...]
-
-
-class NLUResult(BaseModel):
-    """One turn as the models see it - no resolution, no context, no coordinates."""
-
-    text: Normalized
-    weather_intent: WeatherIntent
-    action: Action
-    aggregation: Aggregation = Aggregation.RAW
-    entities: Entities = Field(default_factory=Entities)
-    reference: Reference = Reference.NONE
-    confidence: float = 0.0
-    scores: Dict[str, float] = Field(default_factory=dict)   # full vector, for error analysis
 
 
 class ConversationState(BaseModel):
@@ -133,23 +116,3 @@ class ConversationState(BaseModel):
     aggregation: Aggregation = Aggregation.RAW
     coords: Optional[dict] = None                       # browser geolocation, once given
     turns: int = 0
-
-
-class ResolvedQuery(BaseModel):
-    """The canonical query handed to the weather service, after every resolver has run.
-
-    intent/action are plain strings: v1 puts its 14-class weather_intent here, v2 its coarse
-    intent, and the resolvers downstream care about neither.
-    """
-
-    weather_intent: str
-    action: str
-    aggregation: str
-    places: List[dict] = Field(default_factory=list)    # resolved, with lat/lon
-    start: Optional[str] = None                         # ISO date/datetime, inclusive
-    end: Optional[str] = None
-    granularity: str = "daily"                          # daily | hourly
-    time_label: str = ""                                # what to print above the table
-    operation: Operation = Operation.SET
-    verdict: Verdict = Verdict.READY
-    missing: List[str] = Field(default_factory=list)    # slots that stopped it being READY

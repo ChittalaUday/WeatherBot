@@ -1,0 +1,398 @@
+"""
+The answer path: one Understanding in, one Answer out. No transport, no conversation state.
+
+    python -m backend.pipeline        # self-check, live if the APIs answer
+
+    route -> places -> plan -> fetch -> columns -> quality -> analyse -> decide -> summarise
+
+This is the *only* implementation. The chat endpoint calls it with the places the conversation
+already resolved, so a follow-up ("and there?") keeps the previous village and nothing is
+looked up twice; the comparison view calls it three times with none and lets it resolve. Two
+copies of this sequence would drift the moment one of them was fixed - and they did: location
+resolution, the "does this need weather at all" branch and the time window each existed twice,
+in versions that disagreed.
+
+Nothing here raises. A stage that fails records why and the later stages are skipped, because
+this runs three times side by side in the comparison view and one dead column must not take
+the other two with it.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import time
+from dataclasses import dataclass, field
+from datetime import datetime
+
+from backend.pipeline import advice as advice_engine
+from backend.pipeline import analysis, places as place_index, quality, render, sources
+from backend.pipeline import plan as planner
+from backend.pipeline.timewindow import select_rows
+
+__all__ = ["Answer", "run", "resolve_places"]
+
+
+@dataclass
+class Answer:
+    """Everything one turn produced, and how it got there.
+
+    `stages` is the audit trail - what each step decided and how long it took. It is what the
+    comparison view renders and what a debugger reads; it is never the source of any value the
+    UI shows, which all come from the named fields.
+    """
+
+    ok: bool = True
+    stages: dict = field(default_factory=dict)
+    total_ms: int = 0
+
+    # how it ended, when it did not end in an answer
+    failed_at: str = ""
+    error: str = ""
+    short_circuit: str = ""          # the intent family, for a turn that needs no weather
+    reply: str = ""                  # the canned answer for that turn
+    needs_location: bool = False
+    stopped_by: str = ""             # a plan verdict of REJECT or ASK
+
+    # the answer itself
+    summary: str = ""
+    places: list = field(default_factory=list)
+    unresolved: list = field(default_factory=list)
+    fields: list = field(default_factory=list)
+    when: str = ""
+    aggregation: str = "RAW"
+    hourly: bool = False
+    plan: planner.QueryPlan | None = None
+    quality: quality.Quality | None = None
+    advice: advice_engine.Advice | None = None
+    reduced: dict | None = None
+    insights: list = field(default_factory=list)
+    table: dict = field(default_factory=dict)
+    chart: dict | None = None
+    served_by: str = ""
+    fell_back_from: str = ""
+    rows: list = field(default_factory=list)     # the selected rows, one list per place
+
+    @property
+    def answered(self) -> bool:
+        """True only when there is a forecast to render - not a greeting, not a refusal."""
+        return self.ok and self.plan is not None and not self.stopped_by
+
+    def as_context(self) -> dict:
+        """The shape `backend.generation.context.build` reads. One place defines it."""
+        return {"places": self.places, "when": self.when, "hourly": self.hourly,
+                "insights": self.insights, "table": self.table, "reduced": self.reduced,
+                "advice": self.advice}
+
+    def payload(self, understanding, *, variables=None) -> dict:
+        """The wire body a client renders - identical for a chat turn and a compare column.
+
+        The chat endpoint adds the conversation-specific fields on top (turn_id, chat_id,
+        operation, metrics); everything else comes from here, so a compared column and a
+        chatted answer are literally the same object shape.
+        """
+        plan, checked = self.plan, self.quality
+        return {
+            "model": understanding.version,
+            "variables": variables if variables is not None else understanding.variables,
+            "intent": understanding.intent,
+            "action": understanding.action,
+            "when": self.when,
+            "places": self.places,
+            "granularity": "hourly" if self.hourly else "daily",
+            "summary": self.summary,
+            "confidence": round(understanding.confidence, 3),
+            "aggregation": self.aggregation,
+            "reduced": self.reduced,
+            "chart": self.chart,
+            "insights": [note.as_dict() for note in self.insights],
+            "unresolved": self.unresolved,
+            "presentation": ({"detail": understanding.detail, "chart": understanding.chart,
+                              "insights": understanding.insights}
+                             if understanding.detail else None),
+            "assumed": understanding.assumed,
+            "advice": ({"verdict": self.advice.verdict, "headline": self.advice.headline,
+                        "reasons": self.advice.reasons, "evidence": self.advice.evidence,
+                        "activity": self.advice.activity,
+                        "sub_activity": self.advice.sub_activity,
+                        "window": self.advice.window,
+                        "caveats": self.advice.caveats} if self.advice else None),
+            "plan": {**(plan.as_dict() if plan else {}),
+                     "served_by": self.served_by, "fell_back_from": self.fell_back_from},
+            "quality": {"status": checked.status, "rows": checked.rows,
+                        "coverage": {k: round(v, 2) for k, v in checked.coverage.items()},
+                        "unusable": checked.unusable, "gaps": checked.gaps,
+                        "message": checked.message} if checked else None,
+            "table": self.table,
+            "series": [{"place": place["name"],
+                        "points": [{"t": r["Date_time"], "v": r.get(self.fields[0])}
+                                   for r in rows]}
+                       for place, rows in zip(self.places, self.rows)] if self.fields else [],
+            "stages": self.stages,
+        }
+
+
+async def resolve_places(http, names: list[str]) -> tuple[list[dict], list[str]]:
+    """Raw location spans -> resolved places, plus the ones the index did not know.
+
+    The one implementation. The chat endpoint used to carry a verbatim copy of this, so a fix
+    to either was a fix to one of them.
+    """
+    usable = [n for n in names
+              if not place_index.is_relative(n) and not place_index.is_probably_not_a_place(n)]
+    if not usable:
+        return [], []
+    solr = lambda query, rows=8: sources.solr_query(http, query, rows)
+    # a comma span can be one address or two places - the resolver decides
+    parts = [part for name in usable for part in place_index.split_span(name)]
+    resolved = await asyncio.gather(*(place_index.resolve(solr, part) for part in parts))
+    return [p for p in resolved if p], [n for n, p in zip(parts, resolved) if not p]
+
+
+def served_fields(fields: list[str], selected: list[list[dict]]) -> tuple[list[str], list[str]]:
+    """Split the asked-for columns into (kept, never sent), by what actually came back.
+
+    A source serves what it serves: the hourly feed has no daily max/min and no day length,
+    the archive has six measurements and their normals and nothing else. Asking for the rest
+    cost twice - a table column of dashes, and a quality verdict of SPARSE, which printed "not
+    enough data to answer that" under an answer that had every number it needed.
+
+    The capability table says what a source *claims*; the rows say what it did. This trusts
+    the rows. When nothing at all came back, nothing is dropped - that is a data problem, and
+    quality has to be left free to say so.
+    """
+    absent = [f for f in fields if not any(quality.values(rows, f) for rows in selected)]
+    if not absent or len(absent) == len(fields):
+        return fields, []
+    return [f for f in fields if f not in absent], absent
+
+
+async def run(http, understanding, *, places: list[dict] | None = None,
+              aggregation: str | None = None, now: datetime | None = None) -> Answer:
+    """Everything after the model, for one reading of one sentence."""
+    started = time.perf_counter()
+    answer = Answer()
+    elapsed = lambda: int((time.perf_counter() - started) * 1000)
+
+    def finish(**changes) -> Answer:
+        for key, value in changes.items():
+            setattr(answer, key, value)
+        answer.total_ms = elapsed()
+        return answer
+
+    fields = understanding.fields()
+    answer.aggregation = (analysis.confirm_aggregation(understanding.text,
+                                                       understanding.aggregation)
+                          if aggregation is None else aggregation)
+
+    # 1. routing - does this turn want weather at all? A greeting that reaches the location
+    # resolver comes back asking which city you meant, which is the worst thing this bot does.
+    if not understanding.needs_weather:
+        answer.stages["routing"] = {"family": understanding.family,
+                                    "note": "answered without touching the weather API"}
+        return finish(short_circuit=understanding.family, reply=understanding.reply)
+
+    # 2. places - unless the caller already has them from conversation state
+    began = time.perf_counter()
+    unresolved: list[str] = []
+    if places is None:
+        try:
+            places, unresolved = await resolve_places(http, understanding.locations)
+        except Exception as exc:                                   # noqa: BLE001
+            return finish(ok=False, failed_at="locations",
+                          error=f"{type(exc).__name__}: {exc}")
+    answer.places, answer.unresolved = places, unresolved
+    answer.stages["locations"] = {
+        "ms": int((time.perf_counter() - began) * 1000),
+        "asked_for": understanding.locations,
+        "resolved": [{"name": p["name"], "state": p.get("state"),
+                      "lat": p["lat"], "lon": p["lon"]} for p in places],
+        "unresolved": unresolved,
+    }
+    if not places:
+        answer.stages["locations"]["note"] = "no place resolved - the caller must ask for one"
+        return finish(needs_location=True)
+
+    # 3. plan - which source, at what resolution, and can it be afforded
+    normalized = understanding.times_normalized[0] if understanding.times_normalized else None
+    if not normalized and understanding.activity != "NONE":
+        # an advice turn with no time still has a window - the one its rule reads
+        normalized = advice_engine.DEFAULT_WINDOW.get(understanding.activity)
+        if normalized:
+            answer.stages["assumed_window"] = {
+                "window": normalized, "why": f"{understanding.activity} with no time named"}
+    plan = planner.plan(times_normalized=[normalized] if normalized else [], places=places,
+                        aggregation=answer.aggregation,
+                        level=(places[0].get("type") or "village"), fields=fields, now=now)
+    answer.plan = plan
+    answer.stages["plan"] = {**plan.as_dict(), "fields": fields}
+    if plan.verdict in (planner.Verdict.REJECT, planner.Verdict.ASK):
+        return finish(stopped_by=plan.verdict.value)
+
+    # 4. fetch
+    began = time.perf_counter()
+    fetched = await sources.fetch_for(http, plan, places)
+    answer.served_by, answer.fell_back_from = fetched.source, fetched.fell_back_from
+    answer.stages["fetch"] = {
+        "ms": int((time.perf_counter() - began) * 1000),
+        "served_by": fetched.source, "ok": fetched.ok, "error": fetched.error,
+        "fell_back_from": fetched.fell_back_from, "note": fetched.note,
+        "rows_returned": [len(rows) for rows in fetched.per_place],
+    }
+    if not fetched.ok:
+        return finish(ok=False, failed_at="fetch", error=fetched.error)
+
+    answer.hourly = plan.hourly
+    answer.rows = [select_rows(feed, normalized or "", now)[0] for feed in fetched.per_place]
+    answer.when = plan.label or select_rows(fetched.per_place[0], normalized or "", now)[1]
+
+    # 5. columns - everything downstream reads `fields`, so the ones the feed never sent are
+    # dropped here, once.
+    fields, absent = served_fields(fields, answer.rows)
+    answer.fields = fields
+    if absent:
+        answer.stages["fields_dropped"] = {"absent": absent, "kept": fields}
+
+    # 6. quality - what actually came back, before anything is computed from it
+    checked = quality.assess(answer.rows[0], fields,
+                             expect_daily=0 if answer.hourly else len(answer.rows[0]))
+    answer.quality = checked
+    answer.stages["quality"] = {
+        "status": checked.status, "rows": checked.rows, "gaps": checked.gaps,
+        "coverage": {k: round(v, 2) for k, v in checked.coverage.items()},
+        "unusable": checked.unusable, "message": checked.message,
+    }
+
+    # 7. analysis - the reduction, the observations
+    answer.reduced = analysis.apply_aggregation(answer.rows[0], fields[0], answer.aggregation)
+    # `wanted` is v3's insight selection; v4 leaves it None and every applicable one is emitted
+    answer.insights = analysis.build_insights(answer.rows, places, fields, answer.aggregation,
+                                              answer.hourly,
+                                              wanted=understanding.insights or None)
+    answer.stages["analysis"] = {
+        "aggregation": answer.aggregation, "reduced": answer.reduced,
+        "insights": [n.as_dict() for n in answer.insights],
+        "sample": {f: quality.values(answer.rows[0], f)[:5] for f in fields[:3]},
+    }
+
+    # 8. the decision, if this was an advice turn
+    # `hourly` matters: the same rule reads an hourly feed and a daily one, and only one of
+    # them can honestly say "from 14:00"
+    verdict = advice_engine.evaluate(understanding.activity, answer.rows[0],
+                                     sub_activity=understanding.sub_activity,
+                                     hourly=answer.hourly)
+    answer.advice = verdict
+    answer.stages["advice"] = ({"verdict": verdict.verdict, "headline": verdict.headline,
+                               "reasons": verdict.reasons, "evidence": verdict.evidence,
+                               "window": verdict.window, "caveats": verdict.caveats}
+                              if verdict else {"note": "not an advice turn"})
+
+    # 9. the conclusion. Order matters: the number that was asked for leads, then the
+    # decision, then anything the data could not support.
+    compare_two = understanding.action == "COMPARE" and len(places) > 1
+    shown = places if compare_two else places[:1]
+    parts = [render.summarize(understanding.action,
+                              answer.rows if compare_two else answer.rows[0],
+                              fields, shown, answer.when, answer.aggregation)]
+    if answer.reduced:
+        parts.insert(0, answer.reduced["text"])          # the figure that was asked for leads
+    if verdict and verdict.verdict != advice_engine.UNKNOWN:
+        parts.insert(0, verdict.headline)                # ...unless a decision was asked for
+    elif verdict:
+        # UNKNOWN: the rule could not run, so there are no figures to stand behind. Saying why
+        # is the whole answer - the readings below it would read as one.
+        parts = [verdict.headline, *verdict.reasons]
+    parts += _caveats(checked, fetched, plan, absent, unresolved)
+    answer.summary = _sentences(parts)
+
+    answer.table = render.build_table(answer.rows if compare_two else answer.rows[0], fields,
+                                      shown, answer.hourly)
+    # A verdict and a single reduced figure are both one-line answers; the numbers under them
+    # are evidence, not a dataset to explore. Only draw the series when someone asked to see
+    # it - by wording, or by v3's presentation head, which read the question itself.
+    simple = bool(verdict) or bool(answer.reduced)
+    answer.chart = (analysis.build_chart(answer.rows, places, fields[0], answer.hourly,
+                                         kind=understanding.chart or None, fields=fields)
+                    if not simple or analysis.wants_chart(understanding.text,
+                                                          understanding.chart)
+                    else None)
+    answer.stages["answer"] = {"summary": answer.summary, "when": answer.when,
+                               "table_rows": len(answer.rows[0]), "columns": fields}
+    return finish()
+
+
+def _sentences(parts: list[str]) -> str:
+    """Join fragments into readable prose, punctuating the ones that forgot to.
+
+    Every piece here is built by a different rule and only some of them end in a full stop.
+    Concatenated with a bare space they ran together - "Take it - up to 1.9mm in one reading,
+    from 19 Aug Guntur, tomorrow: 1.9mm total" reads as one broken sentence, and the model
+    downstream, handed that, copied it rather than rewriting it.
+    """
+    out = []
+    for part in parts:
+        part = (part or "").strip()
+        if not part:
+            continue
+        # a trailing bracket is already punctuation of its own kind
+        out.append(part if part[-1] in ".!?)" else part + ".")
+    return " ".join(out)
+
+
+def _caveats(checked, fetched, plan, absent: list[str], unresolved: list[str]) -> list[str]:
+    """Everything the answer is owed but the conclusion could not carry, in reading order."""
+    out = []
+    if (caveat := quality.caveat(checked)):
+        out.append(caveat)
+    if fetched.fell_back_from:
+        out.append(f"({fetched.note or 'served from a fallback source'}.)")
+    if plan.unservable:
+        out.append(f"(No {', '.join(plan.unservable)} in that archive.)")
+    if absent:
+        # said once, plainly - the reader asked for these and is owed the reason they are not
+        # in the table, but it is a footnote, not a failure
+        out.append("(No " + ", ".join(render.label(f).lower() for f in absent) +
+                   " in this feed.)")
+    if unresolved:
+        out.append(f"(Could not find {', '.join(unresolved)} - showing the rest.)")
+    return out
+
+
+async def demo():
+    """Self-check: the column rule offline, then one full run if the APIs answer."""
+    from backend.nlu import Registry
+
+    # the archive's own shape - six measurements and their normals, nothing else. Asking it
+    # for sunshine must lose the column, not the answer.
+    archive = [{"Date_time": "2019-08-07T00:00:00", "Rainfall": 6.6279, "Tmax": 28.209,
+                "Tmin": 22.8525, "RH": 79.5186, "Wind_Speed": 4.2744, "DayLength": 3.0498}]
+    assert served_fields(["Rainfall", "Tmax", "SunSD"], [archive]) == \
+        (["Rainfall", "Tmax"], ["SunSD"])
+    # hourly: no daily max/min in the feed, but humidity itself is there
+    hourly = [{"Date_time": "2026-08-14T16:00:00", "RH": 58.83, "RH_max": None, "SunSD": 1}]
+    assert served_fields(["RH", "RH_max", "SunSD"], [hourly]) == (["RH", "SunSD"], ["RH_max"])
+    # a dead fetch drops nothing: quality must stay free to report that nothing came back
+    assert served_fields(["RH", "SunSD"], [[{"Date_time": "x"}]]) == (["RH", "SunSD"], [])
+    assert served_fields(["RH"], [[]]) == (["RH"], [])
+    print("  columns: kept what the feed sent, dropped what it never did")
+
+    registry = Registry()
+    async with sources.client() as http:
+        for text in ("should i spray pesticide on the cotton in Guntur tomorrow",
+                     "rain and temperature in Guntur this week", "hey there"):
+            got = await run(http, registry.understand(text))
+            print(f"\n  {text}")
+            print(f"    ok={got.ok} answered={got.answered} {got.total_ms}ms  "
+                  f"stages: {list(got.stages)}")
+            for name, stage in got.stages.items():
+                head = (stage.get("summary") or stage.get("headline") or stage.get("status")
+                        or stage.get("verdict") or stage.get("served_by")
+                        or stage.get("note") or "")
+                print(f"      {name:14s} {str(head)[:64]}")
+            if got.answered:
+                # the payload a client renders must be built from the same object
+                body = got.payload(registry.understand(text))
+                assert body["summary"] == got.summary and body["table"] == got.table
+
+
+if __name__ == "__main__":
+    asyncio.run(demo())

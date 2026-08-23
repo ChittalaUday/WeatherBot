@@ -1,0 +1,63 @@
+{
+  "train_rows": 18518,
+  "test": {
+    "intent": 0.9974,
+    "weather_intent": 0.9856,
+    "variables": 0.9284,
+    "activity": 0.9976,
+    "aggregation": 0.9451,
+    "locations": 0.9683,
+    "times": 0.9246,
+    "sub_activity": 0.9994,
+    "everything": 0.7914,
+    "variables_f1": 0.9602,
+    "entities_f1": 0.991,
+    "rows": 3408,
+    "advice_rows": 1272
+  },
+  "eval": {
+    "intent": 0.9985,
+    "weather_intent": 0.9824,
+    "variables": 0.9295,
+    "activity": 1.0,
+    "aggregation": 0.9456,
+    "locations": 0.9285,
+    "times": 0.9187,
+    "sub_activity": 1.0,
+    "everything": 0.7615,
+    "variables_f1": 0.9611,
+    "entities_f1": 0.9845,
+    "rows": 2042,
+    "advice_rows": 773
+  },
+  "implicit": {
+    "intent": 1.0,
+    "weather_intent": 0.9925,
+    "variables": 0.9962,
+    "activity": 1.0,
+    "aggregation": 1.0,
+    "locations": 0.9887,
+    "times": 0.9306,
+    "sub_activity": 1.0,
+    "everything": 0.9174,
+    "variables_f1": 0.9992,
+    "entities_f1": 1.0,
+    "rows": 533,
+    "advice_rows": 533
+  },
+  "confusion": {
+    "intent": 1.0,
+    "weather_intent": 0.9958,
+    "variables": 0.9958,
+    "activity": 1.0,
+    "aggregation": 1.0,
+    "locations": 0.9832,
+    "times": 0.9538,
+    "sub_activity": 1.0,
+    "everything": 0.937,
+    "variables_f1": 0.9991,
+    "entities_f1": 1.0,
+    "rows": 238,
+    "advice_rows": 238
+  }
+}

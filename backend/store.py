@@ -23,11 +23,13 @@ import argparse
 import csv
 import json
 import sqlite3
+import threading
+import uuid
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 
-DB_PATH = Path(__file__).resolve().parent.parent / "data" / "conversations.db"
+from backend.config import DB_PATH
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS turns (
@@ -99,8 +101,7 @@ def _migrate(connection) -> None:
     connection.commit()
 
 
-def connect(path: Path | str = DB_PATH) -> sqlite3.Connection:
-    path = Path(path)
+def _open(path: Path) -> sqlite3.Connection:
     path.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(path, check_same_thread=False)
     connection.row_factory = sqlite3.Row
@@ -110,8 +111,132 @@ def connect(path: Path | str = DB_PATH) -> sqlite3.Connection:
     return connection
 
 
+BROKEN = ("malformed", "not a database", "disk image", "corrupt")
+
+
+class _Rows:
+    """A cursor's results, already read, so nothing touches the connection after the lock.
+
+    `execute(...).fetchone()` looks atomic and is not: the fetch goes back to the connection
+    after the lock would have been released. Materialising here keeps every touch inside it.
+    """
+
+    __slots__ = ("rows", "lastrowid", "rowcount")
+
+    def __init__(self, cursor):
+        self.rows = cursor.fetchall()
+        self.lastrowid = cursor.lastrowid
+        self.rowcount = cursor.rowcount
+
+    def fetchone(self):
+        return self.rows[0] if self.rows else None
+
+    def fetchall(self):
+        return self.rows
+
+    def __iter__(self):
+        return iter(self.rows)
+
+    def __len__(self):
+        return len(self.rows)
+
+
+class Resilient:
+    """A connection that survives its file being replaced or going bad underneath it.
+
+    Two things happen in practice and both used to take the whole UI down with 500s:
+
+      - the file is swapped while the server is running (restoring a backup, say). The open
+        handle still maps the old image, so every read fails until a restart.
+      - the image is genuinely corrupt, and the frontend polls /api/feedback per turn, so one
+        bad page turns into a wall of errors.
+
+    Either way the answer is the same: reopen once and retry. If the file itself is the
+    problem it is moved aside - never deleted, it is the only copy of those turns - and a
+    fresh one takes its place, so the app keeps working and the wreck stays available.
+    """
+
+    def __init__(self, path: Path):
+        self.path = Path(path)
+        self._connection = _open(self.path)
+        # sqlite3.threadsafety is 1 on this build: "threads may share the module, but not
+        # connections". FastAPI runs every sync endpoint in an anyio worker thread while the
+        # websocket writes turns from the event loop, so one shared connection was being used
+        # from several threads at once. check_same_thread=False turns off the warning, not the
+        # hazard - it corrupted the database one night and segfaulted the interpreter the next.
+        self._lock = threading.RLock()
+
+    def _quarantine(self) -> None:
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        for suffix in ("", "-wal", "-shm"):
+            broken = Path(str(self.path) + suffix)
+            if broken.exists():
+                broken.rename(f"{self.path}.corrupt-{stamp}{suffix}")
+        print(f"store: {self.path.name} was unreadable - moved aside as "
+              f"{self.path.name}.corrupt-{stamp}, starting a fresh one")
+
+    def _reopen(self) -> None:
+        try:
+            self._connection.close()
+        except sqlite3.Error:
+            pass
+        try:
+            self._connection = _open(self.path)
+            self._connection.execute("SELECT 1 FROM turns LIMIT 1").fetchone()
+            return                                    # the file was only swapped, not broken
+        except sqlite3.DatabaseError:
+            self._quarantine()
+            self._connection = _open(self.path)
+
+    def execute(self, *args, **kwargs) -> _Rows:
+        with self._lock:
+            try:
+                return _Rows(self._connection.execute(*args, **kwargs))
+            except sqlite3.DatabaseError as exc:
+                if not any(word in str(exc).lower() for word in BROKEN):
+                    raise
+                self._reopen()
+                return _Rows(self._connection.execute(*args, **kwargs))
+
+    def executescript(self, *args, **kwargs):
+        with self._lock:
+            return self._connection.executescript(*args, **kwargs)
+
+    def commit(self):
+        with self._lock:
+            return self._connection.commit()
+
+    def close(self):
+        with self._lock:
+            return self._connection.close()
+
+    def __getattr__(self, name):                      # cursor, row_factory, in_transaction ...
+        return getattr(self._connection, name)
+
+
+def healthy(path: Path | str = DB_PATH) -> bool:
+    """True when the file on disk passes SQLite's own integrity check."""
+    path = Path(path)
+    if not path.exists():
+        return True                                   # nothing to be wrong yet
+    try:
+        with sqlite3.connect(path) as probe:
+            return probe.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    except sqlite3.DatabaseError:
+        return False
+
+
+def connect(path: Path | str = DB_PATH) -> Resilient:
+    return Resilient(Path(path))
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def new_chat_id() -> str:
+    """A fresh conversation id. The client keeps it, so a reload resumes the same chat."""
+    return f"chat-{uuid.uuid4().hex[:10]}"
 
 
 def record_turn(connection, session, text, *, chat_id=None, turn=None, intent=None,
@@ -358,6 +483,48 @@ def review_queue(connection, limit: int = 50) -> list[dict]:
                    AND SUM(CASE WHEN f.kind IN ('choice','correction','up') THEN 1 ELSE 0 END) = 0)
            ORDER BY flagged DESC, t.confidence ASC
            LIMIT ?""", (limit,))]
+
+
+def failed_turns(connection, limit: int = 500) -> list[dict]:
+    """Every turn that did not answer, with what the model read and why it stopped.
+
+    `training_rows` only sees turns a human took the trouble to label. These are the ones that
+    failed on their own - the location that resolved to nothing, the date that came back as a
+    place, the fetch that died - and they are the cheapest labels in the database, because the
+    failure itself says what the right answer was not.
+
+    Grouped by `error_type` so the shape of the failure is visible before anything is
+    retrained: 12 turns spread evenly over four causes is four small problems, and 12 turns of
+    one cause is one worth fixing properly.
+    """
+    rows = []
+    for record in connection.execute(
+        """SELECT t.id, t.text, t.normalized, t.intent, t.action, t.confidence, t.outcome,
+                  t.location, t.time_raw, t.unresolved, t.detail, f.kind, f.error_type,
+                  f.intent AS corrected_intent, f.location AS corrected_location
+           FROM turns t
+           LEFT JOIN feedback f ON f.turn_id = t.id
+           WHERE t.outcome IN ('error', 'need_location', 'clarified')
+              OR f.kind IN ('down', 'correction')
+           ORDER BY t.id DESC LIMIT ?""", (limit,)):
+        text = (record["text"] or "").strip()
+        if text.startswith("[") and "]" in text:          # strip the "[v4] " model tag
+            text = text[text.index("]") + 1:].strip()
+        detail = record["detail"] or ""
+        rows.append({
+            "turn_id": record["id"], "text": text,
+            "outcome": record["outcome"],
+            # the failure's own words are the label when nobody left one
+            "cause": record["error_type"] or (
+                "unresolved_location" if detail.startswith("unresolved:")
+                else "no_place_named" if record["outcome"] == "need_location"
+                else record["outcome"]),
+            "detail": detail,
+            "read_as": record["location"], "read_time": record["time_raw"],
+            "corrected_intent": record["corrected_intent"],
+            "corrected_location": record["corrected_location"],
+        })
+    return rows
 
 
 def export(connection, path: Path, include_approved=False) -> int:

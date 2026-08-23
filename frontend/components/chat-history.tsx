@@ -12,9 +12,8 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
-import { cn } from "@/lib/utils";
+import { apiUrl, cn } from "@/lib/utils";
 
-const API = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8787";
 
 type ChatSummary = {
   chat_id: string;
@@ -48,7 +47,7 @@ export function ChatHistory({
 }) {
   const { data, isFetching, refetch } = useQuery({
     queryKey: ["chats"],
-    queryFn: async () => (await fetch(`${API}/api/chats?limit=40`)).json(),
+    queryFn: async () => (await fetch(`${apiUrl()}/api/chats?limit=40`)).json(),
     staleTime: 15_000,
   });
   const chats: ChatSummary[] = data?.chats ?? [];

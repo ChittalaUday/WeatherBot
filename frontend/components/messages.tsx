@@ -1,6 +1,6 @@
 "use client";
 
-import { Brain, HelpCircle, Radar, Search, Sigma, Volume2, Square } from "lucide-react";
+import { Brain, HelpCircle, PenLine, Radar, Search, Sigma, Volume2, Square } from "lucide-react";
 import { AlarmClockIcon } from "@/components/ui/alarm-clock-icon";
 import { CloudSunRainIcon } from "@/components/ui/cloud-sun-rain-icon";
 import { LoaderCircleIcon } from "@/components/ui/loader-circle-icon";
@@ -15,19 +15,47 @@ import { useQuery } from "@tanstack/react-query";
 import { Correction } from "@/components/correction";
 import { useFeedback } from "@/lib/use-feedback";
 
-const API = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8787";
 import { ResultChart } from "@/components/result-chart";
 import { ResultTable } from "@/components/result-table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import type { ChatMessage, Nlu } from "@/lib/types";
+import type { ChatMessage, Metrics as TurnMetrics, Nlu, PlanInfo, Quality } from "@/lib/types";
+import { Compare } from "@/components/compare";
+import { apiUrl } from "@/lib/utils";
 
 const STAGE_COPY: Record<string, { icon: typeof Brain; label: string }> = {
   understanding: { icon: Brain, label: "Reading your question" },
   locating: { icon: Search, label: "Finding the place" },
   fetching: { icon: Radar, label: "Pulling the forecast" },
+  writing: { icon: PenLine, label: "Writing the answer" },
 };
+
+/** Where the turn's time went. Only the stages that ran are listed - a greeting has an NLU
+ *  number and nothing else, and a zero next to "Data API" would be a lie about work not done. */
+function Metrics({ metrics }: { metrics: TurnMetrics }) {
+  const stages: [string, number | undefined][] = [
+    ["NLU", metrics.nlu_ms],
+    ["Solr", metrics.solr_ms],
+    ["Data API", metrics.api_ms],
+    ["LLM", metrics.llm_ms],
+    ["DB", metrics.db_ms],
+  ];
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border/50 pt-2 text-[10px] text-muted-foreground">
+      {stages
+        .filter(([, ms]) => ms !== undefined)
+        .map(([label, ms]) => (
+          <span key={label}>
+            {label} <span className="font-medium tabular-nums text-foreground">{ms}ms</span>
+          </span>
+        ))}
+      <span className="ml-auto">
+        total <span className="font-medium tabular-nums text-foreground">{metrics.total_ms}ms</span>
+      </span>
+    </div>
+  );
+}
 
 function Bubble({ children, mine = false }: { children: React.ReactNode; mine?: boolean }) {
   return (
@@ -94,8 +122,36 @@ function NluChips({ nlu }: { nlu: Nlu }) {
   );
 }
 
-/** Browser geolocation, asked for only when the text had no usable place (Rule 4.1). */
-function LocationPrompt({
+/**
+ * What the local model is reasoning, while it reasons. Shown rather than hidden: phrasing the
+ * answer is the longest step of a turn, and its thinking is the only honest thing to put in
+ * that gap.
+ *
+ * Open while it is being written, shut once the answer is in - a finished thought is a
+ * one-line footnote, not the middle of the transcript. `<details>` rather than state: the
+ * browser already has this widget.
+ */
+export function Thinking({ text, live = false }: { text: string; live?: boolean }) {
+  return (
+    <details
+      open={live}
+      className="group rounded-xl border border-dashed bg-muted/30 px-3 py-1.5 [&[open]]:py-2"
+    >
+      <summary className="flex cursor-pointer list-none items-center gap-1.5 text-[11px] text-muted-foreground">
+        <Brain className={`h-3.5 w-3.5 ${live ? "animate-pulse" : ""}`} />
+        {live ? "Thinking" : "Thought this through"}
+        <span className="text-[10px] opacity-50 group-open:hidden">· show</span>
+      </summary>
+      <p className="mt-1.5 max-h-40 overflow-y-auto whitespace-pre-wrap text-[11px] leading-relaxed text-muted-foreground">
+        {text}
+      </p>
+    </details>
+  );
+}
+
+/** Browser geolocation, asked for only when the text had no usable place (Rule 4.1).
+ *  Exported because the plain chat asks the same question and must ask it the same way. */
+export function LocationPrompt({
   message,
   answered,
   onShare,
@@ -172,7 +228,7 @@ function Rate({
   const existing = useQuery({
     queryKey: ["feedback", turnId],
     queryFn: async () =>
-      (await fetch(`${API}/api/feedback/${turnId}`)).json() as Promise<{
+      (await fetch(`${apiUrl()}/api/feedback/${turnId}`)).json() as Promise<{
         feedback: { kind: string; revisions: number } | null;
       }>,
     enabled: rateable && sent === null,
@@ -237,8 +293,10 @@ function Rate({
       <button
         onClick={() => {
           setSent("up");
-          feedback.mutate({ turn_id: turnId, kind: "up", intent, action, model,
-                            variables, location: locations, time: times });
+          feedback.mutate({
+            turn_id: turnId, kind: "up", intent, action, model,
+            variables, location: locations, time: times
+          });
         }}
         aria-label="Correct answer"
         className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-emerald-600"
@@ -263,6 +321,7 @@ function Rate({
 function TtsButton({ text }: { text: string }) {
   const [loading, setLoading] = useState(false);
   const [playing, setPlaying] = useState(false);
+  const [ttsMs, setTtsMs] = useState<number | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const handlePlay = async () => {
@@ -282,10 +341,11 @@ function TtsButton({ text }: { text: string }) {
       setLoading(true);
       const ttsUrl = process.env.NEXT_PUBLIC_TTS_URL;
       if (!ttsUrl) {
-         console.warn("NEXT_PUBLIC_TTS_URL is not set");
-         return;
+        console.warn("NEXT_PUBLIC_TTS_URL is not set");
+        return;
       }
 
+      const start = performance.now();
       const response = await fetch(`${ttsUrl}/tts`, {
         method: "POST",
         headers: {
@@ -300,15 +360,16 @@ function TtsButton({ text }: { text: string }) {
       });
 
       if (!response.ok) throw new Error("TTS failed");
-      
+
       const arrayBuffer = await response.arrayBuffer();
+      setTtsMs(Math.round(performance.now() - start));
       const blob = new Blob([arrayBuffer], { type: "audio/wav" });
       const url = URL.createObjectURL(blob);
-      
+
       const audio = new Audio(url);
       audio.onended = () => setPlaying(false);
       audioRef.current = audio;
-      
+
       audio.play();
       setPlaying(true);
     } catch (e) {
@@ -319,37 +380,74 @@ function TtsButton({ text }: { text: string }) {
   };
 
   return (
-    <button 
-      onClick={handlePlay} 
-      className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-      disabled={loading}
-      aria-label="Play audio"
-    >
-      {loading ? <LoaderCircleIcon size={14} isAnimated /> : (playing ? <Square size={14} fill="currentColor" /> : <Volume2 size={14} />)}
-    </button>
+    <div className="flex items-center gap-2">
+      {ttsMs !== null && (
+        <span className="text-[10px] text-muted-foreground whitespace-nowrap">TTS: {ttsMs}ms</span>
+      )}
+      <button
+        onClick={handlePlay}
+        className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+        disabled={loading}
+        aria-label="Play audio"
+      >
+        {loading ? <LoaderCircleIcon size={14} isAnimated /> : (playing ? <Square size={14} fill="currentColor" /> : <Volume2 size={14} />)}
+      </button>
+    </div>
+  );
+}
+
+// The advice verdict is deliberately NOT rendered as a card here.
+//
+// It is still computed, and it still leads the answer: `pipeline.run` puts the headline at the
+// front of the summary and `generation` words it. Showing it a second time as a coloured
+// YES/NO badge made a correct answer look wrong - the sentence would say "you will probably be
+// fine, there is a little rain around" while a red NO sat underneath it, because the rule's
+// verdict is a threshold and the sentence is a description, and a reader trusts the badge.
+// One statement of the decision, in the answer, is the whole point of the wording layer.
+//
+// The verdict, its reasons and its evidence are all still on the payload (`result.advice`) and
+// are rendered per column in compare.tsx, where comparing what each model decided is the job.
+
+/** Where the numbers came from and how complete they were - shown only when it is not routine. */
+function SourceNote({ plan, quality }: { plan?: PlanInfo; quality?: Quality }) {
+  const chips: string[] = [];
+  if (plan?.served_by) chips.push(plan.served_by.replace(/_/g, " ").toLowerCase());
+  if (plan?.resolution) chips.push(plan.resolution.toLowerCase());
+  if (plan?.rows) chips.push(`${plan.rows} rows`);
+  const problems = [
+    plan?.fell_back_from ? `fell back from ${plan.fell_back_from.replace(/_/g, " ").toLowerCase()}` : "",
+    plan?.unservable?.length ? `no ${plan.unservable.join(", ")} in that source` : "",
+    quality && quality.status !== "OK" ? quality.message || quality.status.toLowerCase() : "",
+  ].filter(Boolean);
+  if (!chips.length && !problems.length) return null;
+  return (
+    <div className="mt-2 border-t pt-1.5">
+      <div className="flex flex-wrap items-center gap-1.5">
+        {chips.map((chip) => (
+          <span key={chip} className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+            {chip}
+          </span>
+        ))}
+      </div>
+      {problems.map((problem) => (
+        <p key={problem} className="mt-1 text-[11px] text-amber-600 dark:text-amber-500">{problem}</p>
+      ))}
+    </div>
   );
 }
 
 export function Messages({
   messages,
   onShareLocation,
-  onAsk,
 }: {
   messages: ChatMessage[];
   onShareLocation: (text: string, lat: number, lon: number) => void;
-  onAsk: (text: string) => void;
 }) {
-  const feedback = useFeedback();
-
-  /** Picking an intent answers the model's question - the cheapest gold label there is. */
-  const onChoose = (turnId: number, intent: string, followUp: string) => {
-    feedback.mutate({ turn_id: turnId, kind: "choice", intent });
-    onAsk(followUp);
-  };
-
   return (
     <div className="flex flex-col gap-3">
-      {messages.map((message) => {
+      {messages.map((message, index) => {
+        // the last message is the one still being written, and the only one that animates
+        const live = index === messages.length - 1;
         switch (message.role) {
           case "user":
             return (
@@ -377,6 +475,25 @@ export function Messages({
           case "nlu":
             return <NluChips key={message.id} nlu={message.nlu} />;
 
+          case "thinking":
+            return <Thinking key={message.id} text={message.text} live={live} />;
+
+          case "streaming":
+            // the same bubble the finished answer arrives in, so nothing jumps when it does
+            return (
+              <Bubble key={message.id}>
+                <div className="flex items-start gap-2">
+                  <span className="mt-0.5 shrink-0">
+                    <CloudSunRainIcon size={17} isAnimated />
+                  </span>
+                  <p className="min-w-0 font-medium">
+                    {message.text}
+                    <span className="ml-0.5 inline-block h-3.5 w-0.5 translate-y-0.5 animate-pulse rounded-full bg-primary" />
+                  </p>
+                </div>
+              </Bubble>
+            );
+
           case "ask-location":
             return (
               <LocationPrompt
@@ -387,6 +504,9 @@ export function Messages({
               />
             );
 
+          // The only clarify left: the query planner cannot serve that question. Both models
+          // commit to a reading rather than asking which one you meant (Rule 1.1), so there
+          // is no intent to pick here and nothing to label.
           case "clarify":
             return (
               <Card key={message.id} className="max-w-full gap-0 border-dashed p-4">
@@ -394,25 +514,45 @@ export function Messages({
                   <HelpCircle className="h-4 w-4 text-amber-500" />
                   {message.message}
                 </div>
-                {message.options.length > 0 && (
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {message.options.map((option) => (
-                      <Button
-                        key={option.label}
-                        size="sm"
-                        variant="outline"
-                        className="h-7 text-xs"
-                        onClick={() => onChoose(message.turnId, option.intent, `${message.text} ${option.label}`)}
-                      >
-                        {option.label}
-                        <span className="ml-1 text-muted-foreground">
-                          {Math.round(option.confidence * 100)}%
-                        </span>
-                      </Button>
-                    ))}
-                  </div>
-                )}
               </Card>
+            );
+
+          case "compare":
+            return (
+              <div key={message.id} className="w-full">
+                <Compare
+                  text={message.text}
+                  models={message.models}
+                  disagreements={message.disagreements}
+                  totalMs={message.totalMs}
+                  pending={message.pending}
+                />
+              </div>
+            );
+
+          case "chat":
+            return (
+              <Bubble key={message.id}>
+                <div className="flex items-start gap-2">
+                  <span className="mt-0.5 shrink-0">
+                    <CloudSunRainIcon size={17} isAnimated />
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-sm">{message.message}</p>
+                    <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                      <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                        {message.intent.replace(/_/g, " ").toLowerCase()}
+                      </span>
+                      {message.locations.map((place) => (
+                        <span key={place} className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                          {place}
+                        </span>
+                      ))}
+                    </div>
+                    {message.metrics && <Metrics metrics={message.metrics} />}
+                  </div>
+                </div>
+              </Bubble>
             );
 
           case "error":
@@ -472,13 +612,17 @@ export function Messages({
                     {result.insights.length > 0 && (
                       <ul className="mt-2 space-y-1">
                         {result.insights.map((insight) => (
-                          <li key={insight} className="flex gap-1.5 text-[11px] text-muted-foreground">
+                          <li
+                            key={`${insight.kind}-${insight.text}`}
+                            className="flex gap-1.5 text-[11px] text-muted-foreground"
+                          >
                             <span className="text-primary">•</span>
-                            {insight}
+                            {insight.text}
                           </li>
                         ))}
                       </ul>
                     )}
+                    <SourceNote plan={result.plan} quality={result.quality} />
                     {result.presentation && (
                       <p className="mt-2 text-[10px] text-muted-foreground">
                         model chose: {result.presentation.detail.toLowerCase()} detail ·{" "}
@@ -501,6 +645,7 @@ export function Messages({
                       locations={result.places.map((place) => place.raw ?? place.name)}
                       times={result.when ? [result.when] : []}
                     />
+                    {result.metrics && <Metrics metrics={result.metrics} />}
                   </div>
                 </div>
               </Bubble>

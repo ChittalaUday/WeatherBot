@@ -1,14 +1,20 @@
-# WeatherBot ML Model & Training Rules Book — Model 1
+# WeatherBot ML Model & Training Rules Book — Model 1 (`v3`)
 
-Model 1 is the only model this project ships. It replaced two earlier attempts: a 14-class
-single-variable classifier (v1) and a coarse-intent slot filler (v2). Both are gone. Model 1
-keeps their taxonomy where it was right and predicts three more things neither of them could.
+> **Scope.** This is the rules book for **Model 1 only**. Model 2 (`v4`) is the default served
+> model and has a different taxonomy — 16 intents, 10 variables, 12 activities, and it derives
+> what Model 1 predicts. Model 2's contract is [V4_PLAN.md §2](V4_PLAN.md); the machinery for
+> both is [ARCHITECTURE.md](ARCHITECTURE.md).
+>
+> Kept because it is still load-bearing: the accuracy floors in §10 are what `test_model.py`
+> asserts, and Rules 1.1, 5.1–5.4 and 8.5 are version-neutral — the span tagger, the
+> normalizer and the human-labels-win policy are shared by both models.
 
-The architecture id is still `v3` — it names the bundle (`models/nlu_v3.joblib`), the module
+Model 1 replaced two earlier attempts: a 14-class single-variable classifier (v1) and a
+coarse-intent slot filler (v2). Both are gone. Model 1 keeps their taxonomy where it was right
+and predicts three more things neither of them could.
+
+The architecture id is `v3` — it names the bundle (`models/nlu_v3.joblib`), the module
 (`src/v3/`) and the tag on stored turns. "Model 1" is the name everywhere a human looks.
-
-For the full architecture, the file-by-file map and the training chain, see
-[ARCHITECTURE.md](ARCHITECTURE.md). This file is the rules only.
 
 ---
 
@@ -79,7 +85,7 @@ Model 1 predicts **eight** targets from user text, in one pass over one shared f
 
 Model 1 always commits to a reading. There is no clarification path: every turn returns an
 intent, a variable set, a detail level and a chart, and reports what it assumed in `assumed`.
-`backend/registry.py::NEVER_ASKS` encodes this, and `test_model.py::check_always_decides`
+`backend/nlu/registry.py::NEVER_ASKS` encodes this, and `test_model.py::check_always_decides`
 enforces it — a turn that comes back undecided is a test failure, not a prompt to the user.
 
 ---
@@ -101,7 +107,7 @@ intent. The model must classify into exactly **ONE** of 6 classes:
 | `UNKNOWN` | nothing weather-shaped was said | "who won the match" |
 
 `COMPARE` and `ALERT` carry the action; everything else maps to `GET` downstream
-(`backend/registry.py::_understand`).
+(`backend/nlu/registry.py::_understand`).
 
 ### Rule 2.2: Forbidden `intent` Labels
 
@@ -172,7 +178,7 @@ picks what to do with the **rows** the time expression selected.
 - `TEMPERATURE_MIN` + `RAW` is the `Tmin` field for one day. `TEMPERATURE` + `MIN` is the
   coldest value across a range. Different questions; must not be conflated.
 - **Lexical support required.** A reduction is always spoken out loud ("total", "average",
-  "peak"). `backend/insights.py::confirm_aggregation` drops a non-`RAW` prediction when no
+  "peak"). `backend/pipeline/analysis.py::confirm_aggregation` drops a non-`RAW` prediction when no
   such word appears — a short prompt like "weather in KKD" is not a request for a maximum.
 - `TREND` forces hourly granularity: a turning point cannot be read off one daily row.
 
@@ -270,7 +276,7 @@ one number is asking for no chart.
 | `DRY_SPELL` | consecutive days under a rain threshold |
 
 Two to four per turn is normal; a comparison over a week wants several.
-`backend/insights.py` computes only what the model selected — without a selection it emits
+`backend/pipeline/analysis.py` computes only what the model selected — without a selection it emits
 everything applicable, which is the old pre-Model-1 behaviour.
 
 ### Rule 6.4: Presentation is advisory, never load-bearing

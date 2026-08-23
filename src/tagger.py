@@ -44,7 +44,38 @@ def tokenize(text):
 # Clock times become 24h HH:MM, ranges HH:MM-HH:MM, durations "next N <unit>". This
 # canonicalises the *surface form* only - resolving to an actual datetime stays downstream.
 
+# "whole day", "all week", "the entire month" are span quantifiers: they name a window, not a
+# place. A user reported "what is the rainfall fro whole day" resolving "whole" as a village,
+# and the root cause was that no training text ever used these - so the tagger read a rare
+# word in a location-shaped slot and did the only thing it knew.
+SPAN_QUANTIFIERS = {
+    f"{qualifier}{quantifier} {unit}": canonical
+    for qualifier in ("", "the ")
+    for quantifier, in (("whole",), ("entire",), ("full",), ("complete",))
+    for unit, canonical in (("day", "today"), ("week", "this week"), ("month", "this month"),
+                            ("weekend", "this weekend"), ("night", "tonight"),
+                            ("morning", "this morning"), ("afternoon", "this afternoon"),
+                            ("evening", "this evening"), ("year", "this month"))
+}
+# "history", "historical data", "past records" name no period at all but are unambiguously
+# about the past. Without these the model saw no time span and defaulted to the forecast.
+HISTORY_WORDS = {w: "last 7 days" for w in (
+    "history", "historical", "historic", "history data", "historical data",
+    "past data", "past records", "previous records", "past readings", "old data",
+    "records", "past history", "history of", "in history")}
+
+SPAN_QUANTIFIERS.update(HISTORY_WORDS)
+SPAN_QUANTIFIERS.update({
+    "all day": "today", "all day long": "today", "all week": "this week",
+    "all night": "tonight", "all month": "this month", "the rest of the day": "today",
+    "rest of the day": "today", "rest of the week": "this week",
+    "remainder of the day": "today", "throughout the day": "today",
+    "through the day": "today", "over the day": "today", "for the day": "today",
+    "the day": "today", "the week": "this week", "the night": "tonight",
+})
+
 TIME_ALIASES = {
+    **SPAN_QUANTIFIERS,
     "rn": "now", "right now": "now", "atm": "now", "immediately": "now",
     "2day": "today", "todya": "today", "later today": "today",
     "2nite": "tonight", "tonite": "tonight",
@@ -93,7 +124,10 @@ def normalize_time(span: str) -> str:
     """
     text = " ".join(span.lower().split()).strip(" ,.?!")
     # a leading preposition belongs to the sentence, not the time ("on friday" -> "friday")
-    text = re.sub(r"^(on|at|in|by|during|for|from|around|till|until)\s+", "", text)
+    # `\s+|$` not just `\s+`: a span of exactly "for" is a preposition the tagger swept up,
+    # and it has to normalise to nothing so the caller can drop it. Left as "for" it fuzzy
+    # matched a real time word and moved the window.
+    text = re.sub(r"^(on|at|in|by|during|for|from|around|till|until)(\s+|$)", "", text)
     if not text:
         return text
 
@@ -120,7 +154,10 @@ def normalize_time(span: str) -> str:
 # Words that sit inside a location span without being a place name ("my field", "near me").
 GENERIC_PLACE_WORDS = {"and", "my", "me", "by", "this", "our", "here", "i", "near", "nearby",
                        "area", "place", "field", "farm", "village", "plot", "location",
-                       "feild", "vilage", "ka", "ki", "point", "bad"}
+                       "feild", "vilage", "ka", "ki", "point", "bad",
+                       # span quantifiers - these describe how much of a window, never where
+                       "whole", "entire", "full", "complete", "all", "rest", "remainder",
+                       "throughout", "day", "week", "month", "year", "night"}
 
 
 def choose_min_word_freq(texts, location_spans, candidates=(20, 40, 80, 120, 160, 200, 300, 500)):

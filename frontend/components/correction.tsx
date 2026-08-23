@@ -6,9 +6,8 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useFeedback } from "@/lib/use-feedback";
-import { cn } from "@/lib/utils";
+import { apiUrl, cn } from "@/lib/utils";
 
-const API = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8787";
 
 /**
  * What a thumbs-down actually needs to be worth keeping.
@@ -35,7 +34,7 @@ export function Correction({
   const feedback = useFeedback();
   const { data } = useQuery({
     queryKey: ["labels"],
-    queryFn: async () => (await fetch(`${API}/api/labels`)).json(),
+    queryFn: async () => (await fetch(`${apiUrl()}/api/labels`)).json(),
     staleTime: 10 * 60_000,
   });
 

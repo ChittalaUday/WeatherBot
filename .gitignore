@@ -26,6 +26,7 @@ MANIFEST
 .env
 .env.*
 !.env.example
+!frontend/.env.example
 .venv
 venv/
 env/
@@ -52,18 +53,22 @@ coverage.xml
 .ipynb_checkpoints
 notebooks/*-checkpoint.ipynb
 
-# --- Model artefacts (regenerate: python src/nlu.py --export) -------------
+# --- Model artefacts (regenerate: python -m src.v4.model --export) --------
 models/*.joblib
-models/metrics.json
 
 # --- Runtime data ---------------------------------------------------------
 # conversations.db is per-deployment chat history; export labels instead:
 #   python -m backend.store --export data/from_users.csv
-data/conversations.db
-data/conversations.db-wal
-data/conversations.db-shm
-data/processed/hard_cases.csv
+# The glob also covers the -wal/-shm siblings and the quarantine copy the store writes when
+# the file fails its integrity check, each of which was ignored one exact path at a time.
+data/conversations*.db*
+data/processed/
 data/from_users.csv
+
+# Generated training data: 6 MB, byte-identical on every rebuild (fixed seeds).
+#   python -m src.v4.dataset --build
+# data/eval_v4.csv and ./v4_dataset.csv are hand-written and TRACKED - do not add them here.
+data/v4_dataset.csv
 # GeoNames dumps, re-downloaded on demand by src/fetch_locations.py
 data/.geonames_cache/
 
@@ -99,6 +104,9 @@ Thumbs.db
 logs/
 tmp/
 temp/
-.venv
-.agents
+
+# --- Secrets --------------------------------------------------------------
+# The Postman environment export carries live API keys as `type: secret` values. The
+# collection is a useful API spec and stays; the environment must not be committed.
+*.postman_environment.json
 

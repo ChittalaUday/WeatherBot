@@ -132,7 +132,13 @@ def apply(state: ConversationState, *, weather_intent, action, aggregation,
                       and (silent or not confident))
     merged.weather_intent = state.weather_intent if inherit_intent else weather_intent
     merged.action = (state.action if inherit_intent and not mentions_action(text) else action)
-    merged.aggregation = aggregation or Aggregation.RAW
+    # Coerced: callers pass the plain string their model produced and the field on
+    # ConversationState is an enum - pydantic warns on every model_dump() otherwise, and the
+    # state is dumped into the turn log on every answered turn. `.value` first, because on
+    # 3.9 `str(Aggregation.RAW)` is "Aggregation.RAW", not "RAW" - which is why passing the
+    # enum itself raised instead of being the trivially correct case.
+    merged.aggregation = (Aggregation(getattr(aggregation, "value", aggregation))
+                          if aggregation else Aggregation.RAW)
 
     # v2 carries several variables; a silent follow-up keeps all of them, so "rain and
     # temperature in Guntur" -> "what about Vizag?" still answers with both columns

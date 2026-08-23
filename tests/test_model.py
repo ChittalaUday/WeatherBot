@@ -1,4 +1,4 @@
-"""Self-check for Model 1. Run: python test_model.py
+"""Self-check for Model 1. Run: python tests/test_model.py
 
 Fails if the bundle is missing, if a smoke query breaks, if a predicted span is not verbatim
 in its prompt (Rules 4.1 / 4.2), or if accuracy on the hand-written English evaluation set
@@ -9,13 +9,10 @@ time spans, and the three presentation decisions (detail, chart, insights). This
 of them - a model that reads the question right but picks the wrong chart is still wrong.
 """
 
-from pathlib import Path
-
+from _root import ROOT                       # noqa: F401 - puts the repo root on sys.path
 from src.v3.dataset import CSV_PATH
 from src.v3.model import BUNDLE_PATH, V3Model, evaluate
 from src.v3.schema import Detail
-
-ROOT = Path(__file__).parent
 
 # Floors, not targets: set below the measured numbers so this catches regressions without
 # going red on run-to-run noise. Raise them when the model genuinely improves.

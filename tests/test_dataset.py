@@ -1,16 +1,14 @@
-"""Self-check for the NLU datasets. Run: python test_dataset.py"""
+"""Self-check for the NLU datasets. Run: python tests/test_dataset.py"""
 
 import csv
 import difflib
 import re
 from collections import Counter
 from itertools import combinations
-from pathlib import Path
 
+from _root import ROOT
 from src.build_dataset import (ACTIONS, EVAL_MANUAL, INDIA_NAMES, INTENTS, LOCATIONS_CSV,
                                SPLITS, india_share, load_seed, validate_row)
-
-ROOT = Path(__file__).parent
 MIN_EVAL_ROWS = 200
 
 

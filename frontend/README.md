@@ -1,36 +1,43 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# WeatherSnap frontend
 
-## Getting Started
-
-First, run the development server:
+Next.js chat UI. The backend is a sibling of this directory — see
+[../README.md](../README.md) to run both together with `./scripts/run_app.sh`.
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+cp .env.example .env.local     # optional: only needed to point at a non-local backend
+npm install
+npm run dev                    # http://localhost:3001
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## How a turn works
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+`lib/use-chat.ts` is the whole transport. A turn is one `POST /api/chat` whose response is a
+stream of server-sent events, read to completion and then closed — there is no socket, no
+reconnect loop and no state that outlives a turn. The chat id lives in `localStorage`, and it
+is what carries the conversation, so a reload resumes it server-side.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```text
+POST /api/chat            {"text": "...", "chat_id": "chat-1"}
+  <- status               understanding -> locating -> fetching -> writing
+  <- nlu                  what the model read (the debug strip)
+  <- thinking / delta     the reply being written, streamed
+  <- result | chat | clarify | need_location | error     exactly one, and it ends the turn
+```
 
-## Learn More
+`busy` clears when the stream ends, whatever ended it. A stream that stops without a terminal
+event is reported as an error rather than left spinning.
 
-To learn more about Next.js, take a look at the following resources:
+## Files worth knowing
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+| File | Role |
+| :--- | :--- |
+| `lib/use-chat.ts` | POST + SSE reader, the transcript reducer, the chat id |
+| `lib/types.ts` | the wire format — the one place it is written down |
+| `lib/utils.ts` | `apiUrl()`, the single definition of where the backend is |
+| `components/messages.tsx` | the transcript, ratings, the correction entry point |
+| `components/compare.tsx` | three models on one sentence, side by side |
+| `components/composer.tsx` | input + model pill, fed by `/api/models` |
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Do not inline `process.env.NEXT_PUBLIC_API_URL` in a component. Eight files used to, only one
+of them had the LAN fallback, and the app broke the moment it was opened from a phone. Import
+`apiUrl()`.

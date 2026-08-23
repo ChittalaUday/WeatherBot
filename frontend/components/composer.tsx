@@ -6,33 +6,28 @@ import { m } from "motion/react";
 import { useRef, useState } from "react";
 import { AIInputDropdown, AIInputPillButton } from "@/components/ai-input";
 import { LoaderCircleIcon } from "@/components/ui/loader-circle-icon";
-import { cn } from "@/lib/utils";
-
-const API = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8787";
+import { apiUrl, cn } from "@/lib/utils";
 
 type ModelItem = { id: string; label: string; description: string; icon: typeof Layers };
 
 /**
- * The composer from components/ai-input.tsx, wired to our socket.
+ * The composer from components/ai-input.tsx, wired to this app's transcript.
  *
  * Its own AIInput manages an internal message list and fakes a reply, which would fight the
  * real transcript above; the dropdown and pill primitives are reused instead so the look is
- * the component's and the state stays ours. The dropdown lists whatever /api/models serves -
- * today that is Model 1 alone. There is no third-party LLM anywhere in this app.
+ * the component's and the state stays ours. The dropdown lists whatever /api/models serves.
  */
 export function Composer({
   model,
   onModelChange,
   onSubmit,
   busy,
-  connected,
   centered = false,
 }: {
   model: string;
   onModelChange: (id: string) => void;
   onSubmit: (text: string) => void;
   busy: boolean;
-  connected: boolean;
   centered?: boolean;
 }) {
   const [value, setValue] = useState("");
@@ -41,7 +36,7 @@ export function Composer({
 
   const { data } = useQuery({
     queryKey: ["models"],
-    queryFn: async () => (await fetch(`${API}/api/models`)).json(),
+    queryFn: async () => (await fetch(`${apiUrl()}/api/models`)).json(),
     staleTime: 5 * 60_000,
   });
 
@@ -57,7 +52,7 @@ export function Composer({
   const selected = models.find((item) => item.id === model);
 
   const submit = () => {
-    if (!value.trim() || !connected) return;
+    if (!value.trim() || busy) return;
     onSubmit(value.trim());
     setValue("");
     if (textarea.current) textarea.current.style.height = "auto";
@@ -76,7 +71,6 @@ export function Composer({
             ref={textarea}
             value={value}
             rows={1}
-            disabled={!connected}
             onChange={(event) => setValue(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === "Enter" && !event.shiftKey) {
@@ -89,9 +83,7 @@ export function Composer({
               target.style.height = "auto";
               target.style.height = `${Math.min(target.scrollHeight, 180)}px`;
             }}
-            placeholder={
-              connected ? "Ask about rain, soil, wind - anywhere in India" : "connecting…"
-            }
+            placeholder="Ask about rain, soil, wind - anywhere in India"
             className="max-h-[180px] min-h-[44px] w-full resize-none bg-transparent text-base outline-none placeholder:text-muted-foreground"
           />
         </div>
@@ -145,11 +137,11 @@ export function Composer({
             <button
               onClick={submit}
               suppressHydrationWarning
-              disabled={!connected || busy || !value.trim()}
+              disabled={busy || !value.trim()}
               aria-label="Send"
               className={cn(
                 "grid h-9 w-9 place-items-center rounded-full transition-all",
-                value.trim() && connected && !busy
+                value.trim() && !busy
                   ? "bg-primary text-primary-foreground hover:scale-105"
                   : "bg-muted text-muted-foreground",
               )}

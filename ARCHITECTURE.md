@@ -1,324 +1,427 @@
-# Model 1 — Full Architecture
+# Architecture
 
-How Model 1 works, what every file in this repo does, and why it is the whole model rather
-than one of three. The taxonomy and the training rules live in
-[MODEL_RULES.md](MODEL_RULES.md); this file is the machinery.
-
----
-
-## 1. Why Model 1 Is Complete
-
-Three models were built. Two are deleted. This is what each one could and could not do.
-
-| | v1 — deleted | v2 — deleted | **Model 1** |
-| :--- | :--- | :--- | :--- |
-| Intent | 14 classes, variable baked in | 6 coarse classes | **6 coarse classes** |
-| Variables | one, as part of the intent | multi-label slot | **multi-label slot** |
-| Multiple places / times | no | yes | **yes** |
-| Aggregation | yes | yes | **yes** |
-| Spans + canonical time | yes | yes | **yes** |
-| How much to show | Python lookup table | Python lookup table | **predicted (`detail`)** |
-| Which chart | branch on row count | branch on row count | **predicted (`chart`)** |
-| Which insights | all applicable, always | all applicable, always | **predicted (`insights`)** |
-| Below confidence | asks a clarifying question | asks a clarifying question | **commits, reports assumption** |
-
-v1's flaw was structural: folding the variable into the intent made "rain **and** temperature"
-unrepresentable at any accuracy. v2 fixed the shape but still answered every question the same
-way — the same columns, the same chart rule, every insight every time — because presentation
-lived in Python. Model 1's claim is that presentation is *in the wording*, and wording is
-exactly what a classifier can read:
-
-```text
-"temp in Guntur tomorrow"              -> detail NORMAL   chart NONE         insights RANGE
-"temperature in Guntur in detail"      -> detail FULL     chart LINE         insights RANGE, PEAK, LOW
-"compare rain in Guntur and Vizag"     -> detail NORMAL   chart GROUPED_BAR  insights COMPARISON, TOTAL
-"just tell me the temp in Guntur"      -> detail MINIMAL  chart NONE         insights RANGE
-```
-
-That is the whole argument for calling it complete: it predicts everything needed to answer,
-not just everything needed to look the answer up.
-
-**What survives of v1 and v2 is library code, not models.** Model 1 imports the vectorizer and
-`clean_text` from `src/nlu.py`, the span tagger from `src/tagger.py`, the slot enums from
-`src/v2/schema.py`, and the conversation generator from `src/v2/dataset.py`. Those modules stay
-because Model 1 is built out of them. Only their trained bundles and intermediate CSVs are gone.
+What every part of this repo does and why it is shaped that way. The label taxonomy and the
+annotation rules live in [MODEL_RULES.md](MODEL_RULES.md); this file is the machinery.
 
 ---
 
-## 2. The Model
+## 1. The shape of it
 
-One shared feature matrix, six trained heads, one span tagger. `src/v3/model.py`.
+Four layers, each with one job, each replaceable without touching the others.
 
 ```text
-                          raw text
-                             │
-                     clean_text()  (src/nlu.py)
-                             │
-                  build_vectorizer()  — word + char n-grams
-                             │
-              ┌──────────────┴───────────────┐
-              │                              │
-       feature matrix (shared)          raw text
-              │                              │
-   ┌──────┬───┴───┬────────┬───────┬─────┐   │
-   ▼      ▼       ▼        ▼       ▼     ▼   ▼
-intent  vars  aggregation detail chart insights   SpanTagger (BIO)
-   │      │       │        │       │     │            │
-   │      │       │        │       │     │      ┌─────┴─────┐
-   │      │       │        │       │     │      ▼           ▼
-   │      │       │        │       │     │  locations     times
-   │      │       │        │       │     │                  │
-   │      │       │        │       │     │           normalize_time()
-   └──────┴───────┴────────┴───────┴─────┴──────────┬───────┘
-                                                    ▼
-                                                V3Result
+                       HTTP  (backend/api)
+                            │
+      ┌─────────────────────┼──────────────────────┐
+      │                     │                      │
+  conversation          understanding            answer
+  backend/nlu/          backend/nlu/           backend/pipeline
+  context.py            registry.py                 │
+      │                 llm.py                      │
+      │                     │                       │
+      └──── slots ──────────┴──── Understanding ────┤
+                                                    │
+                                            backend/generation
+                                            (the answer, in words)
 ```
 
-| Head | Estimator | Why |
+| Layer | Package | Owns |
 | :--- | :--- | :--- |
-| `intent` | `CalibratedClassifierCV(LinearSVC(), cv=3)` | needs a real probability — the confidence gate and the score ladder both read it |
-| `variables` | `OneVsRestClassifier(LogisticRegression(C=4.0))` | multi-label; a query can name several measurements |
-| `insights` | `OneVsRestClassifier(LogisticRegression(C=4.0))` | multi-label; a week-long comparison wants several observations |
-| `aggregation` | `LinearSVC(class_weight="balanced")` | `RAW` dominates ~93% of rows, so the classes must be reweighted |
-| `detail` | `LinearSVC(class_weight="balanced")` | same imbalance — `NORMAL` is the default reading |
-| `chart` | `LinearSVC(class_weight="balanced")` | same |
+| Transport | `backend/api` | HTTP routes, SSE framing, the turn log |
+| Understanding | `backend/nlu` | text → `Understanding`; what the conversation remembers |
+| Answer | `backend/pipeline` | places, plan, fetch, quality, analysis, advice, table |
+| Wording | `backend/generation` | retrieval, prompts, the local model |
+| Config | `backend/config.py` | every setting, read once |
+| Storage | `backend/store.py` | turns, feedback, the retraining export |
 
-**Multi-label thresholds are calibrated, not guessed.** `_calibrate()` holds out the last 15%
-of training rows, sweeps cuts from 0.20 to 0.50, and keeps the one with the best micro-F1 —
-separately for `variables` and for `insights`. If nothing clears the cut, the head falls back
-to its top-scoring class, so a prediction is never empty (Rule 3.2).
-
-**Spans are a separate model.** `SpanTagger` (`src/tagger.py`) is a BIO tagger over the raw
-text, not the cleaned features, because Rules 5.1/5.2 require spans to be verbatim. Its
-vocabulary cutoff is chosen by `choose_min_word_freq()` from the training texts, and its
-metric-noun list comes from `v2_dataset.VARIABLE_WORDS` so it knows "rainfall" is not a place.
-
-Bundle: `models/nlu_v3.joblib`, 20.5 MB, joblib-pickled `V3Model`. Metrics written alongside
-as `models/metrics_v3.json` at export time.
+The rule that keeps it honest: **the model never sees a coordinate, a timestamp or a weather
+row, and the generation layer never sees anything the pipeline did not compute.** Everything
+between those two is deterministic.
 
 ---
 
-## 3. The Request Path
+## 2. One turn, end to end
 
-One WebSocket message, end to end. `backend/main.py`.
+`backend/api/chat.py::turn` is an async generator. The endpoint streams it; the self-check
+collects it into a list. Nothing about the turn knows it is being served over HTTP.
 
 ```text
- user text
+ POST /api/chat  {"text": "will it rain in Guntur tomorrow", "chat_id": "chat-1"}
      │
-  1  normalize()                src/normalize.py     shorthand + typos folded, audit kept
+  1  normalize_text()          src/normalize.py       shorthand + typos folded, audit kept
      │
-  2  registry.understand()      backend/registry.py  Model 1 -> Understanding (8 targets)
+  2  registry.understand()     backend/nlu/registry   -> Understanding
      │
-  3  confirm_aggregation()      backend/insights.py  drop a reduction the prompt never said
+     ├─ family != data ────────────────────────────>  {"type":"chat"}   greeting, control, refusal
      │
-  4  detect_reference()         backend/state.py     "and there?" -> what does "there" mean
+  3  detect_reference()        backend/nlu/context    "and there?" -> what "there" means
      is_follow_up()
      │
-  5  context.apply()            backend/state.py     merge this turn into the chat's slots
-     │                                               -> ConversationState + Operation
-  6  locations.resolve()        backend/locations.py Solr lookup, alias table, GPS fallback
-     │                                               -> lat/lng places
-  7  planner.plan()             backend/planner.py   canonical time window, daily vs hourly
+  4  context.apply()           backend/nlu/context    SET / REPLACE / MODIFY / INHERIT / COMPARE
+     │                                                 -> the merged conversation state
+  5  resolve_places()          backend/pipeline       Solr, alias table, GPS fallback
+     │                                                 -> lat/lon, or {"type":"need_location"}
+  6  pipeline.run()            backend/pipeline       everything below, as one call
+     │      plan()                  which source, what resolution, how many rows
+     │      sources.fetch_for()     GFS / archive / lookback, degrading rather than failing
+     │      served_fields()         drop columns the feed never sent
+     │      quality.assess()        what actually came back
+     │      analysis.*              reduction, chart, observations
+     │      advice.evaluate()       the verdict, if this was an advice turn
+     │      render.summarize()      the deterministic conclusion
      │
-  8  weather.daily_forecast()   backend/weather.py   WeatherSnap API
-     weather.hourly_forecast()
+  7  generation.build()        backend/generation     the retrieval context, in sections
+     generation.stream()                              -> {"type":"thinking"} / {"type":"delta"}
      │
-  9  respond.select_rows()      backend/respond.py   pick the rows the time expression meant
-     respond.build_table()                           columns from understanding.fields()
-     respond.summarize()
-     │
- 10  insights.apply_aggregation()  backend/insights.py
-     insights.build_chart()        <- chart kind from the model
-     insights.build_insights()     <- insight set from the model
-     │
- 11  store.record_turn()        backend/store.py     SQLite, tagged "[v3] <text>"
+  8  store.record_turn()       backend/store.py       tagged "[v4] <text>"
+     store.attach_payload()
      │
      ▼
- frontend renders table + chart + notes
+  {"type":"result", ...}       table + chart + insights + advice + plan + quality
 ```
 
-Steps 6–10 are the deterministic layer MODEL_RULES Section 1 keeps out of the model. The model
-never sees a coordinate, a timestamp or a weather row.
+**Where the conversation ends and the answer begins.** Steps 1-5 and 8 are `api/chat.py`:
+they are about *this chat*. Step 6 is `pipeline.run`, which has no conversation, no socket and
+no id - hand it an `Understanding` and it produces an `Answer`. That split is why the compare
+view can run the same pipeline three times on one sentence without a second implementation.
 
-**Where Model 1's three extra predictions land:**
-- `detail` → `Understanding.fields()` → `fields_for(variables, detail)` → which columns step 8
-  fetches and step 9 renders.
-- `chart` → `insights.build_chart(kind=...)` — the model's choice wins over the row-count rule.
-- `insights` → `insights.build_insights(wanted=...)` — only the selected observations compute.
+### Transport: SSE over POST, not a WebSocket
+
+One question has one answer. There is nothing to hold open between turns, so there is no
+reconnect loop, no ping/pong, and no half-open socket that silently stops answering. The
+streaming that mattered - the phrasing, which is the slowest step by a wide margin - is
+exactly what server-sent events are for, and it survives any proxy that speaks HTTP.
+
+Every turn ends in exactly one terminal event: `result`, `chat`, `clarify`, `need_location`
+or `error`. The client's spinner is driven off that, so a stream that dies mid-turn is
+reported rather than left spinning.
 
 ---
 
-## 4. File Map
+## 3. The models
 
-### The model
+Three, answering the same contract. The client picks per turn, so they can be compared on one
+sentence without a redeploy.
+
+| | Model 1 (`v3`) | **Model 2 (`v4`) — default** | Model 3 (`llm`) |
+| :--- | :--- | :--- | :--- |
+| Where | `models/nlu_v3.joblib`, 20.5 MB | `models/nlu_v4.joblib`, 46.6 MB | hosted, via `API_KEY` |
+| Intents | 6 coarse | 16, incl. chat / control / declined | 16, from the prompt |
+| Variables | 13, multi-label | 10, multi-label | 10 |
+| Activities | — | 12, for the advice engine | 12 |
+| Presentation | predicts `detail`, `chart`, `insights` | derived, not predicted | derived |
+| Latency | single-digit ms | single-digit ms | a network round trip |
+| Code | `src/v3/` | `src/v4/` | `backend/nlu/llm.py` |
+
+`Understanding` (`backend/nlu/registry.py`) is the common denominator. The v4-only fields
+default to empty rather than being absent, so a v3 turn flows through code that reads them,
+and the pipeline genuinely cannot tell which model answered.
+
+Model 3 loads no bundle and is not in the registry - it is a client that coerces whatever the
+hosted model emits onto the same enums. A label it invents is dropped; a location span that is
+not a verbatim substring of the question is dropped (Rule 4.1).
+
+### Model 2's heads
+
+```text
+                       raw text
+                          │
+                   clean_text()  (src/nlu.py)
+                          │
+                build_vectorizer()  — word + char n-grams
+                          │
+        ┌─────────────────┴──────────────────┐
+        │                                    │
+  feature matrix (shared)               raw text
+        │                                    │
+  ┌─────┼──────┬──────────┐                  ├──────────────┐
+  ▼     ▼      ▼          ▼                  ▼              ▼
+intent vars activity aggregation      SpanTagger (BIO)  entity gazetteer
+                                       locations, times   crop, material, …
+```
+
+Everything else is derived rather than predicted: `weather_intent` from the resolved window,
+`action` from the intent, `sub_activity` from the entities, `detail` from the wording. A head
+that can be replaced by four lines of arithmetic is a head that can be wrong.
+
+---
+
+## 4. File map
+
+### Backend
+
 | File | Role |
 | :--- | :--- |
-| `src/v3/model.py` | **Model 1.** `V3Model`, `train()`, `evaluate()`, `--export` CLI |
-| `src/v3/schema.py` | `Detail`, `ChartKind`, `Insight`, `Presentation`, `V3Result`, `FIELD_SETS`, `fields_for()` |
-| `src/v3/dataset.py` | Builds `data/v3_dataset.csv` — v2 turns relabelled with presentation, plus fresh detail phrasings |
-| `src/v2/schema.py` | `Intent`, `Variable`, `Aggregation`, `Slots` — Model 1's slot contracts |
-| `src/v2/dataset.py` | Conversation generator + `VARIABLE_WORDS`; upstream of the v3 dataset |
+| `backend/config.py` | Every setting, `.env` loaded once. Nothing else calls `os.getenv`. |
+| `backend/store.py` | SQLite turn/feedback log, review queue, retraining export |
+| `backend/api/__init__.py` | The FastAPI app: middleware, routers, startup |
+| `backend/api/chat.py` | `POST /api/chat` — one turn, streamed |
+| `backend/api/compare.py` | `POST /api/compare` — every model on one sentence |
+| `backend/api/meta.py` | health, models, labels, location autocomplete |
+| `backend/api/history.py` | past conversations, replayed from the log |
+| `backend/api/feedback.py` | thumbs, corrections, the review queue |
+| `backend/api/deps.py` | the three process-lifetime singletons |
+| `backend/nlu/registry.py` | `Understanding`, `Registry`, the trained bundles |
+| `backend/nlu/context.py` | the context engine — what the conversation remembers |
+| `backend/nlu/llm.py` | Model 3: the hosted model, coerced onto the contract |
+| `backend/pipeline/__init__.py` | `run()` and `Answer` — the single answer path |
+| `backend/pipeline/timewindow.py` | **the only calendar**: wording → window, and row selection |
+| `backend/pipeline/plan.py` | source capability, resolution ladder, row budget |
+| `backend/pipeline/windows.py` | **when** a condition holds - the runs of readings, not the total |
+| `backend/pipeline/sources.py` | GFS, historical, Zarr point/bulk; canonical field names |
+| `backend/pipeline/places.py` | Solr resolution, aliases, relative places, ambiguity |
+| `backend/pipeline/quality.py` | what actually came back, before anything is computed |
+| `backend/pipeline/analysis.py` | reduction, chart, observations (`Note.kind`) |
+| `backend/pipeline/advice.py` | 11 activity rules → YES / NO / CAUTION, with a window to act in |
+| `backend/pipeline/render.py` | table, deterministic summary, the field vocabulary |
+| `backend/generation/context.py` | retrieval: the labelled sections the model may use |
+| `backend/generation/prompts.py` | prompt blocks, composed by what the turn has |
+| `backend/generation/llm.py` | the local model, and the fallbacks when it is not there |
+
+### Models and data
+
+| File | Role |
+| :--- | :--- |
+| `src/v4/model.py` | **Model 2.** `V4Model`, `train()`, `evaluate()`, `--export` |
+| `src/v4/schema.py` | the v4 taxonomy: intents, variables, activities, resolutions, fields |
+| `src/v4/dataset.py` | builds `data/v4_dataset.csv` |
+| `src/v4/entities.py` | the entity gazetteer — crop, material, vehicle, garment |
+| `src/v3/*` | Model 1: schema, dataset builder, model |
+| `src/v2/schema.py` | Model 1's slot enums | 
+| `src/v2/dataset.py` | conversation generator, upstream of the v3 dataset |
 | `src/nlu.py` | `build_vectorizer()`, `clean_text()` — the shared encoder |
-| `src/tagger.py` | `SpanTagger` (BIO), `normalize_time()`, `choose_min_word_freq()` |
-| `src/normalize.py` | Pre-model text normalizer: shorthand, typos, casing |
-| `src/schema.py` | `ConversationState`, `Operation`, `Reference`, `Verdict` — the context contracts |
-| `src/build_dataset.py` | Template generator: balanced cells, misspellings, fillers, address forms |
-| `src/data_loader.py` | CSV loading for the seed and eval files |
-| `src/fetch_locations.py` | Samples real place names into `data/locations.csv` |
+| `src/tagger.py` | `SpanTagger` (BIO), `normalize_time()` |
+| `src/normalize.py` | pre-model text normalizer |
+| `src/schema.py` | `ConversationState`, `Operation`, `Reference` |
+| `src/build_dataset.py` | template generator: balanced cells, misspellings, fillers |
+| `src/fetch_locations.py` | samples real place names into `data/locations.csv` |
 
-### The backend
-| File | Role |
-| :--- | :--- |
-| `backend/main.py` | FastAPI app, the WebSocket, the request path above |
-| `backend/registry.py` | Loads Model 1 once; `Understanding`, the shape the rest consumes |
-| `backend/state.py` | Context engine — what the conversation remembers |
-| `backend/planner.py` | Time windows, daily vs hourly, answer-or-ask |
-| `backend/locations.py` | Solr resolution, aliases, relative places, GPS |
-| `backend/weather.py` | WeatherSnap API clients |
-| `backend/respond.py` | Rows → table + summary; `INTENT_FIELDS` |
-| `backend/insights.py` | Aggregation guard, chart building, insight computation |
-| `backend/store.py` | SQLite turn/feedback log and the retraining export |
-
-### The frontend
-| File | Role |
-| :--- | :--- |
-| `frontend/app/page.tsx` | Chat page; holds the model id and chat id |
-| `frontend/components/composer.tsx` | Input + model pill, fed by `/api/models` |
-| `frontend/components/ai-input.tsx` | Input primitives; `DEFAULT_MODELS` fallback |
-| `frontend/components/messages.tsx` | Transcript, ratings, correction entry point |
-| `frontend/components/correction.tsx` | Turns a thumbs-down into a labelled training row |
-| `frontend/components/result-table.tsx` | The table Model 1's `detail` sized |
-| `frontend/components/result-chart.tsx` | The chart Model 1 chose |
-| `frontend/lib/use-weather-socket.ts` | WebSocket client |
-
-### Data
-| File | Tracked | Role |
+| Data | Tracked | Role |
 | :--- | :--- | :--- |
-| `data/v3_dataset.csv` | yes | **Model 1's training data**, 13,533 train rows |
-| `data/intents.csv` | yes | Hand-written seed, head of the generation chain |
-| `data/eval_manual.csv` | yes | Hand-written evaluation set — never generated |
-| `data/locations.csv` | yes | 1,068 real place names, ~94% inside India |
-| `data/location_aliases.json` | yes | Nicknames and spellings Solr will not match |
-| `data/conversations.db` | no | Runtime chat log; export labels, do not commit |
-| `data/processed/hard_cases.csv` | no | Harvested failures from the notebook |
+| `data/v4_dataset.csv` | no | Model 2's training data, 23,968 rows — regenerable |
+| `v4_dataset.csv` (root) | **yes** | 41 hand-written advice seeds. **Unrecoverable if lost.** |
+| `data/eval_v4.csv` | yes | hand-written v4 evaluation set, 183 rows |
+| `data/eval_v4_hard.csv` | yes | 63 hard cases: ambiguity, implicit advice, code-mixing |
+| `data/v3_dataset.csv` | yes | Model 1's training data, 13,533 rows |
+| `data/eval_manual.csv` | yes | Model 1's hand-written eval, 235 rows (219 en + 16 mixed) |
+| `data/intents.csv` | yes | hand-written seed, head of the v3 generation chain |
+| `data/locations.csv` | yes | 1,166 real place names, 86% inside India |
+| `data/location_aliases.json` | yes | nicknames and spellings Solr will not match |
+| `data/conversations.db` | no | runtime chat log; export labels, do not commit |
+
+### Frontend
+
+| File | Role |
+| :--- | :--- |
+| `frontend/lib/use-chat.ts` | the transport: POST + SSE reader, one conversation |
+| `frontend/lib/types.ts` | the wire format, in one place |
+| `frontend/lib/utils.ts` | `apiUrl()` — the single definition of where the backend is |
+| `frontend/app/page.tsx` | the chat page; holds the model id and the chat id |
+| `frontend/components/composer.tsx` | input + model pill, fed by `/api/models` |
+| `frontend/components/messages.tsx` | transcript, ratings, correction entry point |
+| `frontend/components/compare.tsx` | the three-model comparison |
+| `frontend/components/correction.tsx` | a thumbs-down turned into a labelled training row |
+| `frontend/components/result-table.tsx` | the table |
+| `frontend/components/result-chart.tsx` | the chart the pipeline chose |
+| `frontend/components/chat-history.tsx` | past conversations |
+| `frontend/components/health-badge.tsx` | `/api/health`, polled |
 
 ### Tests
+
+Every non-trivial module carries a runnable self-check. `python -m backend.pipeline.plan`
+asserts the routing table; `python -m backend.pipeline.timewindow` asserts the calendar. They
+run in under a second and need no network.
+
 | File | Checks |
 | :--- | :--- |
-| `test_model.py` | Model 1: smoke, presentation, spans verbatim, canonical time, always-decides, accuracy floors |
-| `test_conversations.py` | Replays 150 multi-turn conversations through the real pipeline |
-| `test_dataset.py` | Eval-set coverage, location vocabulary; generated-split quality when present |
+| `tests/test_model.py` | Model 1: smoke, presentation, spans verbatim, canonical time, accuracy floors |
+| `tests/test_conversations.py` | 150 multi-turn conversations replayed through the real context engine |
+| `tests/test_dataset.py` | eval-set coverage, location vocabulary |
+| `tests/eval_v4.py` | Model 2 against the hand-written eval set |
 
 ---
 
-## 5. The Training Chain
+## 5. The training chain
 
-Model 1 trains from `data/v3_dataset.csv` alone. That file is produced by a four-step chain
-whose intermediates are **not** kept — they are byte-identical on every rebuild (fixed seeds),
-so storing them was redundant.
+Model 2 trains from `data/v4_dataset.csv`, built from two hand-written seeds plus generated
+combinations:
 
 ```text
 data/intents.csv          (hand-written seed, tracked)
 data/locations.csv        (sampled vocabulary, tracked)
+v4_dataset.csv            (41 hand-written advice seeds, tracked, UNRECOVERABLE)
         │
-        │  python src/build_dataset.py --split train     ~0.2 s
-        │  python src/build_dataset.py --split test
+        │  python -m src.v4.dataset --build
         ▼
-data/processed/nlu_dataset.csv, nlu_test.csv     ← intermediate, not kept
+data/v4_dataset.csv       23,968 rows          ← generated, gitignored
         │
-        │  python -m src.v2.dataset --build
+        │  python -m src.v4.model --export
         ▼
-data/v2_dataset.csv                              ← intermediate, not kept
-        │
-        │  python -m src.v3.dataset --build
-        ▼
-data/v3_dataset.csv        13,533 train rows     ← TRACKED, this is what trains Model 1
-        │
-        │  python -m src.v3.model --export       ~18 s
-        ▼
-models/nlu_v3.joblib + models/metrics_v3.json
+models/nlu_v4.joblib + models/metrics_v4.json
 ```
 
-**To retrain from the shipped dataset** (the common case — no intermediates needed):
+`src/v4/dataset.py::build()` refuses to overwrite the root `v4_dataset.csv` - the two files
+have the same name and one of them cannot be regenerated.
 
-```bash
-python -m src.v3.model --export
-python test_model.py
-```
+Model 1's chain is four steps from `data/intents.csv` through `src/build_dataset.py`,
+`src/v2/dataset.py` and `src/v3/dataset.py`; only the final `data/v3_dataset.csv` is kept,
+because the intermediates are byte-identical on every rebuild (fixed seeds).
 
-**To rebuild the dataset from the seed** (after editing `data/intents.csv` or folding in user
-corrections), run all four steps in order. `test_dataset.py` checks the intermediates'
-balance and noise properties whenever they are on disk, and skips those checks when they are
-not.
-
-**To fold real usage back in**: `python -m backend.store --export data/from_users.csv`, then
-`src/v2/dataset.py::from_users()` picks it up on the next build. Human labels outrank the
-model's (Rule 8.5).
+**To fold real usage back in**: `python -m backend.store --export data/from_users.csv`. Human
+labels outrank the model's (Rule 8.5).
 
 ---
 
-## 6. Measured Performance
+## 6. Measured performance
 
-`models/metrics_v3.json`, written at export time. Trained on 13,533 rows.
+From `models/metrics_v4.json` and `models/metrics_v3.json`, written at export time.
 
-| Split | rows | intent | vars | detail | chart | locs | times | insights F1 | **everything** |
+**Model 2 (v4)** — 18,518 training rows.
+
+| Split | rows | intent | weather_intent | vars | activity | aggregation | locs | times | **everything** |
 | :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| test (generated) | 2,157 | .964 | .961 | .999 | .981 | .957 | .956 | .935 | **.839** |
-| detail phrasings | 270 | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 | .900 | .976 | **.900** |
-| eval (hand-written English) | 219 | .959 | .922 | 1.00 | .840 | .945 | .959 | .907 | **.680** |
+| test (generated) | 3,408 | .997 | .986 | .928 | .998 | .945 | .968 | .925 | **.791** |
+| eval | 2,042 | .999 | .982 | .930 | 1.00 | .946 | .929 | .919 | **.762** |
+| implicit advice | 533 | 1.00 | .993 | .996 | 1.00 | 1.00 | .989 | .931 | **.917** |
+| confusion pairs | 238 | 1.00 | .996 | .996 | 1.00 | 1.00 | .983 | .954 | **.937** |
 
-Multi-turn context, replayed through the real pipeline (`test_conversations.py`, 150
-conversations / 437 turns): operation 100%, locations 100%, times 100%, variables 99.8%.
+**Model 1 (v3)** — 13,533 training rows.
 
-`everything` — all eight targets right on the same turn — is the honest number. The gap
-between generated test (.839) and hand-written eval (.680) is the cost of typos, code-mixing
-and phrasings no template produced; `chart` at .840 is the weakest single head on real
-wording and is where the next round of training data should go.
+| Split | rows | intent | vars | detail | chart | locs | times | **everything** |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| test (generated) | 2,157 | .964 | .961 | .999 | .981 | .957 | .956 | **.839** |
+| eval (hand-written English) | 219 | .959 | .922 | 1.00 | .840 | .945 | .959 | **.680** |
+
+`everything` — every target right on the same turn — is the honest number. Multi-turn context
+replayed through the real engine (`test_conversations.py`, 150 conversations / 437 turns):
+operation 100%, locations 100%, times 100%, variables 99.8%.
+
+`times` is the weakest head on both models and is where the next round of training data should
+go. `variables` at .928 on v4 is second.
 
 ---
 
-## 7. What Was Removed
+## 7. Design decisions worth knowing
 
-Deleted in the Model 1 cleanup. All of it is recoverable — the datasets from git history, the
-bundles by retraining.
+**One calendar.** `pipeline/timewindow.py` is the only module that knows what "tomorrow"
+means. There used to be three - a window resolver, an absolute-date parser and a row selector -
+each with its own `PART_OF_DAY`, `DAY_OFFSET` and `WEEKDAYS` tables. They disagreed: "monday"
+meant *next* Monday to one and *any* Monday to another; "this weekend" spanned one weekend or
+two depending on which asked; "11 jun 2026" resolved to a single day in one and to the whole
+of 2026 in the other.
 
-| Removed | Size | Replacement |
-| :--- | ---: | :--- |
-| `models/nlu_pipeline.joblib` | 19.5 MB | Model 1 |
-| `models/nlu_v2.joblib` | 14.0 MB | Model 1 |
-| `models/metrics.json`, `metrics_v2.json` | — | `models/metrics_v3.json` |
-| `data/v2_dataset.csv` | 2.7 MB | regenerable intermediate |
-| `data/processed/nlu_dataset.csv`, `nlu_test.csv` | 1.0 MB | regenerable intermediates |
-| `frontend/components/model-switch.tsx` | — | unused; the composer pill lists models |
-| v1/v2 adapters in `backend/registry.py` | — | one `_understand()` |
+**One reader of a column.** `quality.values()` filters `None`, `""`, `"NA"`, NaN and the
+sentinels `{-999, -9999, 999, 9999}`. Six places used to read columns with `is not None`
+instead, so a `-999` sentinel entered means and won `MIN` comparisons - `served_fields` counted
+the column as served and the aggregator then averaged the sentinel in.
 
-`models/` went from 52 MB to 20 MB.
+**Presentation is downstream of the model, never inside it.** Model 1 predicts `detail`,
+`chart` and `insights`; Model 2 derives them. Either way `pipeline` applies them, so neither
+model needs to know a table exists.
 
-The version switcher is gone from the serving path: `/api/models` returns one entry,
-`registry.get()` ignores the version argument callers still pass, and `DEFAULT_VERSION` is
-the only version. Old turns in `data/conversations.db` tagged `[v1]` or `[v2]` still display;
-turns with no tag at all report as `legacy`.
+**A verdict is never computed from thin data.** `advice.evaluate` asks `quality.assess` first
+and returns `UNKNOWN` rather than a verdict when the fields its rule reads are mostly empty. A
+confident answer computed from two readings out of thirty looks exactly like a real one, which
+is what makes it dangerous.
+
+**Failure never depends on another thing working.** Every trouble line in
+`generation/llm.py::TROUBLE_LINES` is a fixed sentence. The local model is asked to re-say it,
+and the result is thrown away if it invented a figure or a weather word its input did not have.
+
+**One gate decides whether the wording is shown at all.** `generation.usable()` drops a reply
+that echoes the conclusion, narrates the machinery ("the data shows"), states a figure it was
+not given, or reverses the verdict it was handed. Anything it drops falls back to the
+deterministic sentence, which is what the reader would have got anyway.
+
+The figure check allows rounding, because the prompt asks for it - "about 2mm" for 1.93mm is
+how people speak, and a guard that rejected it would defeat the layer in the name of protecting
+it. The tolerance comes from the precision the reply was written at: "2" may stand for anything
+within 0.5, "2.4" only for something within 0.05. So 1.93 may be called "2" and may not be
+called "2.4". A 1b model handed "12.5mm against 9.9mm" answered "about 3mm of rain is
+expected"; nothing rounds to that.
+
+The reversal check exists because the advice path is not a style problem. Asked whether clothes
+would dry, a 1b handed "No - 2.4mm expected from 06:00" answered "making it ideal for drying
+clothes". Someone hangs washing out on that.
+
+**A misconfigured wording layer is loud.** Every failure inside a turn falls back silently,
+which is right mid-turn and wrong for a deployment - a one-character typo in `OLLAMA_MODEL`
+degraded every answer and nothing said so. `generation.probe()` runs at startup, prints what is
+wrong, and reports it on `/api/health`. The `think` flag is also negotiated rather than
+assumed: models without a reasoning mode reject it with a 400, which used to turn the whole
+layer off.
+
+**An activity question is a question about *when*.** Rain does not fall for a whole day; it
+falls between two and four. `pipeline/windows.py` finds the runs of readings during which an
+activity's conditions actually hold, and the verdict is about the best of those runs - so the
+answer can be "not at two, but you have until noon". Collapsing the period into an accumulated
+total, which is what every rule used to do, was wrong three ways: 8mm in one storm and 8mm of
+all-day drizzle are the same number and opposite answers; a total only grows, so the same
+weather scored worse the longer a period you asked about, and "should I spray today" disagreed
+with "should I spray this week" about today; and a total can only ever say no - it cannot
+suggest a time.
+
+Rules state what *one reading* has to look like (`below`, `between`, `every`), and a missing
+reading is never a suitable one - an unknown hour in the middle of a spraying window is the
+hour you would least want to bet on. Spraying additionally needs the rain to stay away
+afterwards, measured against the job's length rather than the window's: a ten-hour clear spell
+against a two-hour job needs six clear hours from whenever you start, not fourteen. The
+forecast simply ending is not rain, so a window that reaches the horizon is accepted and says
+that it could not be confirmed.
+
+The activities that are genuinely about state - irrigating, sowing, fertilising, what to wear -
+still accumulate, because how much water arrives *is* their question. Each one says what it
+summed over.
+
+**Adding up is a reduction, and reductions are asked for.** `render.summary_stat` sums only
+when `aggregation` is `SUM`; under `RAW` it means. Rainfall used to be totalled whenever the
+field was additive, so "rain this week" answered with a week's accumulation presented as
+though it were the rainfall, and the same weather scored higher the longer a window you asked
+about. `analysis.confirm_aggregation` is symmetric: it drops a reduction the wording never
+asked for, and promotes one the wording plainly states.
+
+**Both models commit rather than ask.** `NEVER_ASKS` covers every trained model
+(MODEL_RULES Rule 1.1), so an ambiguous place resolves to the ranked best and the answer says
+which one it took. The only `clarify` left is a query the planner genuinely cannot serve - too
+far ahead, too many rows, or an archive that is unreachable.
 
 ---
 
 ## 8. Operations
 
 ```bash
-# run it
-./scripts/run_app.sh                   # backend :8787 + frontend :3000
+# run it — backend :8787, frontend :3001
+./scripts/run_app.sh
 
-# check it
-python test_model.py                   # Model 1 floors and invariants
-python test_conversations.py           # multi-turn context
-python test_dataset.py                 # data coverage
-python backend/registry.py             # 5-second smoke test
+# every module's self-check (no network needed for most)
+python -m backend.pipeline.timewindow      # the calendar
+python -m backend.pipeline.plan            # source routing and the row budget
+python -m backend.pipeline.quality         # missing-data detection
+python -m backend.pipeline.windows         # runs, spacing, labels
+python -m backend.pipeline.advice          # timing beats totals; every verdict flips
+python -m backend.pipeline.render          # tables and the deterministic summary
+python -m backend.pipeline.analysis        # reductions, charts, observations
+python -m backend.generation.context       # what the model is allowed to know
+python -m backend.generation.prompts       # every prompt shape
+python -m backend.nlu.registry             # both bundles answer
+python -m backend.nlu.context              # the four-turn conversation
+python -m backend.api.chat                 # one turn, end to end
+python -m backend.api.compare              # every model on one sentence
 
-# ask it one question
-python -m src.v3.model "rain and temperature in Guntur tomorrow"
+# the suites
+python tests/test_model.py                       # Model 1 floors and invariants
+python tests/test_conversations.py               # multi-turn context, 150 conversations
+python tests/test_dataset.py                     # data coverage
+python tests/eval_v4.py                          # Model 2 against the hand-written eval
 
-# retrain it
-python -m src.v3.model --export        # ~18 s from data/v3_dataset.csv
+# retrain
+python -m src.v4.model --export            # Model 2, from data/v4_dataset.csv
+python -m src.v3.model --export            # Model 1, from data/v3_dataset.csv
+
+# ask one question without the server
+python -m src.v4.model "rain and temperature in Guntur tomorrow"
 ```
 
-`/api/health` reports whether the bundle is loaded; `/api/models` reports its size and
-description; `/api/labels` serves Model 1's five enum sets to the correction form.
+`/api/health` reports which bundles are present and what is configured (no secret values).
+`/api/models` serves each model's own exported metrics. `/api/labels?model=v4` serves the label
+sets the correction form offers - per model, because they no longer agree.

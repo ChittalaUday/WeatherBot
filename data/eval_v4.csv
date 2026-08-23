@@ -1,0 +1,184 @@
+text,intent,weather_intent,variables,activity,locations,times,lang,note
+rain?,INFORMATION,FORECAST,RAIN,NONE,[],[],en,terse
+guntur temp,INFORMATION,FORECAST,TEMPERATURE,NONE,"[""guntur""]",[],en,terse lowercase
+tomorrow?,INFORMATION,TOMORROW,GENERAL,NONE,[],"[""tomorrow""]",en,terse
+weather,INFORMATION,FORECAST,GENERAL,NONE,[],[],en,terse
+how hot,INFORMATION,FORECAST,TEMPERATURE,NONE,[],[],en,terse
+humidity vizag,INFORMATION,FORECAST,HUMIDITY,NONE,"[""vizag""]",[],en,terse alias
+wind now,INFORMATION,CURRENT,WIND,NONE,[],"[""now""]",en,terse
+kakinada rain,INFORMATION,FORECAST,RAIN,NONE,"[""kakinada""]",[],en,terse lowercase
+any rain today,INFORMATION,CURRENT,RAIN,NONE,[],"[""today""]",en,terse
+sun tomorrow?,INFORMATION,TOMORROW,SUNSHINE,NONE,[],"[""tomorrow""]",en,terse
+is it going to be very hot in Nizamabad this week,INFORMATION,FORECAST,TEMPERATURE,NONE,"[""Nizamabad""]","[""this week""]",en,
+i need to know how much rain fell on my field near Bhimavaram,INFORMATION,FORECAST,RAIN,NONE,"[""Bhimavaram""]",[],en,
+whats the humidity like in Kochi right now,INFORMATION,CURRENT,HUMIDITY,NONE,"[""Kochi""]","[""right now""]",en,
+can you tell me the soil moisture around Warangal,INFORMATION,FORECAST,SOIL_MOISTURE,NONE,"[""Warangal""]",[],en,
+how windy will it get in Chennai tomorrow afternoon,INFORMATION,TOMORROW,WIND,NONE,"[""Chennai""]","[""tomorrow afternoon""]",en,
+give me the temperature and rainfall for Nashik this weekend,INFORMATION,FORECAST,TEMPERATURE|RAIN,NONE,"[""Nashik""]","[""this weekend""]",en,multi-variable
+i want both the wind and the humidity for Puri tonight,INFORMATION,CURRENT,WIND|HUMIDITY,NONE,"[""Puri""]","[""tonight""]",en,multi-variable
+how many hours of sunshine does Ooty get tomorrow,INFORMATION,TOMORROW,SUNSHINE,NONE,"[""Ooty""]","[""tomorrow""]",en,
+is the ground still warm enough in Anantapur,INFORMATION,FORECAST,SOIL_TEMPERATURE,NONE,"[""Anantapur""]",[],en,
+whats the cloud cover over Shimla this evening,INFORMATION,CURRENT,CLOUD,NONE,"[""Shimla""]","[""this evening""]",en,
+temperature at hyderbad plz,INFORMATION,FORECAST,TEMPERATURE,NONE,"[""hyderbad""]",[],en,misspelt place
+wat is the rainfal in bhopal,INFORMATION,FORECAST,RAIN,NONE,"[""bhopal""]",[],en,typo lowercase
+HOW MUCH RAIN IN JAIPUR TODAY,INFORMATION,CURRENT,RAIN,NONE,"[""JAIPUR""]","[""TODAY""]",en,uppercase
+weather in HYD,INFORMATION,FORECAST,GENERAL,NONE,"[""HYD""]",[],en,code
+BLR forecast for the weekend,INFORMATION,FORECAST,GENERAL,NONE,"[""BLR""]","[""the weekend""]",en,code
+mausam kaisa hai in Lucknow,INFORMATION,FORECAST,GENERAL,NONE,"[""Lucknow""]",[],hi-en,code-mixed
+Vijayawada lo varsham vasthunda,INFORMATION,FORECAST,RAIN,NONE,"[""Vijayawada""]",[],te-en,code-mixed
+barish hogi kya kal Kanpur me,INFORMATION,TOMORROW,RAIN,NONE,"[""Kanpur""]","[""kal""]",hi-en,KNOWN GAP: normalize_time has no Hindi
+im visiting my parents in Madurai next week what should i expect,INFORMATION,FORECAST,GENERAL,NONE,"[""Madurai""]","[""next week""]",en,narrative
+the crop looked stressed yesterday what was the temperature in Guntur,INFORMATION,HISTORICAL,TEMPERATURE,NONE,"[""Guntur""]","[""yesterday""]",en,narrative
+how much did it rain in Warangal in august 2019,INFORMATION,HISTORICAL,RAIN,NONE,"[""Warangal""]","[""in august 2019""]",en,dated historical
+what was the weather like in Pune on 15 august 2023,INFORMATION,HISTORICAL,GENERAL,NONE,"[""Pune""]","[""on 15 august 2023""]",en,dated historical
+rainfall in Nagpur on 12/06/2021,INFORMATION,HISTORICAL,RAIN,NONE,"[""Nagpur""]","[""on 12/06/2021""]",en,dated historical
+temperature at Leh in december 2019,INFORMATION,HISTORICAL,TEMPERATURE,NONE,"[""Leh""]","[""in december 2019""]",en,dated historical
+what did we get last monsoon in Kurnool,INFORMATION,HISTORICAL,RAIN,NONE,"[""Kurnool""]","[""last monsoon""]",en,vague past
+how was last week in Tirupati,INFORMATION,HISTORICAL,GENERAL,NONE,"[""Tirupati""]","[""last week""]",en,
+give me rainfall each year from 2010 to 2025 for Guntur,INFORMATION,HISTORICAL,RAIN,NONE,"[""Guntur""]","[""from 2010 to 2025""]",en,long range
+total rain in Solapur over the last 5 years,INFORMATION,HISTORICAL,RAIN,NONE,"[""Solapur""]","[""over the last 5 years""]",en,long range
+monthly temperature averages for Indore in 2017,INFORMATION,HISTORICAL,TEMPERATURE,NONE,"[""Indore""]","[""in 2017""]",en,long range
+has the rainfall in Coimbatore changed over the last decade,INFORMATION,HISTORICAL,RAIN,NONE,"[""Coimbatore""]","[""over the last decade""]",en,long range
+whats the wettest it has been in Guwahati in the past 6 months,INFORMATION,HISTORICAL,RAIN,NONE,"[""Guwahati""]","[""in the past 6 months""]",en,long range
+which is hotter right now Nagpur or Raipur,COMPARISON,CURRENT,TEMPERATURE,NONE,"[""Nagpur"", ""Raipur""]","[""right now""]",en,
+is Ooty cooler than Coimbatore this week,COMPARISON,FORECAST,TEMPERATURE,NONE,"[""Ooty"", ""Coimbatore""]","[""this week""]",en,
+compare the rainfall between Kochi and Mangalore,COMPARISON,FORECAST,RAIN,NONE,"[""Kochi"", ""Mangalore""]",[],en,
+im deciding between Goa and Pondicherry for the weekend which has better weather,COMPARISON,FORECAST,GENERAL,NONE,"[""Goa"", ""Pondicherry""]","[""the weekend""]",en,narrative
+did Vizag or Kakinada get more rain yesterday,COMPARISON,HISTORICAL,RAIN,NONE,"[""Vizag"", ""Kakinada""]","[""yesterday""]",en,
+Delhi vs Mumbai humidity,COMPARISON,FORECAST,HUMIDITY,NONE,"[""Delhi"", ""Mumbai""]",[],en,terse
+whos windier tomorrow chennai or pondy,COMPARISON,TOMORROW,WIND,NONE,"[""chennai"", ""pondy""]","[""tomorrow""]",en,lowercase alias
+between Nashik and Pune where is the soil wetter,COMPARISON,FORECAST,SOIL_MOISTURE,NONE,"[""Nashik"", ""Pune""]",[],en,
+i have fields in both Guntur and Prakasam which one needs water more,COMPARISON,FORECAST,SOIL_MOISTURE,NONE,"[""Guntur"", ""Prakasam""]",[],en,narrative
+is it sunnier in Jaipur or Jodhpur this week,COMPARISON,FORECAST,SUNSHINE,NONE,"[""Jaipur"", ""Jodhpur""]","[""this week""]",en,
+difference in temperature between Shimla and Manali tomorrow,COMPARISON,TOMORROW,TEMPERATURE,NONE,"[""Shimla"", ""Manali""]","[""tomorrow""]",en,
+Bengaluru or Mysuru for a picnic this sunday,COMPARISON,FORECAST,GENERAL,NONE,"[""Bengaluru"", ""Mysuru""]","[""this sunday""]",en,
+should i carry an umbrella to work tomorrow,ADVICE,TOMORROW,RAIN,RAIN_PROTECTION,[],"[""tomorrow""]",en,
+im walking to the station in Kolkata will i get soaked,ADVICE,FORECAST,RAIN,RAIN_PROTECTION,"[""Kolkata""]",[],en,keyword-free
+do i need to take anything for the rain in Mumbai this evening,ADVICE,CURRENT,RAIN,RAIN_PROTECTION,"[""Mumbai""]","[""this evening""]",en,
+theres no shelter where im headed in Pune tonight,ADVICE,CURRENT,RAIN,RAIN_PROTECTION,"[""Pune""]","[""tonight""]",en,keyword-free
+will i need sunscreen at the beach in Goa tomorrow,ADVICE,TOMORROW,UV|SUNSHINE|CLOUD,SUN_PROTECTION,"[""Goa""]","[""tomorrow""]",en,
+im standing in the field all day in Nalgonda should i cover up,ADVICE,FORECAST,UV|SUNSHINE|CLOUD,SUN_PROTECTION,"[""Nalgonda""]",[],en,keyword-free
+how strong is the sun going to be in Jodhpur this week,ADVICE,FORECAST,UV|SUNSHINE|CLOUD,SUN_PROTECTION,"[""Jodhpur""]","[""this week""]",en,
+do i need a jacket in Shimla tonight,ADVICE,CURRENT,TEMPERATURE|RAIN,CLOTHING,"[""Shimla""]","[""tonight""]",en,
+taking the kids out in Dehradun tomorrow how should i dress them,ADVICE,TOMORROW,TEMPERATURE|RAIN,CLOTHING,"[""Dehradun""]","[""tomorrow""]",en,keyword-free
+will i regret wearing just a shirt in Srinagar,ADVICE,FORECAST,TEMPERATURE|RAIN,CLOTHING,"[""Srinagar""]",[],en,keyword-free
+my brother is getting married outdoors in Guntur this saturday should we rent a tent,ADVICE,FORECAST,RAIN|TEMPERATURE|WIND,OUTDOOR_ACTIVITY,"[""Guntur""]","[""this saturday""]",en,keyword-free
+can we play cricket in Vizag tomorrow morning,ADVICE,TOMORROW,RAIN|TEMPERATURE|WIND,OUTDOOR_ACTIVITY,"[""Vizag""]","[""tomorrow morning""]",en,
+the pitch was wet in Rajkot is it worth turning up,ADVICE,FORECAST,RAIN|TEMPERATURE|WIND,OUTDOOR_ACTIVITY,"[""Rajkot""]",[],en,keyword-free
+we booked the ground in Trichy for sunday will it be usable,ADVICE,FORECAST,RAIN|TEMPERATURE|WIND,OUTDOOR_ACTIVITY,"[""Trichy""]","[""sunday""]",en,keyword-free
+is it too hot for my evening walk in Chennai,ADVICE,FORECAST,RAIN|TEMPERATURE|WIND,OUTDOOR_ACTIVITY,"[""Chennai""]",[],en,
+can the masons work on the site in Noida tomorrow,ADVICE,TOMORROW,RAIN|TEMPERATURE|WIND,OUTDOOR_ACTIVITY,"[""Noida""]","[""tomorrow""]",en,
+we want to pour concrete in Ghaziabad this week is that sensible,ADVICE,FORECAST,RAIN|TEMPERATURE|WIND,OUTDOOR_ACTIVITY,"[""Ghaziabad""]","[""this week""]",en,
+should i water the garden in Bengaluru this evening,ADVICE,CURRENT,RAIN|TEMPERATURE|WIND,OUTDOOR_ACTIVITY,"[""Bengaluru""]","[""this evening""]",en,
+is it worth taking the scooter or should i just book a cab to Kakinada tomorrow,ADVICE,TOMORROW,RAIN|WIND,TRAVEL,"[""Kakinada""]","[""tomorrow""]",en,confusion pair
+i have a long drive to Nellore tomorrow anything to worry about,ADVICE,TOMORROW,RAIN|WIND,TRAVEL,"[""Nellore""]","[""tomorrow""]",en,keyword-free
+should i leave early for the office in Gurugram tomorrow,ADVICE,TOMORROW,RAIN|WIND,TRAVEL,"[""Gurugram""]","[""tomorrow""]",en,
+is the highway to Tirupati going to be rough this weekend,ADVICE,FORECAST,RAIN|WIND,TRAVEL,"[""Tirupati""]","[""this weekend""]",en,keyword-free
+planning to ride my bike to Rajahmundry tomorrow will the weather hold,ADVICE,TOMORROW,RAIN|WIND,TRAVEL,"[""Rajahmundry""]","[""tomorrow""]",en,
+should i postpone the trip to Manali,ADVICE,FORECAST,RAIN|WIND,TRAVEL,"[""Manali""]",[],en,
+will my clothes dry on the terrace in Chennai today,ADVICE,CURRENT,RAIN|HUMIDITY|SUNSHINE,DRYING,"[""Chennai""]","[""today""]",en,
+i have washing hanging outside in Kochi should i bring it in,ADVICE,FORECAST,RAIN|HUMIDITY|SUNSHINE,DRYING,"[""Kochi""]",[],en,keyword-free
+everything is still damp in Alappuzha is it worth leaving it out,ADVICE,FORECAST,RAIN|HUMIDITY|SUNSHINE,DRYING,"[""Alappuzha""]",[],en,keyword-free
+good day to wash the car in Hyderabad,ADVICE,FORECAST,RAIN|HUMIDITY|SUNSHINE,DRYING,"[""Hyderabad""]",[],en,confusion pair
+should i do the laundry today in Bhubaneswar,ADVICE,CURRENT,RAIN|HUMIDITY|SUNSHINE,DRYING,"[""Bhubaneswar""]","[""today""]",en,
+the bike is filthy is tomorrow a waste of effort in Indore,ADVICE,TOMORROW,RAIN|HUMIDITY|SUNSHINE,DRYING,"[""Indore""]","[""tomorrow""]",en,keyword-free
+should i spray pesticide on the cotton in Guntur tomorrow,ADVICE,TOMORROW,WIND|RAIN,SPRAY,"[""Guntur""]","[""tomorrow""]",en,
+should i spray fertilizer on my paddy this week,ADVICE,FORECAST,WIND|RAIN,SPRAY,[],"[""this week""]",en,crossing: material says fertilize
+the brinjal has pest attack in Krishna district what should i do,ADVICE,FORECAST,WIND|RAIN,SPRAY,"[""Krishna district""]",[],en,keyword-free
+is it too windy in Adilabad for the knapsack today,ADVICE,CURRENT,WIND|RAIN,SPRAY,"[""Adilabad""]","[""today""]",en,keyword-free
+i want to protect the chilli from insects near Khammam tomorrow,ADVICE,TOMORROW,WIND|RAIN,SPRAY,"[""Khammam""]","[""tomorrow""]",en,keyword-free
+fungal spots on the grapes in Nashik is now a good time to treat,ADVICE,CURRENT,WIND|RAIN,SPRAY,"[""Nashik""]","[""now""]",en,keyword-free
+should i apply urea to the paddy in Nellore this week,ADVICE,FORECAST,RAIN|SOIL_MOISTURE,FERTILIZE,"[""Nellore""]","[""this week""]",en,
+will the dap wash off if i put it down in Karimnagar tomorrow,ADVICE,TOMORROW,RAIN|SOIL_MOISTURE,FERTILIZE,"[""Karimnagar""]","[""tomorrow""]",en,
+the maize looks pale and yellow in Medak should i feed it,ADVICE,FORECAST,RAIN|SOIL_MOISTURE,FERTILIZE,"[""Medak""]",[],en,keyword-free
+is this week right for top dressing the wheat in Ludhiana,ADVICE,FORECAST,RAIN|SOIL_MOISTURE,FERTILIZE,"[""Ludhiana""]","[""this week""]",en,keyword-free
+should i mix insecticide into the soil in Guntur,ADVICE,FORECAST,RAIN|SOIL_MOISTURE,FERTILIZE,"[""Guntur""]",[],en,crossing: material says spray
+does the cotton need watering in Adilabad this week,ADVICE,FORECAST,SOIL_MOISTURE|RAIN|TEMPERATURE,IRRIGATE,"[""Adilabad""]","[""this week""]",en,
+we ran out of water in the borewell does the crop need anything,ADVICE,FORECAST,SOIL_MOISTURE|RAIN|TEMPERATURE,IRRIGATE,[],[],en,keyword-free
+the field is cracking near Anantapur what should i do,ADVICE,FORECAST,SOIL_MOISTURE|RAIN|TEMPERATURE,IRRIGATE,"[""Anantapur""]",[],en,keyword-free
+can i skip the pump this week in Kurnool,ADVICE,FORECAST,SOIL_MOISTURE|RAIN|TEMPERATURE,IRRIGATE,"[""Kurnool""]","[""this week""]",en,keyword-free
+the groundnut is wilting in Chittoor,ADVICE,FORECAST,SOIL_MOISTURE|RAIN|TEMPERATURE,IRRIGATE,"[""Chittoor""]",[],en,keyword-free
+can i harvest the paddy in Thanjavur this week,ADVICE,FORECAST,RAIN|HUMIDITY,HARVEST,"[""Thanjavur""]","[""this week""]",en,
+the wheat is ready in Karnal can i bring it in,ADVICE,FORECAST,RAIN|HUMIDITY,HARVEST,"[""Karnal""]",[],en,keyword-free
+is it dry enough to cut the crop in Erode,ADVICE,FORECAST,RAIN|HUMIDITY,HARVEST,"[""Erode""]",[],en,
+grain moisture looks right in Sangli is tomorrow safe,ADVICE,TOMORROW,RAIN|HUMIDITY,HARVEST,"[""Sangli""]","[""tomorrow""]",en,keyword-free
+should i sow the groundnut in Anantapur now,ADVICE,CURRENT,SOIL_MOISTURE|SOIL_TEMPERATURE|RAIN,SOW,"[""Anantapur""]","[""now""]",en,
+the rains have set in near Guntur can i start field work,ADVICE,FORECAST,SOIL_MOISTURE|SOIL_TEMPERATURE|RAIN,SOW,"[""Guntur""]",[],en,keyword-free
+is the ground warm enough for germination in Hisar,ADVICE,FORECAST,SOIL_MOISTURE|SOIL_TEMPERATURE|RAIN,SOW,"[""Hisar""]",[],en,keyword-free
+kharif is starting in Warangal is this week right to begin,ADVICE,FORECAST,SOIL_MOISTURE|SOIL_TEMPERATURE|RAIN,SOW,"[""Warangal""]","[""this week""]",en,keyword-free
+hi,GREETING,NONE,,NONE,[],[],en,
+good morning,GREETING,NONE,,NONE,[],[],en,
+hey there,GREETING,NONE,,NONE,[],[],en,
+namaste,GREETING,NONE,,NONE,[],[],hi-en,
+hey sorry to bother you i have a quick question,GREETING,NONE,,NONE,[],[],en,long greeting - length shortcut
+hello there hope you are having a good day,GREETING,NONE,,NONE,[],[],en,long greeting - length shortcut
+thanks,THANKS,NONE,,NONE,[],[],en,
+thank you so much that was really helpful,THANKS,NONE,,NONE,[],[],en,long thanks
+appreciate it buddy,THANKS,NONE,,NONE,[],[],en,
+thanku,THANKS,NONE,,NONE,[],[],en,typo
+perfect thats exactly what i needed thanks a lot,THANKS,NONE,,NONE,[],[],en,long thanks
+bye,GOODBYE,NONE,,NONE,[],[],en,
+see you later,GOODBYE,NONE,,NONE,[],[],en,
+ok thats all i needed for now goodbye,GOODBYE,NONE,,NONE,[],[],en,long goodbye
+good night,GOODBYE,NONE,,NONE,[],[],en,
+are you a bot,SMALL_TALK,NONE,,NONE,[],[],en,
+how are you doing today,SMALL_TALK,NONE,,NONE,[],[],en,
+who built you,SMALL_TALK,NONE,,NONE,[],[],en,
+do you actually understand what im saying or is it all keywords,SMALL_TALK,NONE,,NONE,[],[],en,long small talk
+whats your favourite kind of weather,SMALL_TALK,NONE,,NONE,[],[],en,
+what can you do,CAPABILITY,NONE,,NONE,[],[],en,
+help,CAPABILITY,NONE,,NONE,[],[],en,
+what sort of questions can i ask you about my farm,CAPABILITY,NONE,,NONE,[],[],en,long capability
+do you give farming advice or only forecasts,CAPABILITY,NONE,,NONE,[],[],en,
+show me an example of what you can answer,CAPABILITY,NONE,,NONE,[],[],en,
+can i change my location,CHANGE_LOCATION,NONE,,NONE,[],[],en,
+set my location to Guntur,CHANGE_LOCATION,NONE,,NONE,"[""Guntur""]",[],en,carries a place
+im in Vijayawada now not Hyderabad,CHANGE_LOCATION,NONE,,NONE,"[""Vijayawada""]",[],en,carries a place
+use my current location instead,CHANGE_LOCATION,NONE,,NONE,[],[],en,
+actually i meant Nellore,CHANGE_LOCATION,NONE,,NONE,"[""Nellore""]",[],en,carries a place
+switch to a different village please,CHANGE_LOCATION,NONE,,NONE,[],[],en,
+i moved last month can you update where you check,CHANGE_LOCATION,NONE,,NONE,[],[],en,long
+start over,RESET,NONE,,NONE,[],[],en,
+new chat please,RESET,NONE,,NONE,[],[],en,
+forget everything we discussed and start fresh,RESET,NONE,,NONE,[],[],en,long
+clear this conversation,RESET,NONE,,NONE,[],[],en,
+lets begin again from scratch,RESET,NONE,,NONE,[],[],en,
+yes,AFFIRM,NONE,,NONE,[],[],en,
+yeah thats the one,AFFIRM,NONE,,NONE,[],[],en,
+correct,AFFIRM,NONE,,NONE,[],[],en,
+haan sahi hai,AFFIRM,NONE,,NONE,[],[],hi-en,code-mixed
+no,DENY,NONE,,NONE,[],[],en,
+nope not that one,DENY,NONE,,NONE,[],[],en,
+thats not what i meant at all,DENY,NONE,,NONE,[],[],en,
+wrong village,DENY,NONE,,NONE,[],[],en,
+why,EXPLAIN,NONE,,NONE,[],[],en,
+on what basis are you saying that,EXPLAIN,NONE,,NONE,[],[],en,
+how did you decide that,EXPLAIN,NONE,,NONE,[],[],en,
+can you say that again i didnt follow,EXPLAIN,NONE,,NONE,[],[],en,
+where are you getting these numbers from,EXPLAIN,NONE,,NONE,[],[],en,
+explain why spraying is a bad idea tomorrow,EXPLAIN,NONE,,NONE,[],[],en,references a prior answer
+whats the air quality in Delhi,UNSUPPORTED_METRIC,NONE,,NONE,[],[],en,
+aqi near me,UNSUPPORTED_METRIC,NONE,,NONE,[],[],en,
+is there any snow in Manali right now,UNSUPPORTED_METRIC,NONE,,NONE,[],[],en,
+pollen count for Bengaluru,UNSUPPORTED_METRIC,NONE,,NONE,[],[],en,
+will there be an earthquake,UNSUPPORTED_METRIC,NONE,,NONE,[],[],en,
+how bad is the smog in Noida this week,UNSUPPORTED_METRIC,NONE,,NONE,[],[],en,
+book me a flight to Chennai,OUT_OF_SCOPE,NONE,,NONE,[],[],en,
+what is the gold rate today,OUT_OF_SCOPE,NONE,,NONE,[],[],en,
+tell me a joke,OUT_OF_SCOPE,NONE,,NONE,[],[],en,
+who won the match last night,OUT_OF_SCOPE,NONE,,NONE,[],[],en,near-miss: weather words
+how do i cook biryani,OUT_OF_SCOPE,NONE,,NONE,[],[],en,
+whats the traffic like on the Hyderabad highway,OUT_OF_SCOPE,NONE,,NONE,[],[],en,near-miss: place + travel
+asdf,UNCLEAR,NONE,,NONE,[],[],en,
+hmm,UNCLEAR,NONE,,NONE,[],[],en,
+the thing i asked about earlier,UNCLEAR,NONE,,NONE,[],[],en,
+???,UNCLEAR,NONE,,NONE,[],[],en,
+do it,UNCLEAR,NONE,,NONE,[],[],en,
+what is the rainfall fro whole day,INFORMATION,CURRENT,RAIN,NONE,[],"[""whole day""]",en,REPORTED BUG: whole was tagged a location
+what is the rainfall for whole day,INFORMATION,CURRENT,RAIN,NONE,[],"[""whole day""]",en,span quantifier
+rainfall whole day,INFORMATION,CURRENT,RAIN,NONE,[],"[""whole day""]",en,span quantifier terse
+rain for the entire week,INFORMATION,FORECAST,RAIN,NONE,[],"[""the entire week""]",en,span quantifier
+whole day rainfall in Kakinada,INFORMATION,CURRENT,RAIN,NONE,"[""Kakinada""]","[""whole day""]",en,span quantifier + place
+what is the temperature all day,INFORMATION,CURRENT,TEMPERATURE,NONE,[],"[""all day""]",en,span quantifier
+rest of the day rain in vizag,INFORMATION,CURRENT,RAIN,NONE,"[""vizag""]","[""rest of the day""]",en,span quantifier
+soil moisture in my field right now,INFORMATION,CURRENT,SOIL_MOISTURE,NONE,[],"[""right now""]",en,relative location - browser supplies coords

@@ -23,11 +23,12 @@ from __future__ import annotations
 
 import json
 import re
-from pathlib import Path
 
 import httpx
 
-ALIAS_FILE = Path(__file__).resolve().parent.parent / "data" / "location_aliases.json"
+from backend.config import DATA_DIR
+
+ALIAS_FILE = DATA_DIR / "location_aliases.json"
 
 # Ordinary English the tagger sometimes hands over as a place. Solr is fuzzy enough to match
 # most of them to *some* village, which is how a question about Pithoragarh once came back
@@ -37,6 +38,10 @@ NOT_PLACES = {
     "forecast", "clouds", "rain", "sun", "wind", "temperature", "humidity", "today",
     "tomorrow", "week", "weekend", "morning", "evening", "night", "chance", "idea",
     "question", "time", "bit", "thing", "way", "one", "some", "any", "please", "thanks",
+    # span quantifiers: "rainfall for whole day" resolved "whole" against the location index
+    "whole", "entire", "full", "complete", "all", "rest", "remainder", "day", "hour",
+    "whole day", "entire day", "full day", "all day", "whole week", "entire week",
+    "full week", "rest of the day", "the day", "the week", "month", "year",
 }
 LEADING_JUNK = {"than", "or", "and", "the", "a", "an", "i", "we", "you", "should", "is", "of"}
 
@@ -51,6 +56,10 @@ REFERENCE_WORDS = {
 
 # Relative locations (Rule 4.1) carry no coordinates - the browser has to supply them.
 RELATIVE_LOCATIONS = {
+    # "soil moisture in my field" reached the resolver as a place called "my field"; it is a
+    # relative location, so the browser supplies the coordinates (Rule 4.1).
+    "my field", "my farm", "my plot", "my village", "my land", "our field", "our farm",
+    "the field", "the farm", "my place", "my side", "my town", "my city",
     "near me", "nearby", "near by", "here", "my location", "this area", "my area",
     "my field", "feild", "my feild", "my farm", "my village", "my vilage", "our village",
     "my plot", "my place", "this village",
@@ -81,10 +90,30 @@ def is_relative(name: str) -> bool:
     return " ".join(name.lower().split()).strip(" ,.?!") in RELATIVE_LOCATIONS
 
 
+MONTH_WORDS = {"january", "february", "march", "april", "may", "june", "july", "august",
+               "september", "october", "november", "december", "jan", "feb", "mar", "apr",
+               "jun", "jul", "aug", "sep", "sept", "oct", "nov", "dec"}
+
+
+def looks_like_a_date(text: str) -> bool:
+    """True for '11 jan', '2026', '12/06/2021' - fragments a split date range leaves behind."""
+    cleaned = " ".join(text.lower().split()).strip(" ,.?!")
+    if not cleaned:
+        return False
+    if re.fullmatch(r"[\d/\-.:\s]+", cleaned):          # all digits and separators
+        return True
+    words = set(re.findall(r"[a-z]+", cleaned))
+    return bool(words) and words <= MONTH_WORDS
+
+
 def is_probably_not_a_place(name: str) -> bool:
     """True for ordinary English that only looks like a place to a fuzzy index."""
     cleaned = " ".join(name.lower().split()).strip(" ,.?!")
     if cleaned in NOT_PLACES or cleaned in REFERENCE_WORDS or len(cleaned) < 3:
+        return True
+    # "11 jan" is what a mis-split date range leaves behind, and the index will happily
+    # fuzzy-match it to a village
+    if looks_like_a_date(cleaned):
         return True
     return cleaned.split()[0] in LEADING_JUNK
 
@@ -103,6 +132,17 @@ def canonical_state(text: str) -> str | None:
     if key.replace(" ", "") in STATE_ALIASES:
         return STATE_ALIASES[key.replace(" ", "")]
     return key.title() if key in SELF_NAMED_STATES else None
+
+
+def _squeeze(text: str) -> str:
+    """Collapse runs of the same letter: "Beeramguda" and "Beramguda" are one name, twice.
+
+    Transliterated names double their vowels and consonants inconsistently - Beeramguda /
+    Beramguda, Kompally / Kompaly - so a prefix guard on the raw spelling throws away the
+    exact class of misspelling the fuzzy pass exists to catch. It still separates real
+    neighbours: "beramguda" and "Belamguda" squeeze to "ber" and "bel".
+    """
+    return re.sub(r"(.)\1+", r"\1", (text or "").lower())
 
 
 def _first(doc: dict, key: str):
@@ -245,7 +285,7 @@ async def resolve(solr, raw: str) -> dict | None:
             for level in LEVELS:
                 label = _first(doc, level)
                 lat, lon = _first(doc, f"{level}_latitude"), _first(doc, f"{level}_longitude")
-                if label and lat and lon and label.lower()[:3] == safe.lower()[:3]:
+                if label and lat and lon and _squeeze(label)[:3] == _squeeze(safe)[:3]:
                     loose.append({"raw": raw, "normalized": label, "type": level, "name": label,
                                   "lat": float(lat), "lon": float(lon),
                                   "fuzzy": label.lower() != safe.lower(),
@@ -260,6 +300,42 @@ async def resolve(solr, raw: str) -> dict | None:
     return None
 
 
+async def suggest(solr, raw: str, limit: int = 3) -> list[str]:
+    """The nearest names the index *does* hold, for a name it does not.
+
+    The same fuzzy queries `resolve` runs, without the guard that makes a hit safe to answer
+    with. That guard is right for answering - Belamguda in Odisha is not Beramguda near
+    Hyderabad and must never be silently served as it - but too far to act on is still close
+    enough to ask about, and "did you mean Vedurumudi?" is the whole difference between a dead
+    end and a resolved turn.
+
+    Retrieval only: what to do with these is the caller's business, and the model that words
+    the reply is told to drop them if none looks right.
+    """
+    head = normalize((raw or "").split(",")[0].split()[0] if raw.strip() else "")
+    safe = re.sub(r"[^\w ]", "", head)
+    if len(safe) < 4:                      # too short to be a near miss of anything
+        return []
+    seen, out = set(), []
+    for query in (f"(village:{safe}~1 OR sub_district:{safe}~1 OR district:{safe}~1)",
+                  f"(village:{safe}* OR district:{safe}*)"):
+        for doc in await solr(query, 8):
+            for level in LEVELS:
+                label = _first(doc, level)
+                if not label:
+                    continue
+                where = ", ".join(p for p in (_first(doc, "district"), _first(doc, "state"))
+                                  if p and p != label)
+                line = f"{label} ({where})" if where else str(label)
+                if line.lower() not in seen:
+                    seen.add(line.lower())
+                    out.append(line)
+                break
+        if len(out) >= limit:
+            break
+    return out[:limit]
+
+
 def demo():
     """Self-check for the parts that need no network."""
     assert normalize("KKD") == "Kakinada"
@@ -270,6 +346,10 @@ def demo():
     assert canonical_state("Kakinada") is None
     assert is_probably_not_a_place("I expect") and is_probably_not_a_place("skies")
     assert is_probably_not_a_place("there") and is_probably_not_a_place("that place")
+    # doubled letters are a spelling, not a different place - but a changed letter is
+    assert _squeeze("Beeramguda")[:3] == _squeeze("beramguda")[:3]
+    assert _squeeze("Kompally")[:3] == _squeeze("kompaly")[:3]
+    assert _squeeze("Belamguda")[:3] != _squeeze("beramguda")[:3]
     assert not is_probably_not_a_place("Kakinada")
     assert is_relative("my field") and not is_relative("Guntur")
     print(f"locations demo OK: {len(ALIASES)} aliases, {len(STATE_ALIASES)} state aliases")

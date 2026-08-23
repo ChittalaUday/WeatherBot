@@ -1,42 +1,42 @@
-Do you think I can leave the umbrella at home today?,RAIN,GET,RAW,[],"[""today""]",en
-Is it safe to head out without carrying an umbrella?,RAIN,GET,RAW,[],[],en
-Would I be better off taking an umbrella with me?,RAIN,GET,RAW,[],[],en
-Do I stand a good chance of getting caught in the rain?,RAIN,GET,RAW,[],[],en
-Am I going to regret not bringing an umbrella?,RAIN,GET,RAW,[],[],en
-Is there any reason I should take an umbrella before heading out?,RAIN,GET,RAW,[],[],en
-Can I go about my day without worrying about rain?,RAIN,GET,RAW,[],[],en
-Should I prepare for rain while I'm outside today?,RAIN,GET,RAW,[],"[""today""]",en
-Is the weather bad enough to justify carrying an umbrella?,RAIN,GET,RAW,[],[],en
-Do you reckon I'll need something to keep the rain off?,RAIN,GET,RAW,[],[],en
-I'm heading out for a few hours today; do you think I should take an umbrella?,RAIN,GET,RAW,[],"[""today""]",en
-"I don't want to carry an umbrella unnecessarily, but is rain likely enough that I should bring one?",RAIN,GET,RAW,[],[],en
-I'll be outside most of the afternoon—would you recommend taking an umbrella?,RAIN,GET,RAW,[],"[""most of the afternoon""]",en
-"If I'm going out later today, is there a decent chance I'll need an umbrella?",RAIN,GET,RAW,[],"[""later today""]",en
-I'm planning to walk around town today; should I take rain protection with me?,RAIN,GET,RAW,[],"[""today""]",en
-I have to leave soon and probably won't be back until evening—do I need an umbrella?,RAIN,GET,RAW,[],"[""soon"", ""until evening""]",en
-I'm going out despite the cloudy weather; do you think I'll need protection from rain?,RAIN,GET,RAW,[],[],en
-"If I leave the house without an umbrella, am I likely to get caught in the rain?",RAIN,GET,RAW,[],[],en
-I'm trying to avoid carrying extra stuff today—can I safely skip the umbrella?,RAIN,GET,RAW,[],"[""today""]",en
-I'm going to be outdoors for most of the day; how concerned should I be about rain?,RAIN,GET,RAW,[],"[""most of the day""]",en
-Is an umbrella actually worth taking today?,RAIN,GET,RAW,[],"[""today""]",en
-Would bringing an umbrella be overkill today?,RAIN,GET,RAW,[],"[""today""]",en
-Can I risk going out without one?,RAIN,GET,RAW,[],[],en
-Is today one of those days when I should have an umbrella handy?,RAIN,GET,RAW,[],"[""today""]",en
-Do I need to be prepared for wet weather?,RAIN,GET,RAW,[],[],en
-Should rain be a concern for me today?,RAIN,GET,RAW,[],"[""today""]",en
-Is there enough rain in the forecast to change what I carry?,RAIN,GET,RAW,[],[],en
-Would you personally bring an umbrella if you were heading out today?,RAIN,GET,RAW,[],"[""today""]",en
-Is the weather likely to turn against me while I'm out?,RAIN,GET,RAW,[],[],en
-Do I need to plan around possible rain today?,RAIN,GET,RAW,[],"[""today""]",en
-What should I take with me if I'm heading out today?,RAIN,GET,RAW,[],"[""today""]",en
-Will I be okay wearing normal clothes outside today?,RAIN,GET,RAW,[],"[""today""]",en
-Is there anything I should carry because of the weather?,RAIN,GET,RAW,[],[],en
-What kind of weather should I prepare for today?,FORECAST,GET,RAW,[],"[""today""]",en
-Is the weather going to cause me any trouble while I'm outside?,FORECAST,GET,RAW,[],[],en
-Can I make plans outdoors without worrying about the weather?,FORECAST,GET,RAW,[],[],en
-What should I bring if I'm going out this afternoon?,RAIN,GET,RAW,[],"[""this afternoon""]",en
-Is there anything I might wish I'd brought with me later?,RAIN,GET,RAW,[],"[""later""]",en
-How should I prepare before heading out today?,FORECAST,GET,RAW,[],"[""today""]",en
-Is rain something I need to plan for?,RAIN,GET,RAW,[],[],en
-It's raining—should I wear a raincoat?,RAIN,GET,RAW,[],[],en
-It's raining—should I take an umbrella?,RAIN,GET,RAW,[],[],en
+Do you think I can leave the umbrella at home today?,RAIN_PROTECTION,GET,RAW,[],"[""today""]",en
+Is it safe to head out without carrying an umbrella?,RAIN_PROTECTION,GET,RAW,[],[],en
+Would I be better off taking an umbrella with me?,RAIN_PROTECTION,GET,RAW,[],[],en
+Do I stand a good chance of getting caught in the rain?,RAIN_PROTECTION,GET,RAW,[],[],en
+Am I going to regret not bringing an umbrella?,RAIN_PROTECTION,GET,RAW,[],[],en
+Is there any reason I should take an umbrella before heading out?,RAIN_PROTECTION,GET,RAW,[],[],en
+Can I go about my day without worrying about rain?,RAIN_PROTECTION,GET,RAW,[],[],en
+Should I prepare for rain while I'm outside today?,RAIN_PROTECTION,GET,RAW,[],"[""today""]",en
+Is the weather bad enough to justify carrying an umbrella?,RAIN_PROTECTION,GET,RAW,[],[],en
+Do you reckon I'll need something to keep the rain off?,RAIN_PROTECTION,GET,RAW,[],[],en
+I'm heading out for a few hours today; do you think I should take an umbrella?,RAIN_PROTECTION,GET,RAW,[],"[""today""]",en
+"I don't want to carry an umbrella unnecessarily, but is rain likely enough that I should bring one?",RAIN_PROTECTION,GET,RAW,[],[],en
+I'll be outside most of the afternoon—would you recommend taking an umbrella?,RAIN_PROTECTION,GET,RAW,[],"[""most of the afternoon""]",en
+"If I'm going out later today, is there a decent chance I'll need an umbrella?",RAIN_PROTECTION,GET,RAW,[],"[""later today""]",en
+I'm planning to walk around town today; should I take rain protection with me?,RAIN_PROTECTION,GET,RAW,[],"[""today""]",en
+I have to leave soon and probably won't be back until evening—do I need an umbrella?,RAIN_PROTECTION,GET,RAW,[],"[""soon"", ""until evening""]",en
+I'm going out despite the cloudy weather; do you think I'll need protection from rain?,RAIN_PROTECTION,GET,RAW,[],[],en
+"If I leave the house without an umbrella, am I likely to get caught in the rain?",RAIN_PROTECTION,GET,RAW,[],[],en
+I'm trying to avoid carrying extra stuff today—can I safely skip the umbrella?,RAIN_PROTECTION,GET,RAW,[],"[""today""]",en
+I'm going to be outdoors for most of the day; how concerned should I be about rain?,RAIN_PROTECTION,GET,RAW,[],"[""most of the day""]",en
+Is an umbrella actually worth taking today?,RAIN_PROTECTION,GET,RAW,[],"[""today""]",en
+Would bringing an umbrella be overkill today?,RAIN_PROTECTION,GET,RAW,[],"[""today""]",en
+Can I risk going out without one?,RAIN_PROTECTION,GET,RAW,[],[],en
+Is today one of those days when I should have an umbrella handy?,RAIN_PROTECTION,GET,RAW,[],"[""today""]",en
+Do I need to be prepared for wet weather?,RAIN_PROTECTION,GET,RAW,[],[],en
+Should rain be a concern for me today?,RAIN_PROTECTION,GET,RAW,[],"[""today""]",en
+Is there enough rain in the forecast to change what I carry?,RAIN_PROTECTION,GET,RAW,[],[],en
+Would you personally bring an umbrella if you were heading out today?,RAIN_PROTECTION,GET,RAW,[],"[""today""]",en
+Is the weather likely to turn against me while I'm out?,OUTDOOR_ACTIVITY,GET,RAW,[],[],en
+Do I need to plan around possible rain today?,RAIN_PROTECTION,GET,RAW,[],"[""today""]",en
+What should I take with me if I'm heading out today?,OUTDOOR_ACTIVITY,GET,RAW,[],"[""today""]",en
+Will I be okay wearing normal clothes outside today?,CLOTHING,GET,RAW,[],"[""today""]",en
+Is there anything I should carry because of the weather?,OUTDOOR_ACTIVITY,GET,RAW,[],[],en
+What kind of weather should I prepare for today?,OUTDOOR_ACTIVITY,GET,RAW,[],"[""today""]",en
+Is the weather going to cause me any trouble while I'm outside?,OUTDOOR_ACTIVITY,GET,RAW,[],[],en
+Can I make plans outdoors without worrying about the weather?,OUTDOOR_ACTIVITY,GET,RAW,[],[],en
+What should I bring if I'm going out this afternoon?,OUTDOOR_ACTIVITY,GET,RAW,[],"[""this afternoon""]",en
+Is there anything I might wish I'd brought with me later?,OUTDOOR_ACTIVITY,GET,RAW,[],"[""later""]",en
+How should I prepare before heading out today?,OUTDOOR_ACTIVITY,GET,RAW,[],"[""today""]",en
+Is rain something I need to plan for?,RAIN_PROTECTION,GET,RAW,[],[],en
+It's raining—should I wear a raincoat?,RAIN_PROTECTION,GET,RAW,[],[],en
+It's raining—should I take an umbrella?,RAIN_PROTECTION,GET,RAW,[],[],en
