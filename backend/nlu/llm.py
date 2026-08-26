@@ -29,8 +29,18 @@ import httpx
 from backend.config import AI_API_KEY, AI_BASE_URL, AI_MODEL, AI_TIMEOUT
 from src.tagger import normalize_time
 from src.v4.entities import extract as extract_entities
-from src.v4.schema import (CONTROL, DECLINED, NO_DATA_NEEDED, REPLIES, Activity, Aggregation,
-                           Intent, Variable, sub_activity_for, weather_intent_for)
+from src.v4.schema import (
+    CONTROL,
+    DECLINED,
+    NO_DATA_NEEDED,
+    REPLIES,
+    Activity,
+    Aggregation,
+    Intent,
+    Variable,
+    sub_activity_for,
+    weather_intent_for,
+)
 
 NAME = "Model 3"
 VERSION = "llm"
@@ -189,68 +199,3 @@ def available() -> bool:
 
 def model_name() -> str:
     return AI_MODEL
-
-
-def offline_check():
-    """The parsing and coercion, without the network - the quota is not always there.
-
-    This is where the bugs actually are: a hosted model returns prose, fences, invented labels
-    and spans that are not in the sentence, and every one of those has to become either a valid
-    contract or nothing.
-    """
-    assert _json_from('{"intent":"ADVICE"}')["intent"] == "ADVICE"
-    assert _json_from('```json\n{"intent":"ADVICE"}\n```')["intent"] == "ADVICE"
-    assert _json_from('Sure! Here you go:\n{"intent":"ADVICE"}\nHope that helps')["intent"] == "ADVICE"
-    assert _json_from("not json at all") == {}
-
-    text = "should i spray fertilizer on the cotton in Guntur tomorrow"
-    got = _coerce({"intent": "ADVICE", "activity": "SPRAY", "variables": ["WIND", "RAIN"],
-                   "aggregation": "RAW", "locations": ["Guntur"], "times": ["tomorrow"]}, text)
-    assert got["intent"] is Intent.ADVICE and got["activity"] is Activity.SPRAY, got
-    assert got["locations"] == ["Guntur"] and got["times"] == ["tomorrow"], got
-
-    # invented labels are dropped, not passed through
-    junk = _coerce({"intent": "WEATHER_QUERY", "activity": "PLOUGHING",
-                    "variables": ["RAIN", "MOONPHASE"], "aggregation": "AVERAGE",
-                    "locations": ["Hyderabad"], "times": []}, text)
-    assert junk["intent"] is Intent.INFORMATION, junk["intent"]     # unknown -> fallback
-    assert junk["activity"] is Activity.NONE, junk["activity"]      # unknown, and not ADVICE
-    assert [v.value for v in junk["variables"]] == ["RAIN"], junk["variables"]
-    assert junk["aggregation"] is Aggregation.RAW, junk["aggregation"]
-    # "Hyderabad" is not in the sentence - a span the model invented is worse than no span
-    assert junk["locations"] == [], junk["locations"]
-
-    # activity only survives on an ADVICE turn
-    assert _coerce({"intent": "INFORMATION", "activity": "SPRAY"}, text)["activity"] is Activity.NONE
-
-    # a chat turn carries no window, no variables, no spans
-    chat = _coerce({"intent": "GREETING", "variables": ["RAIN"], "locations": ["Guntur"],
-                    "times": ["tomorrow"]}, "hey there Guntur tomorrow")
-    assert chat["variables"] == [] and chat["times"] == [] and chat["locations"] == [], chat
-    # ...except CHANGE_LOCATION, which is entirely about the place it names
-    moved = _coerce({"intent": "CHANGE_LOCATION", "locations": ["Guntur"]}, "set location to Guntur")
-    assert moved["locations"] == ["Guntur"], moved
-
-    assert _coerce({}, text)["intent"] is Intent.INFORMATION       # empty reply still valid
-    print("llm_nlu offline check OK - coercion, fences, invented labels, chat blanking")
-
-
-async def demo():
-    for text in ("should i spray fertilizer on my cotton field in Guntur tomorrow",
-                 "what is the rainfall fro whole day",
-                 "hey there",
-                 "what is the air quality in delhi"):
-        got = await understand(text)
-        await asyncio.sleep(4)                      # the demo would otherwise rate-limit itself
-        if not got["ok"]:
-            print(f"  {text[:46]:48s} FAILED {got['error']}")
-            continue
-        print(f"  {text[:46]:48s} {got['intent']:12s} {got['weather_intent']:10s} "
-              f"{got['activity']:16s} loc={got['locations']} time={got['times']} "
-              f"[{got['latency_ms']}ms]")
-
-
-if __name__ == "__main__":
-    offline_check()
-    print()
-    asyncio.run(demo())

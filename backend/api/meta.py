@@ -10,18 +10,26 @@ What this deployment is: health, the models it serves, their label sets, place a
 from __future__ import annotations
 
 import json
+from typing import Union
 
 from fastapi import APIRouter
 
 from backend import config
 from backend.api.deps import registry
+from backend.api.schemas import (
+    HealthResponse,
+    ModelListResponse,
+    SuggestResponse,
+    V3LabelsResponse,
+    V4LabelsResponse,
+)
 from backend.nlu import DEFAULT_VERSION, MODELS
 from backend.pipeline import sources
 
 router = APIRouter()
 
 
-@router.get("/api/health")
+@router.get("/api/health", response_model=HealthResponse)
 def health():
     """Up, which bundles are present, and whether the wording layer is actually working.
 
@@ -35,7 +43,7 @@ def health():
             **config.summary()}
 
 
-@router.get("/api/models")
+@router.get("/api/models", response_model=ModelListResponse)
 def list_models():
     """Every served model and its exported metrics.
 
@@ -50,7 +58,7 @@ def list_models():
     return {"available": registry.available(), "default": DEFAULT_VERSION, "metrics": metrics}
 
 
-@router.get("/api/labels")
+@router.get("/api/labels", response_model=Union[V3LabelsResponse, V4LabelsResponse])
 def labels(model: str = DEFAULT_VERSION):
     """The label sets the correction form offers, for the model that answered.
 
@@ -61,24 +69,24 @@ def labels(model: str = DEFAULT_VERSION):
         from src.v2.schema import Intent, Variable
         from src.v3.schema import ChartKind, Detail, Insight
 
-        return {"model": "v3", "name": MODELS["v3"]["name"],
-                "intents": [i.value for i in Intent],
-                "variables": [v.value for v in Variable],
-                "detail": [d.value for d in Detail],
-                "chart": [c.value for c in ChartKind],
-                "insights": [i.value for i in Insight]}
+        return V3LabelsResponse(model="v3", name=MODELS["v3"]["name"],
+                                intents=[i.value for i in Intent],
+                                variables=[v.value for v in Variable],
+                                detail=[d.value for d in Detail],
+                                chart=[c.value for c in ChartKind],
+                                insights=[i.value for i in Insight])
 
     from src.v4.schema import Activity, Aggregation, Intent, Variable, WeatherIntent
 
-    return {"model": "v4", "name": MODELS["v4"]["name"],
-            "intents": [i.value for i in Intent],
-            "weather_intents": [w.value for w in WeatherIntent],
-            "variables": [v.value for v in Variable],
-            "activities": [a.value for a in Activity],
-            "aggregations": [a.value for a in Aggregation]}
+    return V4LabelsResponse(model="v4", name=MODELS["v4"]["name"],
+                            intents=[i.value for i in Intent],
+                            weather_intents=[w.value for w in WeatherIntent],
+                            variables=[v.value for v in Variable],
+                            activities=[a.value for a in Activity],
+                            aggregations=[a.value for a in Aggregation])
 
 
-@router.get("/api/suggest")
+@router.get("/api/suggest", response_model=SuggestResponse)
 async def suggest(q: str):
     """Location autocomplete for the frontend picker."""
     async with sources.client() as http:

@@ -9,13 +9,14 @@ model, then normalizer, then the context engine, exactly as the socket does it.
 from collections import Counter
 from pathlib import Path
 
-from _root import ROOT                       # noqa: F401 - puts the repo root on sys.path
+from _root import ROOT  # noqa: F401 - puts the repo root on sys.path
+
 from backend import nlu as models
 from backend.nlu import context
 from backend.pipeline import places as place_index
 from src.normalize import normalize
 from src.schema import ConversationState
-from src.v2 import dataset as v2_dataset      # chats() - grouping helper, version-neutral
+from src.v2 import dataset as v2_dataset  # chats() - grouping helper, version-neutral
 from src.v3 import dataset as v3_dataset
 
 # Floors for Model 1 (v3), which is what this fixture was built against - the conversations
@@ -105,7 +106,7 @@ def main():
                 other["locations"] += sorted(got["locations"]) == sorted(
                     n.lower() for n in turn["ctx_locations"])
                 other["operation"] += got["operation"] == turn["operation"]
-        print(f"  for comparison, Model 2 (v4) on the same fixture: "
+        print("  for comparison, Model 2 (v4) on the same fixture: "
               + "  ".join(f"{k} {v / seen:.1%}" for k, v in other.items()))
 
 

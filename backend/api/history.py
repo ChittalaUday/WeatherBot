@@ -15,15 +15,16 @@ from fastapi import APIRouter
 
 from backend import store
 from backend.api.deps import db
+from backend.api.schemas import ChatListResponse, ConversationResponse
 
 router = APIRouter()
 
 
-@router.get("/api/chats")
+@router.get("/api/chats", response_model=ChatListResponse)
 def chats(limit: int = 40):
     return {"chats": store.list_chats(db, limit)}
 
 
-@router.get("/api/chats/{chat_id}")
+@router.get("/api/chats/{chat_id}", response_model=ConversationResponse)
 def conversation(chat_id: str):
     return {"chat_id": chat_id, "turns": store.conversation(db, chat_id)}

@@ -1,7 +1,7 @@
 """
 Rows -> the reduction, the chart and the observations worth saying out loud.
 
-    python -m backend.pipeline.analysis        # self-check
+    python tests/test_pipeline_units.py          # the checks for this module
 
 The model decides *which* reduction the question asks for (Rule 2.3: RAW / SUM / AVG / MAX /
 MIN / TREND) and whether a chart was wanted. Computing any of it is deterministic: the model
@@ -146,10 +146,12 @@ def _trend(rows: list[dict], field: str) -> dict | None:
     points = [(r["Date_time"], float(r[field])) for r in rows if not is_missing(r.get(field))]
     if len(points) < 3:
         return None
+    first, last = points[0][1], points[-1][1]
+    if abs(last - first) < 1.5:
+        return None
     name, units = label(field).lower(), unit(field)
     peak_at, peak = max(points, key=lambda p: p[1])
     low_at, low = min(points, key=lambda p: p[1])
-    first, last = points[0][1], points[-1][1]
     direction = "rising" if last > first else "falling" if last < first else "flat"
 
     when = lambda iso: _when({"Date_time": iso})
@@ -268,74 +270,3 @@ def build_insights(selected: list[list[dict]], places: list[dict], fields: list[
                                 f"{'hours' if hourly else 'days'} (<1mm)", where))
 
     return out[:MAX_NOTES]
-
-
-def demo():
-    """Self-check: the guard, the reductions, and that notes carry their kind."""
-    days = lambda n, **f: [{"Date_time": f"2026-08-{d:02d}T00:00:00",
-                            **{k: (v[d - 1] if isinstance(v, list) else v) for k, v in f.items()}}
-                           for d in range(1, n + 1)]
-
-    # the guard, both ways: a reduction the wording never asked for is dropped, and one the
-    # wording plainly asks for is added when the model missed it
-    assert confirm_aggregation("weather in KKD", "MAX") == "RAW"
-    assert confirm_aggregation("hottest day in KKD", "MAX") == "MAX"
-    assert confirm_aggregation("weather in KKD", "RAW") == "RAW"
-    assert confirm_aggregation("total rain in KKD this week", "RAW") == "SUM"
-    assert confirm_aggregation("rain in KKD altogether", "RAW") == "SUM"
-    assert confirm_aggregation("average temperature in KKD", "RAW") == "AVG"
-    # ...but a loose phrase does not invent one. "how much rain tomorrow" is a question about
-    # tomorrow, not a request for a sum.
-    assert confirm_aggregation("how much rain in KKD tomorrow", "RAW") == "RAW"
-    assert confirm_aggregation("overall weather in KKD", "RAW") == "RAW"
-
-    rows = days(5, Rainfall=[1.0, 12.0, 0.0, 0.5, 3.0])
-    assert apply_aggregation(rows, "Rainfall", "RAW") is None
-    assert apply_aggregation(rows, "Rainfall", "SUM")["value"] == 16.5
-    assert apply_aggregation(rows, "Rainfall", "MAX")["value"] == 12.0
-    assert apply_aggregation(rows, "Rainfall", "MAX")["at"].startswith("2026-08-02")
-    assert apply_aggregation([], "Rainfall", "SUM") is None
-    # sentinels are not values - -999 must never become the minimum
-    assert apply_aggregation(days(3, Rainfall=[-999, 4.0, 6.0]), "Rainfall", "MIN")["value"] == 4.0
-
-    trend = apply_aggregation(days(4, Tmax=[34.0, 36.0, 33.0, 31.0]), "Tmax", "TREND")
-    assert trend["kind"] == "TREND" and "dropping" in trend["text"], trend
-    rise = apply_aggregation(days(4, Tmax=[31.0, 30.0, 33.0, 36.0]), "Tmax", "TREND")
-    assert "climbing" in rise["text"], rise
-    assert apply_aggregation(days(2, Tmax=[30.0, 31.0]), "Tmax", "TREND") is None   # too short
-
-    # notes carry their kind, so the prompt layer can group them
-    notes = build_insights([rows], [{"name": "Guntur"}], ["Rainfall"], "RAW", hourly=False)
-    kinds = {n.kind for n in notes}
-    assert "RANGE" in kinds and "THRESHOLD" in kinds and "DRY_SPELL" in kinds, notes
-    assert all(n.place == "" for n in notes), "one place needs no prefix"
-    assert len(build_insights([rows] * 5, [{"name": f"P{i}"} for i in range(5)],
-                              ["Rainfall"], "RAW", False)) <= MAX_NOTES
-
-    # the comparison survives the cap, because it is what a comparison question asked for
-    two = build_insights([rows, days(5, Rainfall=0.0)],
-                         [{"name": "Guntur"}, {"name": "Vizag"}], ["Rainfall"], "RAW", False)
-    assert two[0].kind == "COMPARISON", two
-    assert two[0].text.startswith("Guntur leads Vizag"), two[0]
-
-    # v3's selection narrows it
-    only_range = build_insights([rows], [{"name": "Guntur"}], ["Rainfall"], "RAW", False,
-                                wanted=["RANGE"])
-    assert {n.kind for n in only_range} == {"RANGE"}, only_range
-
-    # a decision does not come with a graph unless the question asked for one
-    assert not wants_chart("should i take raincoat?")
-    assert wants_chart("show me a graph of rain this week")
-    assert wants_chart("rain today", kind="LINE") and not wants_chart("rain today", kind="NONE")
-
-    chart = build_chart([rows], [{"name": "Guntur"}], "Rainfall", hourly=False)
-    assert chart["type"] == "line" and len(chart["series"][0]["points"]) == 5, chart
-    assert build_chart([rows[:1]], [{"name": "Guntur"}], "Rainfall", False) is None  # one point
-
-    print("analysis demo OK")
-    for note in notes + two[:1]:
-        print(f"  {note.kind:11s} {note.text}")
-
-
-if __name__ == "__main__":
-    demo()

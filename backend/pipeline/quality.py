@@ -1,7 +1,7 @@
 """
 Data quality - what actually came back, before anything is computed from it.
 
-    python backend/quality.py            # self-check
+    python tests/test_pipeline_units.py          # the checks for this module
 
 Every upstream feed here can return less than it promised, and the shapes are not theoretical:
 the historical endpoint's own sample response contains
@@ -28,7 +28,6 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
 
 # Values that mean "missing" while looking like data. -999 and 9999 are the usual sentinels in
 # gridded weather output; a bare "" or "NA" shows up when something serialises through CSV.
@@ -63,7 +62,7 @@ def values(rows: list[dict], field_name: str) -> list[float]:
     out = []
     for row in rows or []:
         v = row.get(field_name)
-        if not is_missing(v):
+        if v is not None and not is_missing(v):
             out.append(float(v))
     return out
 
@@ -139,50 +138,3 @@ def caveat(quality: Quality) -> str:
     if quality.status == "PARTIAL":
         return f"Partial data: {quality.message}."
     return ""
-
-
-def demo():
-    """Self-check against the shapes this API is actually known to return."""
-    full = [{"Date_time": f"2026-08-{d:02d}T00:00:00", "Rainfall": 1.0 + d, "Tavg": 25.0,
-             "Wind_Speed": 3.0} for d in range(1, 8)]
-
-    ok = assess(full, ["Rainfall", "Tavg"])
-    assert ok.status == "OK" and ok.can_decide, ok
-
-    # the real historical sample: one row carries only Date_time and Rainfall
-    ragged = full[:6] + [{"Date_time": "2026-08-08T00:00:00", "Rainfall": 1.18}]
-    partial = assess(ragged, ["Rainfall", "Tavg"])
-    assert partial.status == "PARTIAL", partial
-    assert partial.coverage["Rainfall"] == 1.0 and partial.coverage["Tavg"] < 1.0, partial.coverage
-
-    # a rule that needs the thin field must not get a verdict
-    needs_temp = assess([{"Date_time": "x", "Rainfall": 2.0}] * 5 + [{"Tavg": 25.0}],
-                        ["Rainfall", "Tavg"], required=["Tavg"])
-    assert needs_temp.status == "SPARSE" and not needs_temp.can_decide, needs_temp
-
-    assert assess([], ["Rainfall"]).status == "NO_DATA"
-    assert not assess([], ["Rainfall"]).can_answer
-
-    # sentinels and junk are missing, not values
-    junk = [{"Rainfall": -999}, {"Rainfall": "NA"}, {"Rainfall": None},
-            {"Rainfall": float("nan")}, {"Rainfall": ""}, {"Rainfall": 4.2}]
-    assert values(junk, "Rainfall") == [4.2], values(junk, "Rainfall")
-    assert assess(junk, ["Rainfall"]).status == "SPARSE"
-
-    # strings that are really numbers still count
-    assert values([{"Rainfall": "3.5"}], "Rainfall") == [3.5]
-
-    # gaps inside the window are reported even when every present row is complete
-    gappy = assess(full[:3], ["Rainfall", "Tavg"], expect_daily=7)
-    assert gappy.status == "PARTIAL" and gappy.gaps == 4, gappy
-
-    assert caveat(assess([], ["Rainfall"])).startswith("No data")
-    assert caveat(ok) == ""
-    print("quality demo OK")
-    for q in (ok, partial, needs_temp, assess([], ["Rainfall"]), gappy):
-        print(f"  {q.status:8s} rows={q.rows:<3} usable={q.usable} "
-              f"decide={q.can_decide}  {q.message}")
-
-
-if __name__ == "__main__":
-    demo()

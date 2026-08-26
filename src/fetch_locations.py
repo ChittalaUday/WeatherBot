@@ -44,7 +44,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-from src.build_dataset import _misspell        # one realistic keyboard slip, already tuned
+from src.build_dataset import _misspell  # one realistic keyboard slip, already tuned
 
 # lat/lng envelope for India (minx, miny, maxx, maxy)
 INDIA_BBOX = "st_makeenvelope(68.0, 6.0, 97.5, 37.6, 4326)"

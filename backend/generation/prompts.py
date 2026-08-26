@@ -23,10 +23,13 @@ from __future__ import annotations
 
 ROLE = ("You are a friendly, knowledgeable weather assistant for people across India - many of "
         "them farmers deciding what to do today. You talk the way a helpful neighbour who "
-        "happens to know the forecast would talk: warm, direct, and never showing off.")
+        "happens to know the forecast would talk: warm, direct, and never showing off. "
+        "You MUST answer strictly in plain, standard English. Do not output any Chinese characters, "
+        "foreign words, or text in any other language.")
 
 # Applies to every turn, whatever went right or wrong.
 VOICE = """How to talk:
+- Write strictly in plain, standard English. Never include Chinese characters or non-English words.
 - Sound like a person, not a readout. Contractions are good. "It'll be a wet one tomorrow"
   beats "Rainfall is expected."
 - Lead with the answer to what they actually asked. Then the bit that helps them decide.
@@ -60,6 +63,7 @@ loud.
   the reason it is a yes or a no.
 - Round figures the way people speak - "about 2mm", "just under 30 degrees", "in the low
   twenties" - as long as you are rounding a figure you were given.
+- Standard temperatures in India (20°C to 35°C) are normal and pleasant. Never describe temperatures below 38°C as "intense heat", "extreme", "rising rapidly", or "unsafe".
 - You may not invent, recalculate, add together or otherwise produce a number that is not
   there. If you cannot say it with the figures you have, leave it out.
 - No advice, warnings or judgements of your own. If the conclusion does not say it, nor do
@@ -134,45 +138,3 @@ def user(summary: str, question: str = "", context: str = "", *, answering: bool
     parts.append("Now answer them, in your own words." if answering
                  else "Now tell them, kindly, in your own words.")
     return "\n\n".join(parts)
-
-
-def demo():
-    """Print every shape, and assert the blocks do not contradict or leak into each other."""
-    for answering, grounded in ((True, True), (True, False), (False, True), (False, False)):
-        name = ("answer" if answering else "no-data") + (" + retrieval" if grounded else "")
-        prompt = system(answering=answering, grounded=grounded)
-        print(f"--- {name}  ({len(prompt)} chars, {len(prompt.split())} words) ---")
-
-    # every block must reach exactly one of the four shapes, or it is text nobody reads
-    every = "\n".join(system(answering=a, grounded=g)
-                      for a in (True, False) for g in (True, False))
-    for block in (ROLE, VOICE, ANSWERING, GROUNDING, NOTHING, NEAR):
-        assert block in every, block[:40]
-    assert GROUNDING not in system(answering=True, grounded=False)
-    assert NOTHING not in system(answering=True, grounded=True)
-
-    # The permission to round and the ban on inventing must both reach an answering turn, and
-    # must be separate sentences - told only "never invent a figure" a model writes "1.93mm",
-    # and told only "round the way people speak" it writes whatever sounds round.
-    answering_prompt = system(answering=True, grounded=True)
-    assert "Round figures the way people speak" in answering_prompt
-    assert "may not invent, recalculate, add together" in answering_prompt
-
-    # ...and neither reaches a no-data turn, which has nothing to round and must not be given
-    # the idea that producing a figure is ever in scope
-    no_data = system(answering=False, grounded=True)
-    assert "Round figures" not in no_data and "recalculate" not in no_data, no_data
-
-    # the user block leads with the question and always closes by asking for an answer
-    body = user("Guntur, tomorrow: 1.9mm.", "will it rain", "Places: Guntur")
-    assert body.startswith("They asked: will it rain"), body
-    assert body.rstrip().endswith("in your own words."), body
-    assert "Conclusion:" in body and "Retrieved:" in body, body
-    assert "Retrieved" not in user("x", "y"), "no context, no heading for it"
-    assert "Note:" in user("x", "y", answering=False)
-
-    print("\nprompts demo OK - four shapes, every block reachable, figure rules answering-only")
-
-
-if __name__ == "__main__":
-    demo()

@@ -7,12 +7,14 @@ src/v4/dataset.py produced any of it. That is the entire point: train, test and 
 generated from the same frames, so the numbers they give measure template memorisation. This
 file is the only measurement in the project that a real user could have written.
 """
-import csv, json
+import csv
+import json
 from collections import Counter, defaultdict
 
 from _root import ROOT
+
 from src.v4.model import V4Model
-from src.v4.schema import Intent, NO_DATA_NEEDED, sub_activity_for
+from src.v4.schema import NO_DATA_NEEDED, Intent
 
 EVAL = ROOT / "data" / "eval_v4.csv"
 

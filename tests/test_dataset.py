@@ -7,8 +7,19 @@ from collections import Counter
 from itertools import combinations
 
 from _root import ROOT
-from src.build_dataset import (ACTIONS, EVAL_MANUAL, INDIA_NAMES, INTENTS, LOCATIONS_CSV,
-                               SPLITS, india_share, load_seed, validate_row)
+
+from src.build_dataset import (
+    ACTIONS,
+    EVAL_MANUAL,
+    INDIA_NAMES,
+    INTENTS,
+    LOCATIONS_CSV,
+    SPLITS,
+    india_share,
+    load_seed,
+    validate_row,
+)
+
 MIN_EVAL_ROWS = 200
 
 

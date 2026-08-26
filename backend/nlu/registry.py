@@ -21,13 +21,23 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from backend.config import DEFAULT_MODEL
-from src.normalize import normalize as normalize_text   # re-exported: the first NLU step
-from src.v3.model import BUNDLE_PATH as V3_BUNDLE, V3Model
-from src.v3.schema import Detail, fields_for as v3_fields_for
-from src.v4.model import BUNDLE_PATH as V4_BUNDLE, V4Model
-from src.v4.schema import (CONTROL, DECLINED, NO_DATA_NEEDED, REPLIES, Intent as V4Intent,
-                           detail_from_text, fields_for as v4_fields_for,
-                           sub_activity_for)
+from src.normalize import normalize as normalize_text
+from src.v3.model import BUNDLE_PATH as V3_BUNDLE
+from src.v3.model import V3Model
+from src.v3.schema import Detail
+from src.v3.schema import fields_for as v3_fields_for
+from src.v4.model import BUNDLE_PATH as V4_BUNDLE
+from src.v4.model import V4Model
+from src.v4.schema import (
+    CONTROL,
+    DECLINED,
+    NO_DATA_NEEDED,
+    REPLIES,
+    detail_from_text,
+    sub_activity_for,
+)
+from src.v4.schema import Intent as V4Intent
+from src.v4.schema import fields_for as v4_fields_for
 
 MODELS = {
     "v3": {"name": "Model 1", "path": V3_BUNDLE,
@@ -42,6 +52,8 @@ DEFAULT_VERSION = DEFAULT_MODEL if DEFAULT_MODEL in MODELS else "v4"
 # so the clarify branches downstream are dead for them - kept only because a future head that
 # does ask would need them back.
 NEVER_ASKS = frozenset(MODELS)
+
+__all__ = ["DEFAULT_VERSION", "MODELS", "NEVER_ASKS", "Registry", "Understanding", "normalize_text"]
 
 
 @dataclass
@@ -179,37 +191,3 @@ class Registry:
         version = version if version in MODELS else DEFAULT_VERSION
         model = self.get(version)
         return (_understand_v3 if version == "v3" else _understand_v4)(model, text)
-
-
-def demo():
-    """Self-check: both models answer, and v4 routes a greeting away from the weather API."""
-    cleaned = normalize_text("Whats da wthr in KKD tmrw??")
-    assert cleaned.normalized == "what is the weather in KKD tomorrow??", cleaned.normalized
-    assert cleaned.replacements, "every rewrite has to stay auditable"
-
-    registry = Registry()
-    for version, spec in MODELS.items():
-        if not spec["path"].exists():
-            print(f"skip {spec['name']}: bundle not built")
-            continue
-        u = registry.understand("rain and temperature in Guntur tomorrow", version)
-        assert u.version == version and u.locations == ["Guntur"], u
-        assert u.fields(), u
-        print(f"  {spec['name']} ({version}): intent={u.intent} action={u.action} "
-              f"vars={u.variables} fields={u.fields()}")
-
-    if MODELS["v4"]["path"].exists():
-        greeting = registry.understand("hey there", "v4")
-        assert not greeting.needs_weather and greeting.reply, greeting
-        assert greeting.family == "conversational", greeting.family
-        print(f"  greeting -> {greeting.intent} ({greeting.family}) reply={greeting.reply!r}")
-
-        spray = registry.understand("should i spray fertilizer on the cotton tomorrow", "v4")
-        assert spray.activity == "SPRAY", spray.activity
-        print(f"  advice   -> activity={spray.activity} sub={spray.sub_activity or '-'} "
-              f"entities={spray.entities}")
-    print("registry demo OK")
-
-
-if __name__ == "__main__":
-    demo()

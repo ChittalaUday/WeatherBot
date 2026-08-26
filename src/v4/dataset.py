@@ -45,10 +45,26 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 from src.tagger import normalize_time
 from src.v4.entities import extract as extract_entities
-from src.v4.schema import (ACTIVITY_VARIABLES, ENTITY_SUBSETS, ENTITY_VOCAB, NO_DATA_NEEDED,
-                           REPLIES, Activity, Aggregation, EntityType, Intent, Operation,
-                           TimeBucket, Variable, WeatherIntent, bucket_for, group_for,
-                           sub_activity_for, terms_for, weather_intent_for)
+from src.v4.schema import (
+    ACTIVITY_VARIABLES,
+    ENTITY_SUBSETS,
+    ENTITY_VOCAB,
+    NO_DATA_NEEDED,
+    REPLIES,
+    Activity,
+    Aggregation,
+    EntityType,
+    Intent,
+    Operation,
+    TimeBucket,
+    Variable,
+    WeatherIntent,
+    bucket_for,
+    group_for,
+    sub_activity_for,
+    terms_for,
+    weather_intent_for,
+)
 
 CSV_PATH = ROOT / "data" / "v4_dataset.csv"
 LOCATIONS_CSV = ROOT / "data" / "locations.csv"

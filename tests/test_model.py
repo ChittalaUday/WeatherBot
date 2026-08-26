@@ -9,7 +9,8 @@ time spans, and the three presentation decisions (detail, chart, insights). This
 of them - a model that reads the question right but picks the wrong chart is still wrong.
 """
 
-from _root import ROOT                       # noqa: F401 - puts the repo root on sys.path
+from _root import ROOT  # noqa: F401 - puts the repo root on sys.path
+
 from src.v3.dataset import CSV_PATH
 from src.v3.model import BUNDLE_PATH, V3Model, evaluate
 from src.v3.schema import Detail

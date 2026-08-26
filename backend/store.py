@@ -3,6 +3,7 @@ Every turn of every conversation, in SQLite, so real usage can retrain the model
 
     python -m backend.store --stats
     python -m backend.store --export data/from_users.csv    # gold rows for the next build
+    python tests/test_store_units.py                        # the checks for this module
 
 Honest naming: this is not reinforcement learning. There is no reward signal and no policy -
 it is the same supervised loop MODEL_RULES.md already describes, fed by real users instead of
@@ -540,42 +541,6 @@ def export(connection, path: Path, include_approved=False) -> int:
     return len(rows)
 
 
-def demo():
-    """Self-check: a turn plus a human label must come back out as a training row."""
-    import tempfile
-
-    with tempfile.TemporaryDirectory() as tmp:
-        connection = connect(Path(tmp) / "check.db")
-        turn = record_turn(connection, "s1", "angara vs hyderbad", intent="TEMPERATURE",
-                           action="COMPARE", confidence=0.25,
-                           location=["angara", "hyderbad"], time_raw=[], time_norm=[],
-                           outcome="clarified", detail="low confidence")
-        record_feedback(connection, turn, "down", model="v1")
-        record_feedback(connection, turn, "choice", intent="RAIN", action="COMPARE",
-                        error_type="intent_confusion")
-
-        # one opinion per turn: the down was refined into a choice, not appended to
-        rows_for_turn = connection.execute(
-            "SELECT COUNT(*) n FROM feedback WHERE turn_id = ?", (turn,)).fetchone()["n"]
-        assert rows_for_turn == 1, rows_for_turn
-        current = feedback_for(connection, turn)
-        assert current["kind"] == "choice" and current["revisions"] == 1, current
-        assert current["model"] == "v1", current      # untouched fields survive the update
-
-        rows = training_rows(connection)
-        assert len(rows) == 1, rows
-        assert rows[0]["weather_intent"] == "RAIN", rows          # the human label wins
-        assert json.loads(rows[0]["location"]) == ["angara", "hyderbad"], rows
-
-        # an approved guess is not evidence unless the model was already confident
-        low = record_turn(connection, "s1", "wind", intent="WIND_SPEED", action="GET",
-                          confidence=0.30, outcome="answered")
-        record_feedback(connection, low, "up", intent="WIND_SPEED", action="GET")
-        assert len(training_rows(connection, include_approved=True)) == 1, "low-confidence up leaked"
-        assert stats(connection)["turns"] == 2
-        print("store demo OK:", rows[0])
-
-
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--db", default=str(DB_PATH))
@@ -584,14 +549,10 @@ def main():
     parser.add_argument("--include-approved", action="store_true",
                         help="also export thumbs-up turns the model was already confident about")
     parser.add_argument("--recent", type=int, metavar="N", help="print the last N turns")
-    parser.add_argument("--selfcheck", action="store_true")
     parser.add_argument("--confusion", action="store_true", help="predicted vs actual, from labels")
     parser.add_argument("--competing", action="store_true", help="turns where intents were close")
     parser.add_argument("--review", action="store_true", help="turns waiting to be labelled")
     args = parser.parse_args()
-
-    if args.selfcheck:
-        return demo()
 
     connection = connect(args.db)
     if args.stats or not (args.export or args.recent):

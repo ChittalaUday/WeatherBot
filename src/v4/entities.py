@@ -26,7 +26,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from src.v4.schema import ENTITY_VOCAB, EntityType
+from src.v4.schema import ENTITY_VOCAB
 
 # term -> type, longest first so the specific phrase is tried before the word inside it
 _TERMS = sorted(
@@ -62,28 +62,7 @@ def vocabulary_report() -> dict:
     }
 
 
-def demo():
-    """Self-check: longest match wins, spans stay verbatim, unknown words stay unknown."""
-    assert extract("should i spray pesticide on my cotton field tomorrow") == {
-        "material": ["pesticide"], "crop": ["cotton"]}
-    assert extract("can we play cricket in Guntur tomorrow") == {"sport": ["cricket"]}
-    assert extract("can i wash my white clothes today")["clothing"] == ["white clothes"], \
-        "longest match must beat the word inside it"
-    assert extract("bengal gram sowing")["crop"] == ["bengal gram"]
-    assert extract("Should I take the Motorcycle") == {"transport": ["Motorcycle"]}, \
-        "spans come back cased as typed"
-    assert extract("will it rain tomorrow") == {}, "no entity is a normal answer"
-    assert extract("scattered showers") == {}, "substring must not match inside a word"
-
-    report = vocabulary_report()
-    assert not report["duplicates across types"], report["duplicates across types"]
-    print(f"entities demo OK: {report['terms']} terms over {report['types']} types "
-          f"{report['per type']}")
-
-
 if __name__ == "__main__":
-    if len(sys.argv) > 1:
-        import json
-        print(json.dumps(extract(" ".join(sys.argv[1:])), indent=2))
-    else:
-        demo()
+    import json
+
+    print(json.dumps(extract(" ".join(sys.argv[1:])), indent=2))

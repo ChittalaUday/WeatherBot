@@ -1,7 +1,7 @@
 """
 Rows -> the table and the one-line summary the UI draws.
 
-    python -m backend.pipeline.render        # self-check
+    python tests/test_pipeline_units.py          # the checks for this module
 
 The deterministic half of MODEL_RULES.md Section 1: the model says *what* was asked; which
 API field a variable means, how a COMPARE is laid out and how a number is written down are
@@ -163,71 +163,3 @@ def summarize(action: str, rows, fields: list[str], places: list[dict], when: st
     return (f"{name.capitalize()} in {where} for {when}: "
             f"{min(numbers):.1f}-{max(numbers):.1f}{units} "
             f"(avg {sum(numbers) / len(numbers):.1f}{units}).")
-
-
-def demo():
-    """Self-check: a comparison names the winner, and says which way it won.
-
-    "Min temp: A 21.3 · B 20.5. Highest: A." was true and unreadable - both a human skimming
-    and the phrasing model downstream read "min ... A" as "A is the lower one", and the chat
-    duly said the opposite of the data.
-    """
-    places = [{"name": "Hyderabad"}, {"name": "Vijawada"}]
-    rows = [[{"Date_time": "2026-08-14T00:00:00", "Tmin": 21.3}],
-            [{"Date_time": "2026-08-14T00:00:00", "Tmin": 20.5}]]
-    said = summarize("COMPARE", rows, ["Tmin"], places, "tomorrow")
-    assert said.startswith("Hyderabad has the higher"), said
-    assert "21.3" in said and "Vijawada 20.5" in said, said
-
-    # Adding happens only when a total was asked for. This is the whole rule: the same week
-    # of rain is a mean under RAW and a total under SUM, and never a total by accident.
-    assert summary_stat("Rainfall", [1.0, 2.0, 3.0], "SUM") == (6.0, "total")
-    assert summary_stat("Rainfall", [1.0, 2.0, 3.0], "RAW") == (2.0, "average")
-    assert summary_stat("Tmax", [10.0, 20.0], "SUM") == (15.0, "average")   # never additive
-    assert summary_stat("Rainfall", [], "SUM") == (0.0, "")
-
-    # ...and the sentence follows it. A week of rain under RAW describes the series; the total
-    # appears only when the question said "total".
-    week = [{"Date_time": f"2026-08-{d:02d}T00:00:00", "Rainfall": v}
-            for d, v in enumerate([0.2, 6.0, 0.0, 0.1, 3.0], start=14)]
-    raw = summarize("GET", week, ["Rainfall"], places[:1], "this week")
-    assert "total" not in raw and "rain on 2 of 5 readings" in raw, raw
-    assert "up to 6.0mm" in raw, raw
-    # the description does not change when a total was asked for - the total is said once, by
-    # `analysis.apply_aggregation`, and this sentence follows it
-    assert summarize("GET", week, ["Rainfall"], places[:1], "this week", "SUM") == raw
-    dry = summarize("GET", [{"Date_time": "2026-08-14T00:00:00", "Rainfall": 0.1},
-                            {"Date_time": "2026-08-15T00:00:00", "Rainfall": 0.0}],
-                    ["Rainfall"], places[:1], "tomorrow")
-    assert "little to no rain" in dry, dry
-
-    # a comparison names which statistic it ranked on, so "12.5mm" cannot read as a reading
-    compared = summarize("COMPARE", [week, week[:2]], ["Rainfall"], places, "this week")
-    assert "average rainfall" in compared, compared
-
-    # sentinels never reach a summary - `values` filters them, so this is 4.2 and nothing else
-    junk = [{"Date_time": "2026-08-14T00:00:00", "Rainfall": -999},
-            {"Date_time": "2026-08-15T00:00:00", "Rainfall": 4.2}]
-    assert "4.2mm" in summarize("GET", junk, ["Rainfall"], places[:1], "tomorrow")
-
-    # a column the feed never sent must not become a table column of dashes
-    table = build_table([{"Date_time": "2026-08-14T16:00:00", "RH": 58.8}], ["RH"], places[:1],
-                        hourly=True)
-    assert [c["key"] for c in table["columns"]] == ["time", "RH"], table["columns"]
-    assert table["rows"] == [{"time": "14 Aug 16:00", "RH": "58.8"}], table["rows"]
-
-    # a comparison table is one column per place, zipped on time
-    wide = build_table(rows, ["Tmin"], places, hourly=False)
-    assert [c["key"] for c in wide["columns"]] == ["time", "Hyderabad", "Vijawada"], wide
-    assert wide["rows"] == [{"time": "14 Aug", "Hyderabad": "21.3", "Vijawada": "20.5"}], wide
-
-    assert format_value("Wind_Direction", 90) == "90° E", format_value("Wind_Direction", 90)
-    assert format_value("Lowcloud", 0.42) == "42%"
-    assert format_value("Rainfall", None) == "-"
-
-    print("render demo OK")
-    print(f"  {said}")
-
-
-if __name__ == "__main__":
-    demo()

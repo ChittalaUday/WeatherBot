@@ -7,7 +7,8 @@ one in `src/v3/schema.py` - this is not the place for a new label.
 """
 
 from enum import Enum
-from typing import Dict, List, Optional
+from typing import List, Optional
+
 from pydantic import BaseModel, Field
 
 

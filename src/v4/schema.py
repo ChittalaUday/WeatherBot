@@ -316,11 +316,11 @@ def sub_activity_for(activity, entities: Optional[Dict[str, List[str]]] = None,
     if activity is Activity.OUTDOOR_ACTIVITY:
         for kind in (EntityType.SPORT, EntityType.EVENT):
             if terms := entities.get(kind.value):
-                return fold(terms[0])            # the sport or event itself: "cricket"
+                return fold(terms[0]) or ""            # the sport or event itself: "cricket"
 
     for kind in (EntityType.TRANSPORT, EntityType.CLOTHING_ITEM):
         if terms := entities.get(kind.value):
-            return fold(terms[0])
+            return fold(terms[0]) or ""
 
     lowered = text.lower()
     for word in sorted(SUB_KEYWORDS, key=len, reverse=True):

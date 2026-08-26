@@ -1,14 +1,16 @@
+from __future__ import annotations
+
 """
 Data loader and dataset utilities for WeatherBot NLU training.
 """
 
 import json
-import pandas as pd
-from typing import Tuple, List, Dict, Any
 from pathlib import Path
 
+import pandas as pd
 
-def load_intents_csv(csv_path: str = "data/intents.csv") -> pd.DataFrame:
+
+def load_intents_csv(csv_path: str | Path = "data/intents.csv") -> pd.DataFrame:
     """
     Loads intents CSV dataset and parses location/time JSON list strings.
     """

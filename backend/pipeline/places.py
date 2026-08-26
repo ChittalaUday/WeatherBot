@@ -24,8 +24,6 @@ from __future__ import annotations
 import json
 import re
 
-import httpx
-
 from backend.config import DATA_DIR
 
 ALIAS_FILE = DATA_DIR / "location_aliases.json"
@@ -61,8 +59,8 @@ RELATIVE_LOCATIONS = {
     "my field", "my farm", "my plot", "my village", "my land", "our field", "our farm",
     "the field", "the farm", "my place", "my side", "my town", "my city",
     "near me", "nearby", "near by", "here", "my location", "this area", "my area",
-    "my field", "feild", "my feild", "my farm", "my village", "my vilage", "our village",
-    "my plot", "my place", "this village",
+    "feild", "my feild", "my vilage", "our village",
+    "this village",
 }
 
 LEVELS = ("village", "sub_district", "district", "state")
@@ -145,10 +143,13 @@ def _squeeze(text: str) -> str:
     return re.sub(r"(.)\1+", r"\1", (text or "").lower())
 
 
-def _first(doc: dict, key: str):
+def _first(doc: dict, key: str) -> str | None:
     """Solr multi-valued fields come back as single-element lists."""
     value = doc.get(key)
-    return value[0] if isinstance(value, list) and value else value
+    if isinstance(value, list) and value:
+        val = value[0]
+        return str(val) if val is not None else None
+    return str(value) if value is not None else None
 
 
 def _candidate(doc: dict, wanted: str, raw: str) -> dict | None:
@@ -326,7 +327,7 @@ async def suggest(solr, raw: str, limit: int = 3) -> list[str]:
                     continue
                 where = ", ".join(p for p in (_first(doc, "district"), _first(doc, "state"))
                                   if p and p != label)
-                line = f"{label} ({where})" if where else str(label)
+                line = f"{label} ({where})" if where else label
                 if line.lower() not in seen:
                     seen.add(line.lower())
                     out.append(line)

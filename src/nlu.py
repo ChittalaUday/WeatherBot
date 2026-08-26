@@ -73,7 +73,7 @@ class NLUModel:
         return NLUOutput(
             weather_intent=self.intent_model.predict(features)[0],
             action=self.action_model.predict(features)[0],
-            aggregation=aggregation,
+            aggregation=Aggregation(aggregation),
             entities=Entities(
                 location=spans["location"],
                 time=spans["time"],

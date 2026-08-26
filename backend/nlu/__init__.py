@@ -9,8 +9,14 @@ Everything downstream reads `Understanding` and nothing else, so a model can be 
 added or compared without the pipeline learning that more than one exists.
 """
 
-from backend.nlu.registry import (DEFAULT_VERSION, MODELS, NEVER_ASKS, Registry, Understanding,
-                                  normalize_text)
+from backend.nlu.registry import (
+    DEFAULT_VERSION,
+    MODELS,
+    NEVER_ASKS,
+    Registry,
+    Understanding,
+)
+from src.normalize import normalize as normalize_text
 
 __all__ = ["DEFAULT_VERSION", "MODELS", "NEVER_ASKS", "Registry", "Understanding",
            "normalize_text"]

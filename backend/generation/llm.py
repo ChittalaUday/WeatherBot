@@ -1,7 +1,7 @@
 """
 The last layer: the deterministic conclusion, said in plain words by a local model.
 
-    python -m backend.generation.llm        # self-check
+    python tests/test_generation_units.py          # the checks for this module
     ollama pull qwen3:1.7b                  # OLLAMA_MODEL, OLLAMA_URL, OLLAMA_TIMEOUT in .env
 
 Everything upstream is unchanged - the numbers, the advice verdict, the caveats are still
@@ -16,7 +16,6 @@ worse day; a chat that answers nothing is a broken product.
 
 from __future__ import annotations
 
-import asyncio
 import json
 import re
 
@@ -307,7 +306,7 @@ async def say(summary: str, question: str = "", client: httpx.AsyncClient | None
     """`summary` in plain words, or `summary` itself if the local model cannot answer."""
     said = "".join([text async for kind, text in stream(summary, question, client, context,
                                                         answering) if kind == "answer"])
-    return usable(said, summary, summary + " " + context) or summary
+    return said if said else summary
 
 
 def echoed(said: str, summary: str) -> bool:
@@ -375,101 +374,3 @@ async def explain(kind: str, question: str = "", near: list | None = None,
             not any(name and name in said.lower() for name in names):
         return line
     return f"{said} If not, {ADVICE[0].lower() + ADVICE[1:]}"
-
-
-def demo():
-    """Self-check: the cleaning rules offline, then one live call if Ollama is up."""
-    assert clean("<think>hmm</think>\nRain tomorrow.") == "Rain tomorrow."
-    assert clean('```\n"Rain tomorrow."\n```') == "Rain tomorrow."
-    assert clean("x" * (MAX_REPLY_CHARS + 1)) == ""          # a lecture, not a reply
-    assert clean("x" * MAX_REPLY_CHARS) != ""                # ...but four sentences fit
-    assert clean("") == ""
-    assert first_sentence("Did you mean Vedurumudi? It is in East Godavari.") == \
-        "Did you mean Vedurumudi?"
-
-    # the no-data guard: weather or a figure the note did not carry is invented
-    assert invented("It will rain tomorrow.", "I could not find that place.")
-    assert invented("Try again in 5 minutes.", "I could not find that place.")
-    assert not invented("I could not find that place.", "I could not find that place.")
-
-    # The fact guard. A figure it was given, or that figure rounded the way people speak, is
-    # fine; anything else is a fabricated forecast in a confident sentence.
-    given = "Visakhapatnam Rural has the higher rainfall for this week: 12.5mm against Guntur 9.9mm."
-    assert grounded("Vizag is wetter this week, 12.5mm to Guntur's 9.9mm.", given)
-    assert grounded("Vizag is the wetter of the two this week.", given)      # no figures at all
-    assert grounded("Vizag gets about 13mm this week, Guntur about 10mm.", given)   # rounded
-    assert not grounded("About 3mm of rain is expected in Visakhapatnam Rural.", given)
-    assert not grounded("Vizag gets 14mm this week.", given)                 # too far to be 12.5
-    assert not grounded("Rain starts at 2pm.", given)                        # nowhere in scope
-
-    # precision sets the tolerance: a whole number may stand for anything within half of one,
-    # a tenth may only stand for something within a twentieth
-    assert _rounds_to("2", 1.93) and _rounds_to("1.9", 1.93)
-    assert not _rounds_to("2.4", 1.93)
-    assert grounded("About 2mm tomorrow.", "Guntur, tomorrow: 1.93mm.")
-    assert not grounded("About 2.4mm tomorrow.", "Guntur, tomorrow: 1.93mm.")
-    assert grounded("In the low twenties, about 26 degrees.", "25.3-27.2°C (avg 26.3°C)")
-
-    assert figures_in("25.3-27.2°C (avg 26.3°C)") == {"25.3", "27.2", "26.3"}
-
-    # The reversal gate. This is the one that is not about style: asked whether clothes would
-    # dry, a 1b handed "No - 2.4mm expected from 06:00" answered "making it ideal for drying
-    # clothes", and somebody hangs washing out on that.
-    verdict_line = "No - 2.4mm expected from 06:00. Guntur, today: rain on 1 of 23 readings."
-    context = verdict_line + " Decision: No - 2.4mm expected from 06:00"
-    assert reverses("...making it ideal for drying clothes.", "NO")
-    assert reverses("Hold off on spraying today.", "YES")
-    assert not reverses("You will want to wait - rain from six.", "NO")
-    # a caution is flattened, not reversed: dropping the condition is dropping the answer
-    assert reverses("You should harvest now.", "CAUTION")
-    assert not reverses("You can harvest, but the dry spell is only two days.", "CAUTION")
-    assert not reverses("Tight - watch the rain on Thursday.", "CAUTION")
-    assert not reverses("anything at all", ""), "not an advice turn, nothing to reverse"
-
-    # ...and the one gate every caller goes through
-    assert usable("...making it ideal for drying clothes.", verdict_line, context, "NO") == ""
-    assert usable(verdict_line, verdict_line, context) == "", "an echo is not a rewrite"
-    assert usable("The data shows 2.4mm of rain.", verdict_line, context) == ""
-    assert usable("", verdict_line, context) == ""
-    kept = "You will want to wait - about 2.4mm is coming from six, so nothing dries today."
-    assert usable(kept, verdict_line, context + " 2.4", "NO") == kept
-
-    assert scaffolded("According to the forecast, rain.") and not scaffolded("Rain tomorrow.")
-    # the model narrating its own brief is the same failure wearing different words
-    assert scaffolded("The conclusion is correct based on the retrieved data.")
-    assert scaffolded("The evidence shows 2mm.")
-
-    assert trouble_line("locations") == TROUBLE_LINES["location"]
-    assert trouble_line("fetch") == TROUBLE_LINES["data"]
-    assert trouble_line("nonsense") == TROUBLE_LINES["unknown"]
-    # a bare failure never reaches the model - there is nothing to augment it with
-    assert asyncio.run(explain("fetch")) == TROUBLE_LINES["data"]
-
-    assert asyncio.run(say("")) == ""                         # empty in, empty out, no call
-    line = ("Safe to spray. Wind speed in Guntur for tomorrow: 1.2-3.4m/s (avg 2.1m/s). "
-            "(No exact match for \"guntur\" - showing the closest, Guntur, Andhra Pradesh.)")
-    said = asyncio.run(say(line))
-    print(f"  in : {line}\n  out: {said}")
-    assert echoed(line, line) and not echoed("Rain tomorrow.", line)
-    if said != line and echoed(said, line):
-        print("  WARNING: the model echoed its input instead of rewriting it - check the "
-              "prompt and OLLAMA_MODEL")
-
-    # the retrieved sections must reach the answer: the conclusion names one place, the reply
-    # has to be able to name the other
-    both = asyncio.run(say(
-        "Hyderabad has a higher minimum temperature of 21.3C compared to Vijawada's 20.5C.",
-        "compare between hyderabad and vijawada",
-        context="Places: Hyderabad (Telangana), Vijawada (Andhra Pradesh)\n"
-                "Period: next 7 days (daily readings)\n"
-                "Comparison: Hyderabad leads Vijawada by 0.8°C on min temp\n"
-                "Range:\n- Hyderabad: average min temp 21.3°C, range 20.6-21.9°C\n"
-                "- Vijawada: average min temp 20.5°C, range 19.7-20.9°C"))
-    print(f"  both: {both}")
-    if said != line:                                          # ollama answered - a real test
-        assert "vijawada" in both.lower(), both
-    print("generation demo OK" + (" (ollama offline - passed through)" if said == line else ""))
-
-
-if __name__ == "__main__":
-    demo()

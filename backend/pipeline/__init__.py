@@ -1,7 +1,7 @@
 """
 The answer path: one Understanding in, one Answer out. No transport, no conversation state.
 
-    python -m backend.pipeline        # self-check, live if the APIs answer
+    python tests/test_live_stack.py          # the checks for this module
 
     route -> places -> plan -> fetch -> columns -> quality -> analyse -> decide -> summarise
 
@@ -25,7 +25,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from backend.pipeline import advice as advice_engine
-from backend.pipeline import analysis, places as place_index, quality, render, sources
+from backend.pipeline import analysis, quality, render, sources
+from backend.pipeline import places as place_index
 from backend.pipeline import plan as planner
 from backend.pipeline.timewindow import select_rows
 
@@ -355,44 +356,3 @@ def _caveats(checked, fetched, plan, absent: list[str], unresolved: list[str]) -
     if unresolved:
         out.append(f"(Could not find {', '.join(unresolved)} - showing the rest.)")
     return out
-
-
-async def demo():
-    """Self-check: the column rule offline, then one full run if the APIs answer."""
-    from backend.nlu import Registry
-
-    # the archive's own shape - six measurements and their normals, nothing else. Asking it
-    # for sunshine must lose the column, not the answer.
-    archive = [{"Date_time": "2019-08-07T00:00:00", "Rainfall": 6.6279, "Tmax": 28.209,
-                "Tmin": 22.8525, "RH": 79.5186, "Wind_Speed": 4.2744, "DayLength": 3.0498}]
-    assert served_fields(["Rainfall", "Tmax", "SunSD"], [archive]) == \
-        (["Rainfall", "Tmax"], ["SunSD"])
-    # hourly: no daily max/min in the feed, but humidity itself is there
-    hourly = [{"Date_time": "2026-08-14T16:00:00", "RH": 58.83, "RH_max": None, "SunSD": 1}]
-    assert served_fields(["RH", "RH_max", "SunSD"], [hourly]) == (["RH", "SunSD"], ["RH_max"])
-    # a dead fetch drops nothing: quality must stay free to report that nothing came back
-    assert served_fields(["RH", "SunSD"], [[{"Date_time": "x"}]]) == (["RH", "SunSD"], [])
-    assert served_fields(["RH"], [[]]) == (["RH"], [])
-    print("  columns: kept what the feed sent, dropped what it never did")
-
-    registry = Registry()
-    async with sources.client() as http:
-        for text in ("should i spray pesticide on the cotton in Guntur tomorrow",
-                     "rain and temperature in Guntur this week", "hey there"):
-            got = await run(http, registry.understand(text))
-            print(f"\n  {text}")
-            print(f"    ok={got.ok} answered={got.answered} {got.total_ms}ms  "
-                  f"stages: {list(got.stages)}")
-            for name, stage in got.stages.items():
-                head = (stage.get("summary") or stage.get("headline") or stage.get("status")
-                        or stage.get("verdict") or stage.get("served_by")
-                        or stage.get("note") or "")
-                print(f"      {name:14s} {str(head)[:64]}")
-            if got.answered:
-                # the payload a client renders must be built from the same object
-                body = got.payload(registry.understand(text))
-                assert body["summary"] == got.summary and body["table"] == got.table
-
-
-if __name__ == "__main__":
-    asyncio.run(demo())

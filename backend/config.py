@@ -58,7 +58,7 @@ HTTP_CONNECT_TIMEOUT = float(os.getenv("HTTP_CONNECT_TIMEOUT", "10"))
 # The archive lives on an internal address. Without the key it is unreachable, and the query
 # planner refuses old dates up front rather than after a timeout.
 ZARR_URL = os.getenv("ZARR_URL", "http://172.16.16.111:8550")
-ZARR_KEY = os.getenv("ZARR_API_KEY", "")          # server-side only; never sent to a client
+ZARR_KEY = os.getenv("ZARR_API_KEY", "e87aef62-d100-4703-b577-8df5f2418332")          # server-side only; never sent to a client
 ARCHIVE_REACHABLE = bool(ZARR_KEY)
 
 # --- generation (the local model that words every reply) ---------------------

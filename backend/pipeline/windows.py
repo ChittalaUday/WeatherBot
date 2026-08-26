@@ -1,7 +1,7 @@
 """
 When, not whether: the stretches of a period during which a condition actually holds.
 
-    python -m backend.pipeline.windows        # self-check
+    python tests/test_pipeline_units.py          # the checks for this module
 
 Rain does not fall for a whole day. It falls between two and four in the afternoon, and the
 question "can I dry the clothes today" is answered by the seven hours before it, not by the
@@ -91,7 +91,7 @@ class Window:
 def reading(row: dict, field: str) -> float | None:
     """One field of one row as a number, or None when it is missing in any of its guises."""
     value = row.get(field)
-    return None if is_missing(value) else float(value)
+    return None if value is None or is_missing(value) else float(value)
 
 
 def below(field: str, limit: float):
@@ -151,7 +151,7 @@ def runs(rows: list[dict], suitable, *, hourly: bool | None = None) -> list[Wind
     breaks the run, which is the conservative reading and the intended one.
     """
     spacing = spacing_hours(rows, hourly)
-    is_hourly = spacing < DAY_HOURS if hourly is None else bool(hourly)
+    is_hourly = spacing < DAY_HOURS if hourly is None else hourly
     found, current = [], []
 
     def close():
@@ -189,95 +189,14 @@ def coverage(windows: list[Window], rows: list[dict], hourly: bool | None = None
 
 def fragmented(windows: list[Window], rows: list[dict], needed_hours: float,
                hourly: bool | None = None) -> bool:
-    """True when the condition holds often but never for long enough to be usable.
-
-    This is the case the accumulated total could not express at all. Six one-hour breaks in
-    the rain are not a spraying window however much they add up to, and "3mm expected" says
-    nothing about which of those two days you are looking at.
-    """
+    """True when clear weather exists but is broken into pieces too short to use."""
     if not windows:
         return False
     best = longest(windows)
+    if best is None:
+        return False
+    spacing = spacing_hours(rows, hourly)
+    total_hours = spacing * len(rows or [])
+    if total_hours <= best.hours:
+        return False
     return best.hours < needed_hours and coverage(windows, rows, hourly) >= 0.25
-
-
-def demo():
-    """Self-check: runs, spacing, labels, and the fragmented case the totals could not see."""
-    def hours(pattern, start=6):
-        """One row per hour; `pattern` is the rainfall in each."""
-        return [{"Date_time": f"2026-08-18T{start + i:02d}:00:00", "Rainfall": v}
-                for i, v in enumerate(pattern)]
-
-    dry = below("Rainfall", 1.0)
-
-    # A day that rains only in the afternoon has a usable morning. This is the whole point:
-    # the total is 12mm either way, and only one of these two is a wet morning.
-    afternoon = hours([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 4.0, 5.0, 3.0])       # 06:00, rain from 12
-    found = runs(afternoon, dry, hourly=True)
-    assert len(found) == 1, found
-    assert found[0].hours == 6.0, found[0].hours
-    assert found[0].label() == "06:00 to 12:00", found[0].label()
-    # a window that runs to the end of the day says midnight, not 00:00
-    to_midnight = runs(hours([0.0] * 4, start=20), dry, hourly=True)
-    assert to_midnight[0].label() == "20:00 to midnight", to_midnight[0].label()
-    assert found[0].describe() == "06:00 to 12:00 (6 hours)", found[0].describe()
-
-    # ...and the same 12mm spread through the day leaves nothing usable
-    scattered = hours([2.0, 0.0, 2.0, 0.0, 2.0, 0.0, 2.0, 0.0, 4.0])
-    broken = runs(scattered, dry, hourly=True)
-    assert len(broken) == 4 and all(w.hours == 1.0 for w in broken), broken
-    assert fragmented(broken, scattered, needed_hours=4, hourly=True), "4 breaks, none usable"
-    assert not fragmented(runs(afternoon, dry, hourly=True), afternoon, 4, hourly=True)
-
-    # a period with no rain at all is one window covering all of it
-    clear = hours([0.0] * 8)
-    whole = runs(clear, dry, hourly=True)
-    assert len(whole) == 1 and whole[0].hours == 8.0, whole
-    assert coverage(whole, clear, hourly=True) == 1.0
-
-    # ...and one that rains throughout has none
-    assert runs(hours([3.0] * 6), dry, hourly=True) == []
-    assert longest([]) is None
-    assert not fragmented([], hours([3.0] * 6), 4, hourly=True), "no window is not fragmented"
-
-    # A missing reading breaks the run rather than being assumed dry. This is why the
-    # conditions are built here: `row.get("Rainfall") or 0` reads None as zero, which for
-    # rainfall means "dry" and would have quietly bridged the gap.
-    gappy = hours([0.0, 0.0, None, 0.0, 0.0])
-    assert [w.hours for w in runs(gappy, dry, hourly=True)] == [2.0, 2.0], runs(gappy, dry, hourly=True)
-    assert [w.hours for w in runs(hours([0.0, -999, 0.0]), dry, hourly=True)] == [1.0, 1.0]
-    assert reading({"Rainfall": "3.5"}, "Rainfall") == 3.5      # strings that are numbers count
-    assert reading({"Rainfall": -999}, "Rainfall") is None      # sentinels do not
-
-    # conditions compose the way the rules need them to
-    calm_and_dry = every(below("Rainfall", 0.2), between("Wind_Speed", 1.0, 4.5))
-    assert calm_and_dry({"Rainfall": 0.0, "Wind_Speed": 3.0})
-    assert not calm_and_dry({"Rainfall": 0.0, "Wind_Speed": 6.0})
-    assert not calm_and_dry({"Rainfall": 0.0})                  # no wind reading, no window
-
-    # daily rows: same rule, 24-hour readings, and a label that does not invent a clock time
-    daily = [{"Date_time": f"2026-08-{d:02d}T00:00:00", "Rainfall": v}
-             for d, v in enumerate([0.0, 0.0, 0.0, 8.0, 0.0], start=18)]
-    spans = runs(daily, dry)
-    assert spacing_hours(daily) == 24.0, spacing_hours(daily)
-    assert [w.days for w in spans] == [3.0, 1.0], [w.days for w in spans]
-    assert spans[0].label() == "18 Aug to 20 Aug", spans[0].label()
-    assert spans[1].label() == "22 Aug", spans[1].label()
-    assert spans[0].describe() == "18 Aug to 20 Aug (3 days)"
-
-    # one row is whatever the caller says it is - a timestamp alone cannot tell you
-    assert spacing_hours([{"Date_time": "2026-08-18T06:00:00"}], hourly=True) == 1.0
-    assert spacing_hours([], hourly=False) == 24.0
-    assert runs([], dry) == []
-
-    print("windows demo OK")
-    for name, rows in (("rain from noon", afternoon), ("showers all day", scattered),
-                       ("clear", clear), ("3 dry days then rain", daily)):
-        got = runs(rows, dry, hourly=rows is not daily)
-        best = longest(got)
-        print(f"  {name:22s} {len(got)} window(s), best {best.describe() if best else 'none':28s} "
-              f"cover {coverage(got, rows, hourly=rows is not daily):.0%}")
-
-
-if __name__ == "__main__":
-    demo()

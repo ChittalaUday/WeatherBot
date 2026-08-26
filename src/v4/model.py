@@ -39,10 +39,10 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import random
-from collections import Counter
+import re
 import sys
+from collections import Counter
 from pathlib import Path
 
 import joblib
@@ -58,9 +58,18 @@ from src.nlu import build_vectorizer, clean_text
 from src.tagger import GENERIC_PLACE_WORDS, SpanTagger, normalize_time, tokenize
 from src.v4 import dataset as v4_dataset
 from src.v4.entities import extract as extract_entities
-from src.v4.schema import (NO_DATA_NEEDED, Activity, Aggregation, Intent, Slots, V4Result,
-                           Variable, WeatherIntent, group_for, sub_activity_for,
-                           weather_intent_for)
+from src.v4.schema import (
+    NO_DATA_NEEDED,
+    Activity,
+    Aggregation,
+    Intent,
+    Slots,
+    V4Result,
+    Variable,
+    WeatherIntent,
+    sub_activity_for,
+    weather_intent_for,
+)
 
 BUNDLE_PATH = ROOT / "models" / "nlu_v4.joblib"
 METRICS_PATH = ROOT / "models" / "metrics_v4.json"
@@ -118,8 +127,9 @@ def _with_qualifier(text: str, span: str) -> str:
 def _history_noun(text: str) -> str:
     """The history word in the sentence, if any. Longest first so "historical data" wins."""
     for word in HISTORY_NOUNS:
-        if re.search(rf"\b{re.escape(word)}\b", text, re.I):
-            return re.search(rf"\b{re.escape(word)}\b", text, re.I).group(0)
+        m = re.search(rf"\b{re.escape(word)}\b", text, re.I)
+        if m:
+            return m.group(0)
     return ""
 
 
@@ -204,7 +214,7 @@ class V4Model:
 
         intent_scores = dict(zip(self.heads["intent"].classes_,
                                  self.heads["intent"].predict_proba(features)[0]))
-        intent = Intent(str(max(intent_scores, key=intent_scores.get)))
+        intent = Intent(str(max(intent_scores, key=lambda k: intent_scores[k])))
         # str(): sklearn hands back numpy.str_, which is a str subclass the enum accepts
         # but pydantic warns about on every serialisation
         aggregation = Aggregation(str(self.heads["aggregation"].predict(features)[0]))
@@ -420,6 +430,6 @@ def main():
 
 
 if __name__ == "__main__":
-    from src.v4.model import main as packaged_main   # pickle as src.v4.model.V4Model
+    from src.v4.model import main as packaged_main  # pickle as src.v4.model.V4Model
 
     packaged_main()

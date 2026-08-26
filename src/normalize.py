@@ -116,29 +116,3 @@ def normalize(text: str) -> Normalized:
 
     rebuilt = re.sub(r"\s+", " ", rebuilt).strip()
     return Normalized(original=original, normalized=rebuilt, replacements=replacements)
-
-
-def demo():
-    """Self-check: shorthand folds, place names and casing survive."""
-    result = normalize("What’s da wthr in KKD tmrw??")
-    assert result.normalized == "what is the weather in KKD tomorrow??", result.normalized
-    assert ["da", "the"] in result.replacements and ["tmrw", "tomorrow"] in result.replacements
-    assert result.original == "What’s da wthr in KKD tmrw??"        # audit trail intact
-
-    # place names are never rewritten here - that is the resolver's job (Rule 4.1)
-    assert "KKD" in normalize("weather in KKD").normalized
-    assert normalize("rain in Nokha").normalized == "rain in Nokha"
-
-    # repeated characters, shouting, and unicode punctuation
-    assert normalize("soooo hot").normalized == "soo hot"
-    assert normalize("TEMP IN BZA").normalized == "TEMPERATURE IN BZA"
-    assert "degrees" in normalize("is it 40° in Guntur").normalized
-
-    # a clean sentence must come out unchanged apart from spacing
-    assert (normalize("will it rain in Guntur tomorrow?").normalized
-            == "will it rain in Guntur tomorrow?")
-    print("normalize demo OK:", normalize("What’s da wthr in KKD tmrw??").model_dump())
-
-
-if __name__ == "__main__":
-    demo()

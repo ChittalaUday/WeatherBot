@@ -25,7 +25,8 @@ import asyncio
 import time
 
 from backend.api.deps import registry
-from backend.nlu import MODELS, Understanding, llm as hosted, normalize_text
+from backend.nlu import MODELS, Understanding, normalize_text
+from backend.nlu import llm as hosted
 from backend.pipeline import run, sources
 from src.v4.schema import weather_intent_for
 
@@ -81,8 +82,10 @@ async def _column(version: str, text: str) -> dict:
         return {"version": version, "ok": False, "latency_ms": 0,
                 "error": f"{type(exc).__name__}: {exc}"}
 
+    if understanding is None:
+        return {"version": version, "ok": False, "latency_ms": nlu_ms, "error": "Null understanding"}
+
     slots = {
-        "intent": understanding.intent,
         # v3 has no weather_intent head; deriving it from the window is what makes the column
         # comparable at all rather than blank
         "weather_intent": (getattr(understanding, "weather_intent", "")
@@ -149,32 +152,3 @@ async def columns(text: str):
     yield {"type": "compare_done", "disagreements": found,
            "agreed": not found and sum(1 for c in done if c.get("ok")) > 1,
            "total_ms": ms()}
-
-
-async def demo(text: str = "should i spray fertilizer on the cotton in Guntur tomorrow"):
-    """Self-check: the disagreement rule offline, then a live comparison if the APIs answer."""
-    same = [{"ok": True, "intent": "ADVICE", "locations": ["Guntur", "Vizag"]},
-            {"ok": True, "intent": "ADVICE", "locations": ["vizag", "guntur"]}]
-    assert disagreements(same) == [], disagreements(same)          # order does not matter
-    differ = [{"ok": True, "intent": "ADVICE"}, {"ok": True, "intent": "INFORMATION"}]
-    assert disagreements(differ) == ["intent"], disagreements(differ)
-    assert disagreements([differ[0]]) == [], "one column cannot disagree with anything"
-    assert disagreements([{"ok": False}, differ[0]]) == [], "a dead column is not a dissent"
-    print("  disagreements: order-insensitive on lists, exact on scalars")
-
-    print(f"\n  {text}")
-    async for event in columns(text):
-        if event["type"] == "compare_result":
-            head = (f"{event.get('intent', '-'):12s} {event.get('activity', '-'):10s} "
-                    f"loc={event.get('locations')}" if event.get("ok")
-                    else f"FAILED {event.get('error', '')[:50]}")
-            print(f"    {event['version']:4s} {event['latency_ms']:>6}ms  {head}")
-        elif event["type"] == "compare_done":
-            print(f"    disagree on: {event['disagreements'] or 'nothing'} "
-                  f"({event['total_ms']}ms)")
-
-
-if __name__ == "__main__":
-    import sys
-
-    asyncio.run(demo(*sys.argv[1:2]))

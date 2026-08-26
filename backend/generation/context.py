@@ -1,7 +1,7 @@
 """
 Retrieval: what the model is allowed to know about this turn, and nothing else.
 
-    python -m backend.generation.context        # self-check
+    python tests/test_generation_units.py          # the checks for this module
 
 The generation step is retrieval-augmented in the literal sense - it generates nothing from
 its own weights except the wording. Everything it may state is retrieved here from what the
@@ -126,59 +126,3 @@ def build(result: dict, *, max_rows: int = MAX_FACT_ROWS,
     if (table := result.get("table")):
         add("Figures", _table_lines(table, max_rows, max_cells))
     return context
-
-
-def demo():
-    """Self-check: the sections keep their order, and a big table is summarised not truncated."""
-    from backend.pipeline.analysis import Note
-
-    def month(days):
-        return {"places": [{"name": "Guntur", "state": "Andhra Pradesh"}],
-                "when": "this week", "hourly": False,
-                "insights": [Note("RANGE", "average rainfall 2.0mm, range 0.0-6.0mm"),
-                             Note("THRESHOLD", "heavy rain on 1 of 7 days (peak 12.0mm)")],
-                "table": {"columns": [{"key": "time", "label": "When"},
-                                      {"key": "Rainfall", "label": "Rainfall (mm)"}],
-                          "rows": [{"time": f"{d} Aug", "Rainfall": "2"}
-                                   for d in range(1, days + 1)]}}
-
-    week = build(month(7)).render()
-    assert "Places: Guntur (Andhra Pradesh)" in week, week
-    assert "Range: average rainfall" in week and "Notable: heavy rain" in week, week
-    assert "1 Aug | 2" in week, week
-    assert week.index("Range") < week.index("Notable") < week.index("Figures"), week
-
-    # too much table: the rows go, the summary of them stays
-    year = build(month(365)).render()
-    assert "1 Aug | 2" not in year and "365 rows" in year, year
-    assert "average rainfall" in year, "the summary must survive when the rows do not"
-    assert "|" not in build(month(24)).render(), "a day of hourly rows is a large set"
-
-    # a comparison leads, whatever order the notes arrived in
-    compared = build({"places": [{"name": "A"}, {"name": "B"}], "when": "tomorrow",
-                      "insights": [Note("RANGE", "A: average 2mm", "A"),
-                                   Note("COMPARISON", "A leads B by 2mm on rainfall")]}).render()
-    assert compared.index("Comparison") < compared.index("Range"), compared
-
-    # an advice turn carries the verdict and what it was read off
-    from backend.pipeline.advice import Advice
-    decided = build({"places": [{"name": "Guntur"}], "when": "tomorrow",
-                     "advice": Advice("YES", "Yes, but pick your moment.", [],
-                                      {"mean_wind_ms": 6.0, "total_mm": 0.0},
-                                      window="06:00 to 12:00 (6 hours)",
-                                      caveats=["partial data: 80% coverage"])}).render()
-    assert "Decision:" in decided and "pick your moment" in decided, decided
-    assert "Best window: 06:00 to 12:00 (6 hours)" in decided, decided
-    # the evidence dict's machine keys must never reach the prompt - the model reads them out
-    assert "mean wind ms" not in decided and "mean_wind_ms" not in decided, decided
-    assert "Caution:" in decided, decided
-    # one line renders inline, several render as a list - so a heading never sits alone
-    assert "Period: tomorrow" in decided, decided
-
-    assert not build({}), "nothing retrieved is an empty context, not an empty heading list"
-    print("context demo OK\n")
-    print("\n".join("  " + line for line in week.splitlines()))
-
-
-if __name__ == "__main__":
-    demo()

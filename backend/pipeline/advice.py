@@ -31,12 +31,21 @@ measurements - they carry a `ponytail:` note where that is true.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-
 from datetime import timedelta
 
 from backend.pipeline.quality import assess, values
-from backend.pipeline.windows import (Window, below, between, coverage, every, fragmented,
-                                      longest, reading, runs, spacing_hours)
+from backend.pipeline.windows import (
+    Window,
+    below,
+    between,
+    coverage,
+    every,
+    fragmented,
+    longest,
+    reading,
+    runs,
+    spacing_hours,
+)
 from backend.pipeline.windows import _stamp as _when
 
 YES, NO, CAUTION, UNKNOWN = "YES", "NO", "CAUTION", "UNKNOWN"
@@ -224,8 +233,7 @@ def _timed(spec: Timed, rows: list[dict], hourly: bool, sub: str) -> Advice:
     if sub:
         ev["sub_activity"] = sub
 
-    if long_enough:
-        pick = longest(long_enough)
+    if long_enough and (pick := longest(long_enough)) is not None:
         thin = (["the forecast does not reach far enough to confirm it stays dry afterwards"]
                 if unconfirmed else [])
         if share >= 0.99:
@@ -236,11 +244,10 @@ def _timed(spec: Timed, rows: list[dict], hourly: bool, sub: str) -> Advice:
                       [f"{spec.blocker} outside that"], ev, window=pick.describe(),
                       caveats=thin)
 
-    if long_by_time and spec.settle_hours:
+    if long_by_time and spec.settle_hours and (early := longest(long_by_time)) is not None:
         # long enough to do the job in, but the rain arrives before it has settled. Checked
         # before the length branches below, or a three-hour window against a two-hour job
         # comes back "tight", which is the wrong complaint entirely.
-        early = longest(long_by_time)
         return Advice(NO,
                       f"No - {early.label()} would work, but rain follows too soon after and "
                       f"it will wash off.",
@@ -248,10 +255,11 @@ def _timed(spec: Timed, rows: list[dict], hourly: bool, sub: str) -> Advice:
                       window=early.describe())
 
     if fragmented(usable, rows, spec.hours, hourly):
+        best_str = _spell(best.hours, hourly) if best else ""
         return Advice(CAUTION,
                       f"It keeps breaking up - {len(usable)} clear "
                       f"spell{'s' if len(usable) != 1 else ''} but the longest is only "
-                      f"{_spell(best.hours, hourly)}, and you need {wanted}.",
+                      f"{best_str}, and you need {wanted}.",
                       [f"{spec.blocker} on and off through the period"], ev,
                       window=best.describe() if best else "")
 
@@ -421,6 +429,16 @@ def evaluate(activity: str, rows: list[dict], *, sub_activity: str = "",
         if activity == "DRYING" and sub_activity == "vehicle":
             spec = Timed(spec.needs, NOT_DAMP, hours=2, verb="wash the vehicle",
                          blocker="rain")
+        elif activity == "OUTDOOR_ACTIVITY" and sub_activity:
+            def is_daylight(r):
+                val = reading(r, "SunSD")
+                if val is not None:
+                    return val > 0.0
+                w = _when(r)
+                return w is not None and 6 <= w.hour < 19
+            sports_during = every(DRY, BEARABLE, is_daylight)
+            spec = Timed(("Rainfall", "Tmax", "SunSD"), sports_during, hours=spec.hours,
+                         verb=f"play {sub_activity}", blocker="rain, heat or darkness")
         advice = _timed(spec, rows, hourly, sub_activity)
     else:
         advice = STATE_RULES[activity](rows, sub_activity, hourly)
@@ -443,6 +461,11 @@ def demo():
                  **{k: (v[d - 1] if isinstance(v, list) else v) for k, v in fields.items()}}
                 for d in range(1, n + 1)]
 
+    def ev(*args, **kwargs) -> Advice:
+        res = evaluate(*args, **kwargs)
+        assert res is not None
+        return res
+
     # ---- the whole point: the same total, two different answers -------------------
     # 12mm either way. In the afternoon it leaves a clear morning; spread through the day it
     # leaves nothing. The old engine summed and said no to both.
@@ -450,80 +473,80 @@ def demo():
     scattered = hourly_rows([2.0, 0.0, 2.0, 0.0, 2.0, 0.0, 2.0, 0.0, 4.0], RH=60.0)
     assert round(sum(values(afternoon, "Rainfall"))) == round(sum(values(scattered, "Rainfall")))
 
-    morning = evaluate("DRYING", afternoon, hourly=True)
+    morning = ev("DRYING", afternoon, hourly=True)
     assert morning.verdict == YES, morning
     assert "06:00 to 12:00" in morning.headline, morning.headline
-    broken = evaluate("DRYING", scattered, hourly=True)
+    broken = ev("DRYING", scattered, hourly=True)
     assert broken.verdict == CAUTION and "breaking up" in broken.headline, broken.headline
 
     # ...and rain right through is still a flat no, with no window to offer
-    soaked = evaluate("DRYING", hourly_rows([3.0] * 9, RH=95.0), hourly=True)
+    soaked = ev("DRYING", hourly_rows([3.0] * 9, RH=95.0), hourly=True)
     assert soaked.verdict == NO and not soaked.window, soaked
 
     # ---- a period that is entirely clear says so, rather than naming a window -----
-    clear = evaluate("OUTDOOR_ACTIVITY", hourly_rows([0.0] * 8, Tmax=30.0), hourly=True)
+    clear = ev("OUTDOOR_ACTIVITY", hourly_rows([0.0] * 8, Tmax=30.0), hourly=True)
     assert clear.verdict == YES and "any time" in clear.headline, clear.headline
 
     # ---- spraying needs the rain to stay away afterwards, not just during --------
     # Two calm hours then rain an hour later: the window exists and is still useless.
     calm_then_rain = hourly_rows([0.0, 0.0, 0.0, 5.0, 5.0, 5.0], Wind_Speed=3.0)
-    washed = evaluate("SPRAY", calm_then_rain, hourly=True)
+    washed = ev("SPRAY", calm_then_rain, hourly=True)
     assert washed.verdict == NO and "wash off" in washed.headline, washed.headline
     # ...and with the afternoon clear too, the same morning is a yes
     long_clear = hourly_rows([0.0] * 10, Wind_Speed=3.0)
-    assert evaluate("SPRAY", long_clear, hourly=True).verdict == YES
+    assert ev("SPRAY", long_clear, hourly=True).verdict == YES
 
     # wind is a per-reading condition like rain: a gusty hour breaks the window
     gusty = [{**r, "Wind_Speed": 3.0 if i % 2 else 9.0} for i, r in enumerate(long_clear)]
-    assert evaluate("SPRAY", gusty, hourly=True).verdict in (CAUTION, NO)
+    assert ev("SPRAY", gusty, hourly=True).verdict in (CAUTION, NO)
 
     # ---- daily rows read the same rules, and never invent a clock time -----------
     week = days(7, Rainfall=[0.0, 0.0, 0.0, 8.0, 0.0, 0.0, 0.0], RH=70.0)
-    harvest = evaluate("HARVEST", week, hourly=False)
+    harvest = ev("HARVEST", week, hourly=False)
     assert harvest.verdict == YES, harvest
     assert ":" not in harvest.headline, f"a daily feed cannot say a time: {harvest.headline}"
     assert "01 Aug" in harvest.headline or "1 Aug" in harvest.headline, harvest.headline
     # two dry days is not the three harvesting wants
-    assert evaluate("HARVEST", days(4, Rainfall=[0.0, 0.0, 8.0, 0.0], RH=70.0),
-                    hourly=False).verdict == CAUTION
+    assert ev("HARVEST", days(4, Rainfall=[0.0, 0.0, 8.0, 0.0], RH=70.0),
+              hourly=False).verdict == CAUTION
 
     # ---- the length of the period must not change the answer ---------------------
     # A sum only grows, so the old engine answered "can I go out today" and "...this week"
     # differently for identical weather. The window is the same window either way.
     drizzle = [0.3, 0.0, 0.4, 0.0, 0.3, 0.0, 0.4]
-    short = evaluate("RAIN_PROTECTION", days(3, Rainfall=drizzle[:3]), hourly=False)
-    long = evaluate("RAIN_PROTECTION", days(7, Rainfall=drizzle), hourly=False)
+    short = ev("RAIN_PROTECTION", days(3, Rainfall=drizzle[:3]), hourly=False)
+    long = ev("RAIN_PROTECTION", days(7, Rainfall=drizzle), hourly=False)
     assert short.verdict == long.verdict == NO, (short.verdict, long.verdict)
     # ...and one real shower is a coat however small the total
-    assert evaluate("RAIN_PROTECTION", days(2, Rainfall=[0.0, 6.0]), hourly=False).verdict == YES
+    assert ev("RAIN_PROTECTION", days(2, Rainfall=[0.0, 6.0]), hourly=False).verdict == YES
 
     # ---- state rules keep accumulating, because that is their actual question ----
     # straddle the 25mm leaching threshold: 24.9 carries it in, 25.1 washes it away
-    assert evaluate("FERTILIZE", days(2, Rainfall=[12.4, 12.5])).verdict == YES     # 24.9
-    assert evaluate("FERTILIZE", days(2, Rainfall=[12.5, 12.6])).verdict == NO      # 25.1
-    assert evaluate("FERTILIZE", days(2, Rainfall=[1.0, 0.9])).verdict == CAUTION   # 1.9
-    assert evaluate("FERTILIZE", days(2, Rainfall=[0.1, 0.1], Soilm10=0.10)).verdict == CAUTION
+    assert ev("FERTILIZE", days(2, Rainfall=[12.4, 12.5])).verdict == YES     # 24.9
+    assert ev("FERTILIZE", days(2, Rainfall=[12.5, 12.6])).verdict == NO      # 25.1
+    assert ev("FERTILIZE", days(2, Rainfall=[1.0, 0.9])).verdict == CAUTION   # 1.9
+    assert ev("FERTILIZE", days(2, Rainfall=[0.1, 0.1], Soilm10=0.10)).verdict == CAUTION
 
     # SOW wants the rain HARVEST is avoiding - the same days, opposite verdicts
     wet = days(4, Rainfall=6.0, Soilm10=0.22, Soilt10=24.0, RH=80.0)
-    assert evaluate("SOW", wet).verdict == YES
-    assert evaluate("HARVEST", wet, hourly=False).verdict == NO
+    assert ev("SOW", wet).verdict == YES
+    assert ev("HARVEST", wet, hourly=False).verdict == NO
 
-    assert evaluate("IRRIGATE", days(3, Soilm10=0.12, Rainfall=0.0)).verdict == YES
-    assert evaluate("IRRIGATE", days(3, Soilm10=0.35, Rainfall=0.0)).verdict == NO
-    assert evaluate("IRRIGATE", days(3, Soilm10=0.12, Rainfall=4.0)).verdict == NO  # 12mm coming
+    assert ev("IRRIGATE", days(3, Soilm10=0.12, Rainfall=0.0)).verdict == YES
+    assert ev("IRRIGATE", days(3, Soilm10=0.35, Rainfall=0.0)).verdict == NO
+    assert ev("IRRIGATE", days(3, Soilm10=0.12, Rainfall=4.0)).verdict == NO  # 12mm coming
 
-    assert evaluate("CLOTHING", days(2, Tmin=12.0, Tmax=22.0)).verdict == YES
-    assert evaluate("CLOTHING", days(2, Tmin=25.0, Tmax=35.0)).verdict == NO
+    assert ev("CLOTHING", days(2, Tmin=12.0, Tmax=22.0)).verdict == YES
+    assert ev("CLOTHING", days(2, Tmin=25.0, Tmax=35.0)).verdict == NO
 
     # ---- nothing decides without the readings its rule needs --------------------
-    assert evaluate("SPRAY", []).verdict == UNKNOWN
-    assert evaluate("SPRAY", [{"Date_time": "x", "Rainfall": 0.0}] * 5).verdict == UNKNOWN
-    assert evaluate("IRRIGATE", days(5, Rainfall=0.0)).verdict == UNKNOWN   # no soil column
+    assert ev("SPRAY", []).verdict == UNKNOWN
+    assert ev("SPRAY", [{"Date_time": "x", "Rainfall": 0.0}] * 5).verdict == UNKNOWN
+    assert ev("IRRIGATE", days(5, Rainfall=0.0)).verdict == UNKNOWN   # no soil column
     assert evaluate("NONE", days(3, Rainfall=0.0)) is None
 
     # ---- granularity is inferred when the caller does not know it ---------------
-    assert evaluate("DRYING", afternoon).verdict == YES, "hourly timestamps, inferred"
+    assert ev("DRYING", afternoon).verdict == YES, "hourly timestamps, inferred"
 
     print("advice demo OK")
     print(f"  {'12mm, all afternoon':26s} {morning.verdict:8s} {morning.headline}")
@@ -536,7 +559,7 @@ def demo():
         ("FERTILIZE 35mm coming", days(2, Rainfall=[18.0, 17.0]), False),
         ("IRRIGATE dry soil", days(3, Soilm10=0.12, Rainfall=0.0), False),
     ):
-        got = evaluate(name.split()[0], rows, hourly=hourly)
+        got = ev(name.split()[0], rows, hourly=hourly)
         print(f"  {name:26s} {got.verdict:8s} {got.headline}")
 
 

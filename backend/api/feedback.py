@@ -12,33 +12,23 @@ labels outrank the model's (Rule 8.5), which is what `store.training_rows` acts 
 
 from __future__ import annotations
 
-from typing import List, Optional
-
 from fastapi import APIRouter
-from pydantic import BaseModel
 
 from backend import store
 from backend.api.deps import db
+from backend.api.schemas import (
+    FeedbackRequest,
+    FeedbackResponse,
+    ReviewQueueResponse,
+    StatsResponse,
+    TurnFeedbackResponse,
+)
 
 router = APIRouter()
 
 
-class Feedback(BaseModel):
-    # typing.Optional, not `str | None`: pydantic resolves these at runtime and this venv is 3.9
-    turn_id: int
-    kind: str                       # up | down | correction | choice
-    intent: Optional[str] = None
-    action: Optional[str] = None
-    variables: Optional[List[str]] = None
-    location: Optional[List[str]] = None
-    time: Optional[List[str]] = None
-    model: Optional[str] = None
-    error_type: Optional[str] = None
-    note: Optional[str] = None
-
-
-@router.post("/api/feedback")
-def record(body: Feedback):
+@router.post("/api/feedback", response_model=FeedbackResponse)
+def record(body: FeedbackRequest):
     store.record_feedback(db, body.turn_id, body.kind, intent=body.intent, action=body.action,
                           variables=body.variables, location=body.location,
                           time_raw=body.time, model=body.model, error_type=body.error_type,
@@ -47,17 +37,17 @@ def record(body: Feedback):
             "feedback": store.feedback_for(db, body.turn_id)}
 
 
-@router.get("/api/feedback/{turn_id}")
+@router.get("/api/feedback/{turn_id}", response_model=TurnFeedbackResponse)
 def for_turn(turn_id: int):
     return {"feedback": store.feedback_for(db, turn_id)}
 
 
-@router.get("/api/review")
+@router.get("/api/review", response_model=ReviewQueueResponse)
 def review(limit: int = 50):
     """Turns flagged wrong, or answered uncertainly and never rated."""
     return {"queue": store.review_queue(db, limit)}
 
 
-@router.get("/api/stats")
+@router.get("/api/stats", response_model=StatsResponse)
 def stats():
     return store.stats(db)

@@ -1,7 +1,7 @@
 """
 Query planner - what each source can do, and what this question would cost.
 
-    python -m backend.pipeline.plan            # self-check
+    python tests/test_pipeline_units.py          # the checks for this module
 
 The NLU says what was asked. Nothing in it knows that Zarr serves points and Postgres serves
 districts, that the forecast stops at ten days, or that ten years of daily rows is a million
@@ -156,7 +156,8 @@ def _pick_source(*, tense: str, geography: str, points: int, days_back: int) -> 
         return Source.GFS_DAILY                    # hourly is chosen later, by resolution
     if points > 1:
         return Source.ZARR_BULK
-    if days_back <= CAPABILITY[Source.GFS_HISTORICAL].max_days_back:
+    max_days = CAPABILITY[Source.GFS_HISTORICAL].max_days_back
+    if max_days is not None and days_back <= max_days:
         return Source.GFS_HISTORICAL               # same columns as the forecast feed
     return Source.ZARR_POINT
 
@@ -241,91 +242,3 @@ def plan(*, times_normalized: list[str], places: list[dict], aggregation: str = 
                      reason=f"{span_days:,} days is too much even at "
                             f"{coarsest.value.lower()} - narrow the range",
                      offer=[coarsest.value], notes=notes)
-
-
-def demo():
-    """Self-check: routing, windows and the budget, on a fixed 'now'."""
-    now = datetime(2026, 8, 13, 15, 30)
-    here = [{"name": "Guntur", "lat": 16.3, "lon": 80.4}]
-    two = here + [{"name": "Vizag", "lat": 17.7, "lon": 83.2}]
-    # routing is what this checks; whether the internal archive answers today is a separate
-    # question, so the archive-backed cases are asserted with it assumed up
-    up = lambda **kw: plan(**{"archive": True, "now": now, **kw})
-
-    # Inside the hourly feed's 24h reach -> hourly, so the answer can say *when*.
-    for wording in ("now", "today", "tonight", "this evening"):
-        assert up(times_normalized=[wording], places=here).source is Source.GFS_HOURLY, wording
-
-    # ...and outside it -> daily. "tomorrow" asked at 15:30 ends 32h out, past what /hrlydata
-    # holds; serving it hourly would drop tomorrow evening and make the answer depend on the
-    # clock.
-    for wording in ("tomorrow", "this week", "day after tomorrow"):
-        p = up(times_normalized=[wording], places=here)
-        assert p.source is Source.GFS_DAILY and p.resolution is Resolution.DAILY, (wording, p)
-
-    # The rule is the reach, not the word: the same wording flips as the clock moves.
-    assert plan(times_normalized=["tomorrow morning"], places=here, archive=True,
-                now=datetime(2026, 8, 13, 6, 0)).source is Source.GFS_DAILY
-    assert plan(times_normalized=["tomorrow morning"], places=here, archive=True,
-                now=datetime(2026, 8, 13, 22, 0)).source is Source.GFS_HOURLY
-
-    assert up(times_normalized=["yesterday"], places=here).source is Source.GFS_HISTORICAL
-    assert up(times_normalized=["yesterday"], places=here,
-              level="district").source is Source.POSTGRES_AGG          # an area, not a point
-    assert up(times_normalized=["last week"], places=two).source is Source.ZARR_BULK
-
-    p = up(times_normalized=["in august 2019"], places=here)
-    assert p.source is Source.ZARR_POINT and p.start.startswith("2019-08-01"), p
-    assert p.end.startswith("2019-08-31"), p.end
-    assert up(times_normalized=["on 15 august 2023"], places=here).span_days == 1
-
-    # 5,844 days. The ladder already answers this in YEARLY, so it is affordable as asked -
-    # 16 rows out of a GROUP BY rather than a million observations.
-    p = up(times_normalized=["from 2010 to 2025"], places=here)
-    assert p.verdict is Verdict.EXECUTE and p.resolution is Resolution.YEARLY and p.rows == 16, p
-
-    # The ladder caps rows for one place, so the budget only bites when places multiply them.
-    assert up(times_normalized=["for all of 2023"], places=here).resolution is Resolution.DAILY
-    three = two + [{"name": "Nellore", "lat": 14.4, "lon": 80.0}]
-    p = up(times_normalized=["for all of 2023"], places=three)
-    assert p.verdict is Verdict.COARSEN and p.rows <= MAX_ROWS and p.offer, p
-
-    assert up(times_normalized=["next month"], places=here).verdict is Verdict.REJECT
-    p = up(times_normalized=["tomorrow"], places=[])
-    assert p.verdict is Verdict.ASK and "place" in p.reason, p
-
-    # the archive holds six measurements; asking it for soil moisture has to be visible
-    p = up(times_normalized=["in august 2019"], places=here, fields=["Rainfall", "Soilm10"])
-    assert p.source is Source.ZARR_POINT and p.unservable == ["Soilm10"], p
-    assert not up(times_normalized=["tomorrow"], places=here, fields=["Soilm10"]).unservable
-
-    # ...and with the archive down, an old date is refused up front rather than timing out
-    down = plan(times_normalized=["in august 2019"], places=here, now=now, archive=False)
-    assert down.verdict is Verdict.REJECT and "internal network" in down.reason, down
-
-    # a date within the 7-day lookback is served by the forecast API, archive or no archive
-    recent = plan(times_normalized=["11 august 2026"], places=here, archive=False,
-                  now=datetime(2026, 8, 14, 13, 0))
-    assert recent.verdict is Verdict.EXECUTE and recent.source is Source.GFS_HISTORICAL, recent
-
-    for wording in ("in 2017", "for all of 2023", "every year since 2018", "in the last decade",
-                    "over the past 6 months", "on 12/06/2021", "2023-08-15", "march 2022",
-                    "11 jan 2026 and 17 jan 2026"):
-        got = up(times_normalized=[wording], places=here)
-        assert got.verdict in (Verdict.EXECUTE, Verdict.COARSEN), (wording, got)
-        assert got.rows <= MAX_ROWS, (wording, got.rows)
-
-    print("plan demo OK")
-    for wording, where in (("tomorrow", here), ("yesterday", here), ("in august 2019", here),
-                           ("from 2010 to 2025", here), ("over the last 5 years", here),
-                           ("next month", here), ("for all of 2023", here),
-                           ("for all of 2023", three)):
-        got = up(times_normalized=[wording], places=where)
-        name = f"{wording} x{len(where)}" if len(where) > 1 else wording
-        print(f"  {name:22s} {got.verdict.value:8s} {str(got.source and got.source.value):15s} "
-              f"{str(got.resolution and got.resolution.value):8s} {got.span_days:>5}d "
-              f"{got.rows:>5} rows  {got.reason}")
-
-
-if __name__ == "__main__":
-    demo()

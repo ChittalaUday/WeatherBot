@@ -111,7 +111,7 @@ class V3Model:
 
         intent_scores = dict(zip(self.heads["intent"].classes_,
                                  self.heads["intent"].predict_proba(features)[0]))
-        intent = max(intent_scores, key=intent_scores.get)
+        intent = max(intent_scores, key=lambda k: intent_scores[k])
         variables = self._multi("variables", features)
         insights = self._multi("insights", features)
 
@@ -249,6 +249,6 @@ def main():
 
 
 if __name__ == "__main__":
-    from src.v3.model import main as packaged_main   # pickle as src.v3.model.V3Model
+    from src.v3.model import main as packaged_main  # pickle as src.v3.model.V3Model
 
     packaged_main()

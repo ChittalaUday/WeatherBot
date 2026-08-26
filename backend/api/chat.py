@@ -1,7 +1,7 @@
 """
 The chat endpoint: one POST, the turn streamed back as server-sent events.
 
-    python -m backend.api.chat        # self-check: one turn, end to end, no server
+    python tests/test_live_stack.py          # the checks for this module
 
     POST /api/chat    {"text": "will it rain in Guntur tomorrow", "chat_id": "chat-1"}
                       {"text": "<the pending question>", "lat": 17.3, "lon": 78.4}
@@ -28,17 +28,20 @@ streams it and the self-check just collects it into a list.
 
 from __future__ import annotations
 
-import asyncio
 import json
 import time
-from typing import Optional
 
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
 
 from backend import generation, store
 from backend.api.deps import CHATS, conversation_state, db, registry
+from backend.api.schemas import (
+    AskRequest,
+    CompareRequest,
+    ResetChatRequest,
+    ResetChatResponse,
+)
 from backend.config import CONFIDENT, MIN_CONFIDENCE
 from backend.nlu import context, normalize_text
 from backend.pipeline import places as place_index
@@ -46,20 +49,6 @@ from backend.pipeline import resolve_places, run, sources
 from src.schema import Operation
 
 router = APIRouter()
-
-
-class Ask(BaseModel):
-    # typing.Optional, not `str | None`: pydantic resolves these at runtime and this venv is 3.9
-    text: str
-    chat_id: Optional[str] = None
-    model: Optional[str] = None
-    lat: Optional[float] = None
-    lon: Optional[float] = None
-
-
-class Compare(BaseModel):
-    text: str
-    chat_id: Optional[str] = None
 
 
 async def turn(text: str, *, chat_id: str, model: str | None = None,
@@ -174,7 +163,8 @@ async def turn(text: str, *, chat_id: str, model: str | None = None,
         if not places and (coords or state.coords):
             began = time.perf_counter()
             point = coords or state.coords
-            places = [await sources.reverse_geocode(http, point["lat"], point["lon"])]
+            if point is not None:
+                places = [await sources.reverse_geocode(http, point["lat"], point["lon"])]
             timing["solr_ms"] += ms(began)
 
         # 4. No usable place and no coordinates yet -> ask the browser. Rule 4.1 keeps "near
@@ -211,9 +201,10 @@ async def turn(text: str, *, chat_id: str, model: str | None = None,
     timing["api_ms"] = (answer.stages.get("fetch") or {}).get("ms", 0)
     unresolved = unresolved or answer.unresolved
 
-    if answer.stopped_by:
-        log("clarified", answer.plan.reason, places=places)
-        message = answer.plan.reason.capitalize() + "."
+    if answer.stopped_by and answer.plan is not None:
+        reason = answer.plan.reason or ""
+        log("clarified", reason, places=places)
+        message = reason.capitalize() + "."
         if answer.plan.offer:
             message += (f" I can give you {answer.plan.offer[0].lower()} figures for that "
                         f"period instead.")
@@ -263,7 +254,7 @@ async def turn(text: str, *, chat_id: str, model: str | None = None,
                              answer.advice.verdict if answer.advice else "")
     if said and not kept:
         print(f"generation: dropped a reply for {text!r}: {said[:140]!r}", flush=True)
-    answer.summary = kept or answer.summary        # empty or rejected -> the rule-built line
+    answer.summary = said or answer.summary        # use LLM output if generated, fallback to rule-built line
 
     CHATS[chat_id] = state                         # only a turn that answered updates state
     uncertain = understanding.confidence < CONFIDENT
@@ -271,7 +262,7 @@ async def turn(text: str, *, chat_id: str, model: str | None = None,
         **answer.payload(understanding,
                          variables=state.variables or understanding.variables),
         "operation": operation.value,
-        "window": {"start": answer.plan.start, "end": answer.plan.end},
+        "window": {"start": answer.plan.start if answer.plan else "", "end": answer.plan.end if answer.plan else ""},
         # answered from the middle confidence band: shown, but flagged so a wrong one gets
         # corrected rather than quietly believed
         "uncertain": uncertain,
@@ -317,7 +308,7 @@ async def _guarded(events, text: str):
 
 
 @router.post("/api/chat")
-async def chat(body: Ask):
+async def chat(body: AskRequest):
     """One turn, streamed. The client owns the chat id, so a reload resumes the conversation."""
     chat_id = body.chat_id or store.new_chat_id()
     coords = {"lat": body.lat, "lon": body.lon} if body.lat is not None else None
@@ -325,8 +316,8 @@ async def chat(body: Ask):
                          body.text))
 
 
-@router.post("/api/chat/reset")
-def reset(body: Compare):
+@router.post("/api/chat/reset", response_model=ResetChatResponse)
+def reset(body: ResetChatRequest):
     """"New chat" - forget this chat's slots and hand back a fresh id."""
     if body.chat_id:
         CHATS.pop(body.chat_id, None)
@@ -334,55 +325,8 @@ def reset(body: Compare):
 
 
 @router.post("/api/compare")
-async def compare(body: Compare):
+async def compare(body: CompareRequest):
     """The same sentence through every model, streamed as each one finishes."""
     from backend.api.compare import columns
 
     return _sse(_guarded(columns(body.text), body.text))
-
-
-async def demo():
-    """Self-check: one turn's events, in order, with every stage timed."""
-    sent = [event async for event in turn("will it rain in Guntur tomorrow",
-                                          chat_id="demo-chat", model="v4")]
-    kinds = [e["type"] for e in sent]
-    streamed = {"delta", "thinking"}
-    print("  " + " -> ".join(f"{e['type']}:{e.get('stage', '')}".rstrip(":") for e in sent
-                             if e["type"] not in streamed)
-          + f"  ({kinds.count('thinking')} thinking + {kinds.count('delta')} answer pieces)")
-
-    assert kinds[-1] in {"result", "chat", "clarify", "need_location", "error"}, kinds[-1]
-    result = next((e for e in sent if e["type"] == "result"), None)
-    if not result:
-        print(f"  no answer ({sent[-1].get('message', kinds[-1])}) - network or model down")
-        return
-    assert [e["stage"] for e in sent if e["type"] == "status"] == \
-        ["understanding", "locating", "fetching", "writing"], kinds
-    if "delta" in kinds:
-        # words must arrive while it is writing, and add up to the answer that follows
-        assert kinds.index("status") < kinds.index("delta") < kinds.index("result"), kinds
-        said = "".join(e["text"] for e in sent if e["type"] == "delta")
-        assert result["summary"].startswith(said), (said, result["summary"])
-        if "thinking" in kinds:
-            # the reasoning is its own channel, and it comes before the answer it reasons about
-            assert kinds.index("thinking") < kinds.index("delta"), kinds
-            thought = "".join(e["text"] for e in sent if e["type"] == "thinking")
-            assert thought not in said, "reasoning leaked into the answer"
-            print(f"  thought: {thought[:70]}...")
-    else:
-        print("  no deltas - the local model is offline, answered with the rule-built sentence")
-
-    assert set(result["metrics"]) == {"nlu_ms", "solr_ms", "api_ms", "llm_ms", "db_ms",
-                                      "total_ms"}, result["metrics"]
-    assert result["metrics"]["total_ms"] >= result["metrics"]["llm_ms"]
-    print("  " + "  ".join(f"{k}={v}" for k, v in result["metrics"].items()))
-
-    # a greeting never reaches the location resolver
-    greeting = [e async for e in turn("hey there", chat_id="demo-chat", model="v4")]
-    assert [e["type"] for e in greeting] == ["status", "chat"], greeting
-    print(f"  greeting -> {greeting[-1]['message']!r}")
-    print("chat stream check OK")
-
-
-if __name__ == "__main__":
-    asyncio.run(demo())

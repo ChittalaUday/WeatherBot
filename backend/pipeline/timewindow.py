@@ -1,7 +1,7 @@
 """
 The only place that knows what a time expression means.
 
-    python -m backend.pipeline.timewindow        # self-check
+    python tests/test_pipeline_units.py          # the checks for this module
 
 Three jobs that used to live in three modules with three copies of the calendar:
 
@@ -264,10 +264,10 @@ def select_rows(rows: list[dict], canonical: str,
         picked = [r for r in rows if start <= _stamp(r).hour <= end]
         return picked or rows[:1], canonical
 
-    if ":" in canonical:                                  # "18:45" -> that hour, next occurrence
+    if ":" in canonical:                                  # "18:45" -> from that hour onwards
         hour = int(canonical.split(":")[0])
-        at_hour = [r for r in rows if _stamp(r).hour == hour]
-        return ([r for r in at_hour if _stamp(r) >= now] or at_hour or rows)[:1], canonical
+        at_hour = [r for r in rows if _stamp(r).hour >= hour]
+        return ([r for r in at_hour if _stamp(r) >= now] or at_hour or rows)[:3], canonical
 
     if canonical in PART_OF_DAY:
         start, end = PART_OF_DAY[canonical]
@@ -306,60 +306,3 @@ def select_rows(rows: list[dict], canonical: str,
         return picked, canonical
 
     return rows[:7], canonical                            # unknown expression: show the horizon
-
-
-def demo():
-    """Self-check: the calendar arithmetic and the row picker, on a fixed 'now'."""
-    now = datetime(2026, 8, 13, 15, 30)          # a Thursday
-
-    assert resolve("tomorrow", now).start.date() == date(2026, 8, 14)
-    assert resolve("day after tomorrow", now).start.date() == date(2026, 8, 15)
-    assert resolve("yesterday", now).start.date() == date(2026, 8, 12)
-    assert resolve("monday", now).start.date() == date(2026, 8, 17)      # next, never today
-
-    evening = resolve("this evening", now)
-    assert evening.granularity == "hourly" and evening.start.hour == 17
-
-    assert resolve("18:45", now).start == datetime(2026, 8, 13, 18, 45)
-    assert resolve("06:00", now).start == datetime(2026, 8, 14, 6, 0)    # already gone
-
-    span = resolve("next 3 days", now)
-    assert span.start.date() == date(2026, 8, 13) and span.end.date() == date(2026, 8, 15)
-    assert resolve("this weekend", now).start.date() == date(2026, 8, 15)   # Saturday
-
-    default = resolve(None, now)
-    assert default.label == "next few days" and default.granularity == "daily"
-
-    # calendar wording, which the relative resolver alone could never do
-    assert resolve("in august 2019", now).start.date() == date(2019, 8, 1)
-    assert resolve("in august 2019", now).end.date() == date(2019, 8, 31)
-    assert resolve("from 2010 to 2025", now).span_days == 5844
-    assert resolve("on 15 august 2023", now).span_days == 1
-    assert resolve("for all of 2023", now).start.date() == date(2023, 1, 1)
-    # the abbreviated-month bug: this must be one day, not the whole of 2026
-    assert resolve("11 jun 2026", now).span_days == 1, resolve("11 jun 2026", now)
-    # a date range must not collapse to its first date
-    assert resolve("11 jan 2026 and 17 jan 2026", now).span_days == 7
-
-    # ...and the row picker reads the same calendar
-    daily = [{"Date_time": f"2026-08-{d:02d}T00:00:00"} for d in range(12, 22)]
-    picked, label = select_rows(daily, "tomorrow", now)
-    assert len(picked) == 1 and picked[0]["Date_time"].startswith("2026-08-14"), picked
-    assert select_rows(daily, "next 3 days", now)[0] == daily[1:4]       # 12 Aug is past
-    assert len(select_rows(daily, "", now)[0]) == 7 and label == "tomorrow"
-    assert select_rows(daily, "15 august 2026", now)[0][0]["Date_time"].startswith("2026-08-15")
-    assert select_rows([], "tomorrow", now) == ([], "no data")
-
-    hourly = [{"Date_time": f"2026-08-13T{h:02d}:00:00"} for h in range(24)]
-    assert len(select_rows(hourly, "this evening", now)[0]) == 5        # 17:00-21:00
-
-    print("timewindow demo OK")
-    for wording in ("tomorrow", "this evening", "in august 2019", "from 2010 to 2025",
-                    "over the last 5 years", "11 jun 2026", None):
-        w = resolve(wording, now)
-        print(f"  {str(wording):22s} {w.start:%Y-%m-%d %H:%M} -> {w.end:%Y-%m-%d %H:%M}  "
-              f"{w.span_days:>5}d  {w.granularity:6s} {w.label}")
-
-
-if __name__ == "__main__":
-    demo()
