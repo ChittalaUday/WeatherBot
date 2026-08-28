@@ -11,14 +11,17 @@ services:
         ENABLE_CUDA: "OFF"
         ENABLE_CUDA_GRAPHS: "OFF"
         ENABLE_GGML_PATCHES: "OFF"
-        # HTTP + realtime WebSocket is the only interface we serve. gRPC/Riva,
-        # Flashlight LM decoding, Sparrowhawk normalisation and NMT are all off:
-        # each pulls a heavy toolchain into the builder and none is used.
+        # HTTP + realtime WebSocket is the only interface we serve; gRPC/Riva,
+        # Sparrowhawk normalisation and NMT are off, each pulls a heavy toolchain
+        # into the builder and none is used.
         ENABLE_HTTP: "ON"
         ENABLE_GRPC: "OFF"
-        ENABLE_FLASHLIGHT: "OFF"
         ENABLE_NORM: "OFF"
         ENABLE_NMT: "OFF"
+        # Must stay ON despite nothing here using LM-fused decoding: the
+        # Dockerfile builds SentencePiece only inside this branch, and the ASR
+        # links it unconditionally (src/asr/CMakeLists.txt:101 find_library).
+        ENABLE_FLASHLIGHT: "ON"
         # ponytail: 6, not nproc — Docker Desktop has 8 GB and ggml/llama.cpp
         # translation units peak near 1 GB each. Raise if the VM gets more RAM.
         JOBS: "6"
@@ -36,6 +39,12 @@ services:
       # The browser talks to this from the Next.js origin, not from :2701.
       - --cors-origin
       - "*"
+      # Default is 4, and a realtime WebSocket holds one for the whole dictation - so the
+      # 5th concurrent mic waits at accept, not in the model. scripts/stt_bench.py showed
+      # 15 s connect waits at 16 clients on the default. These threads are idle between
+      # audio frames, so overcommitting the 4 CPUs is the point.
+      - --threads
+      - "32"
     healthcheck:
       # scratch image: no shell, no curl. The CLI ships its own /ready probe.
       test: ["CMD", "/opt/nemo-speech/bin/nemo-speech", "health", "--quiet"]

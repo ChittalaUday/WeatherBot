@@ -4,10 +4,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { sttUrl } from "@/lib/utils";
 
 /**
- * Mic -> the Nemotron ASR container (stt/) -> text, as you speak.
+ * Mic -> the NeMo-Speech.cpp ASR container (stt-cpp/) -> text, as you speak.
  *
- * The server runs a cache-aware streaming model, so {"partial"} lands roughly per word
- * while you are still talking, and {"text"} closes the utterance.
+ * The server runs a cache-aware streaming model, so a transcription delta lands roughly per
+ * word while you are still talking, and a "completed" event closes each utterance.
  *
  * The server wants 16 kHz mono PCM s16le, so the AudioContext is opened at 16 kHz and the
  * browser resamples the mic for us - no hand-written resampler. The worklet is a blob so
@@ -23,10 +23,13 @@ import { sttUrl } from "@/lib/utils";
  * `analyser` is a tap on the mic for drawing a live trace; it is null unless recording.
  */
 
-// Only a safety net for a server that never answers: the normal path ends when the server
-// sends its last result and closes, which is prompt. Generous on purpose - a slow host
-// finishing a long utterance must not have its transcript cut off.
+// Only a safety net for a server that never answers: the normal path ends on the
+// "completed" event for the committed buffer, which is prompt. Generous on purpose - a slow
+// host finishing a long utterance must not have its transcript cut off.
 const FLUSH_TIMEOUT_MS = 120_000;
+
+const DELTA = "conversation.item.input_audio_transcription.delta";
+const COMPLETED = "conversation.item.input_audio_transcription.completed";
 
 const WORKLET = `
 class PCM extends AudioWorkletProcessor {
@@ -68,25 +71,35 @@ export function useDictation(onText: (text: string) => void) {
     let ctx: AudioContext | undefined;
     let ws: WebSocket | undefined;
     let flush: ReturnType<typeof setTimeout> | undefined;
+    // Set once the mic is released and the buffer committed, so the "completed" handler can
+    // tell the last utterance of a dictation from one the server ended on its own silence
+    // detector mid-sentence - only the former is the end of the session.
+    let committed = false;
+
+    // Drop the mic. Idempotent, and it has to be: releasing the mic runs this, and so does
+    // the teardown when the closing result lands a moment later. AudioContext.close()
+    // throws on a context that is already closed.
+    const release = () => {
+      setAnalyser(null);
+      stream?.getTracks().forEach((track) => track.stop());
+      if (ctx && ctx.state !== "closed") void ctx.close();
+    };
 
     const teardown = () => {
       clearTimeout(flush);
       setPending(false);
-      setAnalyser(null);
-      stream?.getTracks().forEach((track) => track.stop());
-      void ctx?.close();
+      release();
       ws?.close();
     };
 
     stop.current = () => {
       // Release the mic straight away, but leave the socket open. The server replies at
-      // its own pace - seconds per utterance, not milliseconds - and closes once it has
-      // flushed the last one; closing here would throw that transcript away.
-      setAnalyser(null);
-      stream?.getTracks().forEach((track) => track.stop());
-      void ctx?.close();
+      // its own pace - seconds per utterance, not milliseconds - and the words spoken just
+      // before the release are still in flight; closing here would throw them away.
+      release();
       if (ws?.readyState !== WebSocket.OPEN) return teardown();
-      ws.send('{"eof":1}');
+      ws.send('{"type":"input_audio_buffer.commit"}');
+      committed = true;
       setPending(true);
       flush = setTimeout(teardown, FLUSH_TIMEOUT_MS);
     };
@@ -105,10 +118,33 @@ export function useDictation(onText: (text: string) => void) {
       });
 
       const done: string[] = [];
+      let partial = "";
+      const emit = () => text.current([...done, partial].join(" ").replace(/\s+/g, " ").trim());
+
       ws.onmessage = (event) => {
         const message = JSON.parse(event.data as string);
-        if (message.text) done.push(message.text);
-        text.current([...done, message.partial ?? ""].join(" ").trim());
+        switch (message.type) {
+          case DELTA:
+            // Incremental, and split on token boundaries rather than words - "humidity"
+            // arrives as " hum" + "id" + "ity" - so it is concatenated, not assigned.
+            partial += message.delta ?? "";
+            emit();
+            break;
+          case COMPLETED:
+            // The final re-punctuates the whole utterance, so it replaces the deltas that
+            // built it up rather than being appended to them.
+            done.push(message.transcript ?? partial);
+            partial = "";
+            emit();
+            // Nothing closes this socket for us: unlike the old stt/ service the server
+            // stays open after committing, ready for another utterance.
+            if (committed) teardown();
+            break;
+          case "error":
+            setError(message.error?.message ?? "transcription failed");
+            teardown();
+            break;
+        }
       };
       ws.onclose = () => {
         clearTimeout(flush);

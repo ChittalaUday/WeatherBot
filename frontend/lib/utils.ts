@@ -24,8 +24,12 @@ export function apiUrl(): string {
 }
 
 /**
- * The streaming speech-to-text socket (the Nemotron ASR container in stt/). Same fallback rule
- * as apiUrl(): a loopback default is ignored when the page is being reached over the network.
+ * The streaming speech-to-text socket (the NeMo-Speech.cpp container in stt-cpp/). Same
+ * fallback rule as apiUrl(): a loopback default is ignored when the page is being reached
+ * over the network.
+ *
+ * Unlike the old stt/ service this one is not at the socket root - the same port also serves
+ * the REST API, health and a playground, so the realtime socket has its own path.
  */
 export function sttUrl(): string {
   const configured = process.env.NEXT_PUBLIC_STT_URL;
@@ -33,7 +37,7 @@ export function sttUrl(): string {
   if (configured && !(loopback.test(configured) && !loopback.test(window.location.hostname))) {
     return configured;
   }
-  return `ws://${window.location.hostname}:2700`;
+  return `ws://${window.location.hostname}:2701/v1/realtime`;
 }
 
 /**
@@ -44,5 +48,7 @@ export function sttUrl(): string {
  * work from here. ws:// -> http://, wss:// -> https://.
  */
 export function sttHealthUrl(): string {
-  return `${sttUrl().replace(/^ws/, "http").replace(/\/$/, "")}/health`;
+  // Origin, not the socket URL with /health glued on: sttUrl() now carries a path
+  // (/v1/realtime) and health is served at the root of the same port.
+  return `${new URL(sttUrl().replace(/^ws/, "http")).origin}/health`;
 }

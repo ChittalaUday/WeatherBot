@@ -33,10 +33,11 @@ export function MicButton({
   const { data, isPending, isError } = useQuery({
     queryKey: ["stt-health"],
     queryFn: async () => {
-      // 503 while the weights load, and that body still names the model, so don't
-      // treat a non-ok status as a failure - only an unreachable host is that.
+      // Don't treat a non-ok status as a failure - only an unreachable host is that.
+      // The server binds its port after the weights are in, so "loading" is a moment, and
+      // an unstarted container shows up as a fetch error rather than a bad status.
       const response = await fetch(sttHealthUrl());
-      return (await response.json()) as { status: string; model: string; device: string };
+      return (await response.json()) as { status: string; version: string };
     },
     // Check often while it is warming up, then settle down once it is answering.
     refetchInterval: (query) => (query.state.data?.status === "ok" ? 30_000 : 5_000),
@@ -46,9 +47,9 @@ export function MicButton({
   const unavailable = isPending
     ? "Checking the speech service…"
     : isError
-      ? "Speech service unreachable - start it with: docker compose up -d in stt/"
+      ? "Speech service unreachable - start it with: docker compose up -d in stt-cpp/"
       : data?.status !== "ok"
-        ? `Speech model is still loading (${data?.model ?? "unknown"})…`
+        ? `Speech service is not ready (${data?.status ?? "unknown"})…`
         : null;
 
   const label = pending ? "Transcribing" : recording ? "Stop dictation" : "Speak";
