@@ -51,14 +51,11 @@ class Source(str, Enum):
     ZARR_POINT = "ZARR_POINT"            # /weather                point, any dates
     ZARR_BULK = "ZARR_BULK"              # /bulk-get-weather/*     many points, any dates
     POSTGRES_AGG = "POSTGRES_AGG"        # weather.daily_*_weather admin levels, pre-aggregated
-
-
 class Verdict(str, Enum):
     EXECUTE = "EXECUTE"
     COARSEN = "COARSEN"
     ASK = "ASK"
     REJECT = "REJECT"
-
 
 # Geography a source can address. A village or a raw lat/lon is a POINT; a district or a state
 # is an AREA that Postgres already has pre-aggregated and Zarr would have to average by hand.
@@ -74,7 +71,6 @@ GFS_FIELDS = frozenset({"Rainfall", "Tmin", "Tmax", "Tavg", "RH", "RH_max", "RH_
                         "Lowcloud", "Soilm10", "Soilm40", "Soilt10"})
 # Tavg is derived from Tmax/Tmin by the adapter - the feed does not send it.
 ZARR_FIELDS = frozenset({"Rainfall", "Tmax", "Tmin", "Tavg", "RH", "Wind_Speed", "DayLength"})
-
 
 @dataclass(frozen=True)
 class Capability:
@@ -117,7 +113,6 @@ CAPABILITY = {
                                     resolutions=(Resolution.DAILY, Resolution.WEEKLY,
                                                  Resolution.MONTHLY, Resolution.YEARLY)),
 }
-
 
 @dataclass
 class QueryPlan:

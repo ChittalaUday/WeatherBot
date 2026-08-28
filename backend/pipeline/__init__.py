@@ -24,10 +24,12 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from backend.nlu import times
 from backend.pipeline import advice as advice_engine
-from backend.pipeline import analysis, quality, render, sources
+from backend.pipeline import analysis, params, profiles, quality, render, sources
 from backend.pipeline import places as place_index
 from backend.pipeline import plan as planner
+from backend.pipeline.timewindow import resolve as resolve_window
 from backend.pipeline.timewindow import select_rows
 
 __all__ = ["Answer", "run", "resolve_places"]
@@ -107,9 +109,6 @@ class Answer:
             "chart": self.chart,
             "insights": [note.as_dict() for note in self.insights],
             "unresolved": self.unresolved,
-            "presentation": ({"detail": understanding.detail, "chart": understanding.chart,
-                              "insights": understanding.insights}
-                             if understanding.detail else None),
             "assumed": understanding.assumed,
             "advice": ({"verdict": self.advice.verdict, "headline": self.advice.headline,
                         "reasons": self.advice.reasons, "evidence": self.advice.evidence,
@@ -139,7 +138,7 @@ async def resolve_places(http, names: list[str]) -> tuple[list[dict], list[str]]
     to either was a fix to one of them.
     """
     usable = [n for n in names
-              if not place_index.is_relative(n) and not place_index.is_probably_not_a_place(n)]
+              if not place_index.is_relative(n)]
     if not usable:
         return [], []
     solr = lambda query, rows=8: sources.solr_query(http, query, rows)
@@ -171,6 +170,7 @@ async def run(http, understanding, *, places: list[dict] | None = None,
               aggregation: str | None = None, now: datetime | None = None) -> Answer:
     """Everything after the model, for one reading of one sentence."""
     started = time.perf_counter()
+    now = now or datetime.now()
     answer = Answer()
     elapsed = lambda: int((time.perf_counter() - started) * 1000)
 
@@ -179,11 +179,6 @@ async def run(http, understanding, *, places: list[dict] | None = None,
             setattr(answer, key, value)
         answer.total_ms = elapsed()
         return answer
-
-    fields = understanding.fields()
-    answer.aggregation = (analysis.confirm_aggregation(understanding.text,
-                                                       understanding.aggregation)
-                          if aggregation is None else aggregation)
 
     # 1. routing - does this turn want weather at all? A greeting that reaches the location
     # resolver comes back asking which city you meant, which is the worst thing this bot does.
@@ -213,18 +208,40 @@ async def run(http, understanding, *, places: list[dict] | None = None,
         answer.stages["locations"]["note"] = "no place resolved - the caller must ask for one"
         return finish(needs_location=True)
 
-    # 3. plan - which source, at what resolution, and can it be afforded
-    normalized = understanding.times_normalized[0] if understanding.times_normalized else None
-    if not normalized and understanding.activity != "NONE":
-        # an advice turn with no time still has a window - the one its rule reads
-        normalized = advice_engine.DEFAULT_WINDOW.get(understanding.activity)
-        if normalized:
-            answer.stages["assumed_window"] = {
-                "window": normalized, "why": f"{understanding.activity} with no time named"}
-    plan = planner.plan(times_normalized=[normalized] if normalized else [], places=places,
-                        aggregation=answer.aggregation,
-                        level=(places[0].get("type") or "village"), fields=fields, now=now)
+    # 3. parameters - which API, how many places, which reduction, over which window. One
+    # object now, with the reason for each decision beside it: these used to be made in three
+    # places that recorded nothing, so an answer that came back hourly could not be explained
+    # without a debugger.
+    #
+    # The profile is chosen from the window, so the window is resolved first. A turn that
+    # named no time has none to resolve, and the profile is what supplies one.
+    #
+    # Before that: a span the rule tables could not canonicalise gets one chance from a model,
+    # and if that fails too the turn stops rather than guessing. This is the whole
+    # `time_resolution` cluster in the feedback table - "when i asked last 7 days it showed
+    # next 7days", "when i asked for history it showed next", "when i asked yesterday it is
+    # showing today data". Every one of them was an expression nobody could place, answered
+    # with next week under the user's own words.
+    said = understanding.times_normalized[0] if understanding.times_normalized else ""
+    spoken, how = await times.place(said, understanding.text)
+    if how != "rules":
+        answer.stages["time"] = {"span": said or None, "canonical": spoken or None, "by": how}
+    if how == "unplaceable":
+        # Nothing can place it. Saying so is the answer - `generation.explain("time")` has
+        # carried the line for this since before anything could reach it.
+        return finish(ok=False, failed_at="time",
+                      error=f"could not place the time in {understanding.text!r}")
+    understanding.times_normalized = [spoken] if spoken else []
+    window = resolve_window(spoken, now) if spoken else None
+    profile = profiles.pick(understanding, window, now)
+    chosen = params.resolve(understanding, profile, places, now=now, aggregation=aggregation)
+    fields, plan = chosen.fields, chosen.plan
+    normalized = chosen.window
+    answer.aggregation = chosen.aggregation
     answer.plan = plan
+    # what was assumed on their behalf is the answer's to admit, not the audit trail's to bury
+    understanding.assumed.extend(chosen.assumed)
+    answer.stages["params"] = chosen.as_dict()
     answer.stages["plan"] = {**plan.as_dict(), "fields": fields}
     if plan.verdict in (planner.Verdict.REJECT, planner.Verdict.ASK):
         return finish(stopped_by=plan.verdict.value)
@@ -265,10 +282,8 @@ async def run(http, understanding, *, places: list[dict] | None = None,
 
     # 7. analysis - the reduction, the observations
     answer.reduced = analysis.apply_aggregation(answer.rows[0], fields[0], answer.aggregation)
-    # `wanted` is v3's insight selection; v4 leaves it None and every applicable one is emitted
     answer.insights = analysis.build_insights(answer.rows, places, fields, answer.aggregation,
-                                              answer.hourly,
-                                              wanted=understanding.insights or None)
+                                              answer.hourly)
     answer.stages["analysis"] = {
         "aggregation": answer.aggregation, "reduced": answer.reduced,
         "insights": [n.as_dict() for n in answer.insights],
@@ -308,13 +323,11 @@ async def run(http, understanding, *, places: list[dict] | None = None,
     answer.table = render.build_table(answer.rows if compare_two else answer.rows[0], fields,
                                       shown, answer.hourly)
     # A verdict and a single reduced figure are both one-line answers; the numbers under them
-    # are evidence, not a dataset to explore. Only draw the series when someone asked to see
-    # it - by wording, or by v3's presentation head, which read the question itself.
+    # are evidence, not a dataset to explore. Only draw the series when the wording asked to
+    # see it.
     simple = bool(verdict) or bool(answer.reduced)
-    answer.chart = (analysis.build_chart(answer.rows, places, fields[0], answer.hourly,
-                                         kind=understanding.chart or None, fields=fields)
-                    if not simple or analysis.wants_chart(understanding.text,
-                                                          understanding.chart)
+    answer.chart = (analysis.build_chart(answer.rows, places, fields[0], answer.hourly)
+                    if not simple or analysis.wants_chart(understanding.text)
                     else None)
     answer.stages["answer"] = {"summary": answer.summary, "when": answer.when,
                                "table_rows": len(answer.rows[0]), "columns": fields}

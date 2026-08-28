@@ -50,6 +50,12 @@ from src.schema import Operation
 
 router = APIRouter()
 
+# How many previous exchanges the wording model is shown. Three is two follow-ups deep, which
+# is where "and there?" -> "what about next week?" stops being resolvable from the last turn
+# alone. More is not free: every turn of history is read on every turn, by a small model that
+# has a fixed budget of attention and spends it on whatever is in front of it.
+HISTORY_TURNS = 3
+
 
 async def turn(text: str, *, chat_id: str, model: str | None = None,
                coords: dict | None = None):
@@ -116,9 +122,11 @@ async def turn(text: str, *, chat_id: str, model: str | None = None,
         "reference": reference.value, "follow_up": follow_up,
     }
 
-    named = [n for n in understanding.locations
-             if not place_index.is_relative(n) and not place_index.is_probably_not_a_place(n)]
-    relative = [n for n in understanding.locations if place_index.is_relative(n)]
+    named = [n for n in understanding.locations if not place_index.is_relative(n)]
+    # v4 does not tag a relative span at all, so the sentence is the fallback - without it
+    # "soil moisture in my field" is answered with "which place should I check?"
+    relative = ([n for n in understanding.locations if place_index.is_relative(n)]
+                or place_index.relative_in(cleaned.normalized))
 
     # 3. fold this turn into the conversation: SET / REPLACE / MODIFY / INHERIT / COMPARE
     state, operation = context.apply(
@@ -238,9 +246,21 @@ async def turn(text: str, *, chat_id: str, model: str | None = None,
     # carries the finished text anyway, so a client that missed a piece is still correct.
     yield {"type": "status", "stage": "writing"}
     began = time.perf_counter()
-    retrieved = generation.build(answer.as_context()).render()
+    # not `context` - that name is the NLU module this endpoint already imports
+    sections = generation.build(answer.as_context())
+    retrieved = sections.render()
+    # What came before, so a follow-up is answered as one. Without it every turn arrived cold:
+    # "and tomorrow?" read as a complete question about nothing, and the reply re-introduced
+    # the place and the period from scratch to someone who had just named them.
+    history = store.recent_exchanges(db, chat_id, HISTORY_TURNS)
+    # An advice turn is the one place the wording must not think for itself - the verdict was
+    # reached by rules that read the whole forecast. Everywhere else it may say what the
+    # figures mean, which is the difference between an answer and a label printer.
+    deciding = answer.advice is not None
     said = ""
-    async for kind, piece in generation.stream(answer.summary, text, context=retrieved):
+    async for kind, piece in generation.stream(answer.summary, text, context=retrieved,
+                                               deciding=deciding, history=history,
+                                               headings=sections.headings()):
         if kind == "answer":
             said += piece
         yield {"type": "thinking" if kind == "thinking" else "delta", "text": piece}

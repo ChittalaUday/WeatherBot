@@ -623,13 +623,6 @@ export function Messages({
                       </ul>
                     )}
                     <SourceNote plan={result.plan} quality={result.quality} />
-                    {result.presentation && (
-                      <p className="mt-2 text-[10px] text-muted-foreground">
-                        model chose: {result.presentation.detail.toLowerCase()} detail ·{" "}
-                        {result.presentation.chart.toLowerCase().replace("_", " ")} ·{" "}
-                        {result.presentation.insights.join(", ").toLowerCase() || "no insights"}
-                      </p>
-                    )}
                     {result.uncertain && (
                       <p className="mt-2 text-[11px] text-amber-600 dark:text-amber-500">
                         Not fully sure I read that right ({Math.round(result.confidence * 100)}%) -

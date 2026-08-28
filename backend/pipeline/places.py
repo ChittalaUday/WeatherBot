@@ -7,8 +7,10 @@ into a place is this module's job, in three steps that fail independently:
     raw span  ->  alias table  ->  Solr lookup  ->  candidates
     "KKD"         "Kakinada"      village/district match     [Kakinada, Andhra Pradesh]
 
-Aliases live in data/location_aliases.json, not in code and never in the model: teaching the
-system that BZA means Vijayawada is a one-line edit to a data file, not a retraining run.
+Every name-based lookup lives in data/location_aliases.json, not in code and never in the
+model - aliases, state spellings, the states that are already canonical, and the relative
+phrases only the browser can resolve. Teaching the system that BZA means Vijayawada, or that
+"my plot" is a relative place, is a one-line edit to a data file, not a retraining run.
 
 A resolved place carries both halves, so the answer can show what was asked and what was used:
 
@@ -28,92 +30,52 @@ from backend.config import DATA_DIR
 
 ALIAS_FILE = DATA_DIR / "location_aliases.json"
 
-# Ordinary English the tagger sometimes hands over as a place. Solr is fuzzy enough to match
-# most of them to *some* village, which is how a question about Pithoragarh once came back
-# with a forecast for "skies".
-NOT_PLACES = {
-    "expect", "i expect", "skies", "plan", "might be", "outdoor plan", "trip", "weather",
-    "forecast", "clouds", "rain", "sun", "wind", "temperature", "humidity", "today",
-    "tomorrow", "week", "weekend", "morning", "evening", "night", "chance", "idea",
-    "question", "time", "bit", "thing", "way", "one", "some", "any", "please", "thanks",
-    # span quantifiers: "rainfall for whole day" resolved "whole" against the location index
-    "whole", "entire", "full", "complete", "all", "rest", "remainder", "day", "hour",
-    "whole day", "entire day", "full day", "all day", "whole week", "entire week",
-    "full week", "rest of the day", "the day", "the week", "month", "year",
-}
-LEADING_JUNK = {"than", "or", "and", "the", "a", "an", "i", "we", "you", "should", "is", "of"}
-
-# Words that point at the previous turn rather than naming a place. Without this, "and
-# there?" gets fuzzy-matched to a village called Thera. backend/state.py owns the meaning;
-# here they only need to be kept away from Solr.
-REFERENCE_WORDS = {
-    "there", "that place", "same place", "that city", "that town", "same location",
-    "that village", "the same", "over there", "same spot", "that area", "then",
-    "same day", "that day", "same date", "that time", "it", "this",
-}
-
-# Relative locations (Rule 4.1) carry no coordinates - the browser has to supply them.
-RELATIVE_LOCATIONS = {
-    # "soil moisture in my field" reached the resolver as a place called "my field"; it is a
-    # relative location, so the browser supplies the coordinates (Rule 4.1).
-    "my field", "my farm", "my plot", "my village", "my land", "our field", "our farm",
-    "the field", "the farm", "my place", "my side", "my town", "my city",
-    "near me", "nearby", "near by", "here", "my location", "this area", "my area",
-    "feild", "my feild", "my vilage", "our village",
-    "this village",
-}
-
 LEVELS = ("village", "sub_district", "district", "state")
 
 
-def _load_aliases() -> tuple[dict, dict]:
+def _load_lookups() -> tuple[dict, dict, set, set]:
+    """Everything the resolver matches by name, out of ALIAS_FILE.
+
+    Four lookups, one file, loaded once:
+
+        aliases             "kkd" -> "Kakinada"
+        states              a spelling -> its canonical name ("ap", "telengana", "orissa")
+        self_named_states   already canonical, so they map to themselves ("telangana")
+        relative_locations  a place only the browser can resolve ("my field", "near me")
+
+    An unreadable file degrades rather than crashes - the resolver still answers on names the
+    index holds verbatim. It does mean a relative phrase would be sent to Solr as if it were a
+    place name, so the file being present is worth checking in a deployment, not assumed.
+    """
     try:
         data = json.loads(ALIAS_FILE.read_text())
-        return data.get("aliases", {}), data.get("states", {})
     except (OSError, ValueError):
-        return {}, {}
+        return {}, {}, set(), set()
+    lower = lambda names: {" ".join(str(n).lower().split()) for n in names or ()}
+    return (data.get("aliases", {}), data.get("states", {}),
+            lower(data.get("self_named_states")), lower(data.get("relative_locations")))
 
 
-ALIASES, STATE_ALIASES = _load_aliases()
-SELF_NAMED_STATES = {
-    "telangana", "karnataka", "kerala", "odisha", "maharashtra", "gujarat", "rajasthan",
-    "uttarakhand", "jharkhand", "bihar", "punjab", "haryana", "goa", "assam", "tripura",
-    "manipur", "meghalaya", "mizoram", "nagaland", "sikkim", "delhi", "ladakh", "puducherry",
-    "chandigarh", "andaman", "lakshadweep", "andhra pradesh", "tamil nadu", "west bengal",
-    "madhya pradesh", "himachal pradesh", "arunachal pradesh",
-}
+ALIASES, STATE_ALIASES, SELF_NAMED_STATES, RELATIVE_LOCATIONS = _load_lookups()
 
 
 def is_relative(name: str) -> bool:
     return " ".join(name.lower().split()).strip(" ,.?!") in RELATIVE_LOCATIONS
 
 
-MONTH_WORDS = {"january", "february", "march", "april", "may", "june", "july", "august",
-               "september", "october", "november", "december", "jan", "feb", "mar", "apr",
-               "jun", "jul", "aug", "sep", "sept", "oct", "nov", "dec"}
+def relative_in(text: str) -> list[str]:
+    """The relative phrase in a sentence, for a tagger that does not tag them (Rule 4.1).
 
-
-def looks_like_a_date(text: str) -> bool:
-    """True for '11 jan', '2026', '12/06/2021' - fragments a split date range leaves behind."""
-    cleaned = " ".join(text.lower().split()).strip(" ,.?!")
-    if not cleaned:
-        return False
-    if re.fullmatch(r"[\d/\-.:\s]+", cleaned):          # all digits and separators
-        return True
-    words = set(re.findall(r"[a-z]+", cleaned))
-    return bool(words) and words <= MONTH_WORDS
-
-
-def is_probably_not_a_place(name: str) -> bool:
-    """True for ordinary English that only looks like a place to a fuzzy index."""
-    cleaned = " ".join(name.lower().split()).strip(" ,.?!")
-    if cleaned in NOT_PLACES or cleaned in REFERENCE_WORDS or len(cleaned) < 3:
-        return True
-    # "11 jan" is what a mis-split date range leaves behind, and the index will happily
-    # fuzzy-match it to a village
-    if looks_like_a_date(cleaned):
-        return True
-    return cleaned.split()[0] in LEADING_JUNK
+    v4 tags only names from the location index, so "near me" and "my field" reach the resolver
+    as no location at all - and a turn with no location asks "which place should I check?",
+    which is the one question someone who said "near me" has already answered. Longest match
+    first, so "my village" is not read as "my".
+    """
+    low = " ".join((text or "").lower().split())
+    for phrase in sorted(RELATIVE_LOCATIONS, key=len, reverse=True):
+        if re.search(rf"\b{re.escape(phrase)}\b", low):
+            return [phrase]
+    return []
 
 
 def normalize(text: str) -> str:
@@ -239,7 +201,7 @@ async def resolve(solr, raw: str) -> dict | None:
     Returns the best candidate with every other candidate under "matches", so an ambiguous
     name can be handed back to the user instead of guessed at.
     """
-    if not raw or is_probably_not_a_place(raw):
+    if not raw or is_relative(raw):
         return None
     cleaned = normalize(raw)
     if not cleaned:
@@ -339,21 +301,29 @@ async def suggest(solr, raw: str, limit: int = 3) -> list[str]:
 
 def demo():
     """Self-check for the parts that need no network."""
+    # every lookup is data now, so an empty or half-written file is a failure and not a quiet
+    # degradation - four empty sets would pass every assertion below except this one
+    assert ALIASES and STATE_ALIASES and SELF_NAMED_STATES and RELATIVE_LOCATIONS, \
+        f"{ALIAS_FILE} did not load: {len(ALIASES)} aliases, {len(STATE_ALIASES)} states, " \
+        f"{len(SELF_NAMED_STATES)} self-named, {len(RELATIVE_LOCATIONS)} relative"
     assert normalize("KKD") == "Kakinada"
     assert normalize("bza") == "Vijayawada"
     assert normalize("Kakinada") == "Kakinada"          # unknown text passes through
     assert canonical_state("AP") == "Andhra Pradesh"
     assert canonical_state("andhrapradesh") == "Andhra Pradesh"
     assert canonical_state("Kakinada") is None
-    assert is_probably_not_a_place("I expect") and is_probably_not_a_place("skies")
-    assert is_probably_not_a_place("there") and is_probably_not_a_place("that place")
     # doubled letters are a spelling, not a different place - but a changed letter is
     assert _squeeze("Beeramguda")[:3] == _squeeze("beramguda")[:3]
     assert _squeeze("Kompally")[:3] == _squeeze("kompaly")[:3]
     assert _squeeze("Belamguda")[:3] != _squeeze("beramguda")[:3]
-    assert not is_probably_not_a_place("Kakinada")
     assert is_relative("my field") and not is_relative("Guntur")
-    print(f"locations demo OK: {len(ALIASES)} aliases, {len(STATE_ALIASES)} state aliases")
+    # v4 tags no span for these, so the sentence is where they have to be found
+    assert relative_in("soil moisture in my field") == ["my field"]
+    assert relative_in("will it rain near me") == ["near me"]
+    assert relative_in("will it rain in Guntur") == []
+    print(f"locations demo OK: {len(ALIASES)} aliases, {len(STATE_ALIASES)} state "
+          f"spellings, {len(SELF_NAMED_STATES)} self-named states, "
+          f"{len(RELATIVE_LOCATIONS)} relative places - all from {ALIAS_FILE.name}")
 
 
 if __name__ == "__main__":

@@ -84,7 +84,7 @@ def spans(rows):
 def check_split_quality(rows):
     """Properties of the generated splits: balance, noise, geography, clock variety.
 
-    These feed Model 1 through src/v2/dataset.py, so they still matter - but the CSVs are
+    These feed the dataset chain through src/v2/dataset.py, so they still matter - but the CSVs are
     build-time intermediates, not shipped data, so this only runs when they are on disk.
     """
     for a, b in combinations(rows, 2):
@@ -148,11 +148,11 @@ def main():
             check_generated(name, rows[name])
     else:
         rows = {}
-        print("SKIP: generated splits absent - build-time intermediates on the way to "
-              "data/v3_dataset.csv, not shipped. Rebuild the chain with:\n"
+        print("SKIP: generated splits absent - build-time intermediates, not shipped. "
+              "Rebuild the chain with:\n"
               "      python src/build_dataset.py --split train && "
               "python src/build_dataset.py --split test\n"
-              "      python -m src.v2.dataset --build && python -m src.v3.dataset --build")
+              "      python -m src.v2.dataset --build && python -m src.v4.dataset --build")
 
     rows["eval"] = load_seed(EVAL_MANUAL)
     check_manual(rows["eval"])

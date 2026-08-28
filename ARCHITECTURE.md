@@ -100,22 +100,27 @@ reported rather than left spinning.
 
 ## 3. The models
 
-Three, answering the same contract. The client picks per turn, so they can be compared on one
-sentence without a redeploy.
+Two, answering the same contract, so they can be compared on one sentence.
 
-| | Model 1 (`v3`) | **Model 2 (`v4`) — default** | Model 3 (`llm`) |
-| :--- | :--- | :--- | :--- |
-| Where | `models/nlu_v3.joblib`, 20.5 MB | `models/nlu_v4.joblib`, 46.6 MB | hosted, via `API_KEY` |
-| Intents | 6 coarse | 16, incl. chat / control / declined | 16, from the prompt |
-| Variables | 13, multi-label | 10, multi-label | 10 |
-| Activities | — | 12, for the advice engine | 12 |
-| Presentation | predicts `detail`, `chart`, `insights` | derived, not predicted | derived |
-| Latency | single-digit ms | single-digit ms | a network round trip |
-| Code | `src/v3/` | `src/v4/` | `backend/nlu/llm.py` |
+| | **Model 2 (`v4`) — served** | Model 3 (`llm`) |
+| :--- | :--- | :--- |
+| Where | `models/nlu_v4.joblib`, 46.6 MB | hosted, via `API_KEY` |
+| Intents | 16, incl. chat / control / declined | 16, from the prompt |
+| Variables | 10, multi-label | 10 |
+| Activities | 12, for the advice engine | 12 |
+| Presentation | derived, not predicted | derived |
+| Latency | single-digit ms | a network round trip |
+| Code | `src/v4/` | `backend/nlu/llm.py` |
+| Reachable from | every endpoint | `POST /api/compare` only |
 
-`Understanding` (`backend/nlu/registry.py`) is the common denominator. The v4-only fields
-default to empty rather than being absent, so a v3 turn flows through code that reads them,
-and the pipeline genuinely cannot tell which model answered.
+`Understanding` (`backend/nlu/registry.py`) is the common denominator, so the pipeline genuinely
+cannot tell which model answered.
+
+Model 1 (`v3`) is **retired**: 6 coarse intents, 13 variables, and three heads that predicted
+`detail`, `chart` and `insights`. All three are now derived - answer width off the words, the
+chart off the wording, every applicable insight with a cap. `src/v3/`, `models/nlu_v3.joblib`,
+`models/metrics_v3.json` and `tests/test_model.py` are gone; the registry is still a registry so
+that a v5 is a `MODELS` entry and a loader branch, not a rewrite of every caller.
 
 Model 3 loads no bundle and is not in the registry - it is a client that coerces whatever the
 hosted model emits onto the same enums. A label it invents is dropped; a location span that is
@@ -186,9 +191,8 @@ that can be replaced by four lines of arithmetic is a head that can be wrong.
 | `src/v4/schema.py` | the v4 taxonomy: intents, variables, activities, resolutions, fields |
 | `src/v4/dataset.py` | builds `data/v4_dataset.csv` |
 | `src/v4/entities.py` | the entity gazetteer — crop, material, vehicle, garment |
-| `src/v3/*` | Model 1: schema, dataset builder, model |
-| `src/v2/schema.py` | Model 1's slot enums | 
-| `src/v2/dataset.py` | conversation generator, upstream of the v3 dataset |
+| `src/v2/schema.py` | legacy slot enums, still read by the dataset chain |
+| `src/v2/dataset.py` | conversation generator, upstream of the datasets |
 | `src/nlu.py` | `build_vectorizer()`, `clean_text()` — the shared encoder |
 | `src/tagger.py` | `SpanTagger` (BIO), `normalize_time()` |
 | `src/normalize.py` | pre-model text normalizer |
@@ -202,9 +206,9 @@ that can be replaced by four lines of arithmetic is a head that can be wrong.
 | `v4_dataset.csv` (root) | **yes** | 41 hand-written advice seeds. **Unrecoverable if lost.** |
 | `data/eval_v4.csv` | yes | hand-written v4 evaluation set, 183 rows |
 | `data/eval_v4_hard.csv` | yes | 63 hard cases: ambiguity, implicit advice, code-mixing |
-| `data/v3_dataset.csv` | yes | Model 1's training data, 13,533 rows |
-| `data/eval_manual.csv` | yes | Model 1's hand-written eval, 235 rows (219 en + 16 mixed) |
-| `data/intents.csv` | yes | hand-written seed, head of the v3 generation chain |
+| `data/v3_dataset.csv` | yes | the retired model's training data — kept as the only shipped multi-turn fixture, replayed by `test_conversations.py` |
+| `data/eval_manual.csv` | yes | hand-written eval, 235 rows (219 en + 16 mixed) |
+| `data/intents.csv` | yes | hand-written seed, head of the generation chain |
 | `data/locations.csv` | yes | 1,166 real place names, 86% inside India |
 | `data/location_aliases.json` | yes | nicknames and spellings Solr will not match |
 | `data/conversations.db` | no | runtime chat log; export labels, do not commit |
@@ -234,7 +238,6 @@ run in under a second and need no network.
 
 | File | Checks |
 | :--- | :--- |
-| `tests/test_model.py` | Model 1: smoke, presentation, spans verbatim, canonical time, accuracy floors |
 | `tests/test_conversations.py` | 150 multi-turn conversations replayed through the real context engine |
 | `tests/test_dataset.py` | eval-set coverage, location vocabulary |
 | `tests/eval_v4.py` | Model 2 against the hand-written eval set |
@@ -263,9 +266,9 @@ models/nlu_v4.joblib + models/metrics_v4.json
 `src/v4/dataset.py::build()` refuses to overwrite the root `v4_dataset.csv` - the two files
 have the same name and one of them cannot be regenerated.
 
-Model 1's chain is four steps from `data/intents.csv` through `src/build_dataset.py`,
-`src/v2/dataset.py` and `src/v3/dataset.py`; only the final `data/v3_dataset.csv` is kept,
-because the intermediates are byte-identical on every rebuild (fixed seeds).
+The legacy chain ran from `data/intents.csv` through `src/build_dataset.py` and
+`src/v2/dataset.py`; its output `data/v3_dataset.csv` is kept because it is the only shipped
+file with multi-turn conversations and gold context slots in it.
 
 **To fold real usage back in**: `python -m backend.store --export data/from_users.csv`. Human
 labels outrank the model's (Rule 8.5).
@@ -274,7 +277,7 @@ labels outrank the model's (Rule 8.5).
 
 ## 6. Measured performance
 
-From `models/metrics_v4.json` and `models/metrics_v3.json`, written at export time.
+From `models/metrics_v4.json`, written at export time.
 
 **Model 2 (v4)** — 18,518 training rows.
 
@@ -285,19 +288,12 @@ From `models/metrics_v4.json` and `models/metrics_v3.json`, written at export ti
 | implicit advice | 533 | 1.00 | .993 | .996 | 1.00 | 1.00 | .989 | .931 | **.917** |
 | confusion pairs | 238 | 1.00 | .996 | .996 | 1.00 | 1.00 | .983 | .954 | **.937** |
 
-**Model 1 (v3)** — 13,533 training rows.
-
-| Split | rows | intent | vars | detail | chart | locs | times | **everything** |
-| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| test (generated) | 2,157 | .964 | .961 | .999 | .981 | .957 | .956 | **.839** |
-| eval (hand-written English) | 219 | .959 | .922 | 1.00 | .840 | .945 | .959 | **.680** |
-
 `everything` — every target right on the same turn — is the honest number. Multi-turn context
-replayed through the real engine (`test_conversations.py`, 150 conversations / 437 turns):
-operation 100%, locations 100%, times 100%, variables 99.8%.
+replayed through the real engine (`test_conversations.py`, 150 conversations / 437 turns, Model
+2): operation 99.8%, locations 89.5%, times 99.8%.
 
-`times` is the weakest head on both models and is where the next round of training data should
-go. `variables` at .928 on v4 is second.
+`times` is the weakest head and is where the next round of training data should go.
+`variables` at .928 is second.
 
 ---
 
@@ -403,25 +399,23 @@ python -m backend.pipeline.render          # tables and the deterministic summar
 python -m backend.pipeline.analysis        # reductions, charts, observations
 python -m backend.generation.context       # what the model is allowed to know
 python -m backend.generation.prompts       # every prompt shape
-python -m backend.nlu.registry             # both bundles answer
+python -m backend.nlu.registry             # the bundle answers
 python -m backend.nlu.context              # the four-turn conversation
 python -m backend.api.chat                 # one turn, end to end
 python -m backend.api.compare              # every model on one sentence
 
 # the suites
-python tests/test_model.py                       # Model 1 floors and invariants
 python tests/test_conversations.py               # multi-turn context, 150 conversations
 python tests/test_dataset.py                     # data coverage
 python tests/eval_v4.py                          # Model 2 against the hand-written eval
 
 # retrain
 python -m src.v4.model --export            # Model 2, from data/v4_dataset.csv
-python -m src.v3.model --export            # Model 1, from data/v3_dataset.csv
 
 # ask one question without the server
 python -m src.v4.model "rain and temperature in Guntur tomorrow"
 ```
 
-`/api/health` reports which bundles are present and what is configured (no secret values).
+`/api/health` reports whether the bundle is present and what is configured (no secret values).
 `/api/models` serves each model's own exported metrics. `/api/labels?model=v4` serves the label
 sets the correction form offers - per model, because they no longer agree.

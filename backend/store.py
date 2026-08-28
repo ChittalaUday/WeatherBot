@@ -381,6 +381,29 @@ def conversation(connection, chat_id: str) -> list[dict]:
     return turns
 
 
+def recent_exchanges(connection, chat_id: str, limit: int = 3) -> list[tuple]:
+    """The last few (question, answer) pairs of one chat, oldest first.
+
+    What the generation layer is handed so a follow-up is answered as one. Only turns that
+    actually answered: a "which place did you mean?" in the history reads to a small model as
+    a question it still owes a reply to, and it answers that instead of the one in front of it.
+
+    The model tag `record_turn` prefixes onto the text ("[v4] will it rain") is stripped - it
+    is for the training log, and in a prompt it is one more thing to copy.
+    """
+    rows = connection.execute(
+        "SELECT text, detail FROM turns WHERE chat_id = ? AND outcome IN "
+        "('answered', 'uncertain') AND detail != '' ORDER BY id DESC LIMIT ?",
+        (chat_id, limit)).fetchall()
+    out = []
+    for row in reversed(list(rows)):
+        asked = row["text"] or ""
+        if asked.startswith("[") and "]" in asked:
+            asked = asked[asked.index("]") + 1:].strip()
+        out.append((asked, row["detail"]))
+    return out
+
+
 def stats(connection) -> dict:
     row = connection.execute(
         """SELECT COUNT(*) turns, COUNT(DISTINCT session) sessions,

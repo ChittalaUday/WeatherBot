@@ -3,10 +3,10 @@ The same sentence through every model, streamed as each one finishes.
 
     python -m backend.api.compare "should i spray in Guntur tomorrow"
 
-Two trained models answer in milliseconds offline; the hosted one is a network round trip to a
+The trained model answers in milliseconds offline; the hosted one is a network round trip to a
 model with no training on this label set at all, working purely from the schema in its prompt.
 Putting them side by side on the same sentence is the only honest way to know what the trained
-models are worth - and where a general model is simply better, which is worth knowing too.
+model is worth - and where a general model is simply better, which is worth knowing too.
 
 Each column carries the *same* payload a chat turn produces, built by the same
 `Answer.payload`, so a compared answer and a chatted answer are the same object and the UI
@@ -56,7 +56,7 @@ def _from_hosted(column: dict, text: str) -> Understanding | None:
 
 
 def contenders() -> list[dict]:
-    """Every model this deployment can compare, trained ones first."""
+    """Every model this deployment can compare, the trained one first."""
     entries = [{"version": v, "name": spec["name"], "kind": "local", "provider": ""}
                for v, spec in MODELS.items()]
     entries.append({"version": "llm", "name": hosted.NAME, "kind": "hosted",
@@ -86,8 +86,8 @@ async def _column(version: str, text: str) -> dict:
         return {"version": version, "ok": False, "latency_ms": nlu_ms, "error": "Null understanding"}
 
     slots = {
-        # v3 has no weather_intent head; deriving it from the window is what makes the column
-        # comparable at all rather than blank
+        # the hosted column has no weather_intent property; deriving it from the window is
+        # what makes the column comparable at all rather than blank
         "weather_intent": (getattr(understanding, "weather_intent", "")
                            or weather_intent_for(
                                (understanding.times_normalized or [None])[0]).value),

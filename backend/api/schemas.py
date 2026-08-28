@@ -71,16 +71,6 @@ class ModelListResponse(BaseModel):
     metrics: Dict[str, Any]
 
 
-class V3LabelsResponse(BaseModel):
-    model: Literal["v3"] = "v3"
-    name: str
-    intents: List[str]
-    variables: List[str]
-    detail: List[str]
-    chart: List[str]
-    insights: List[str]
-
-
 class V4LabelsResponse(BaseModel):
     model: Literal["v4"] = "v4"
     name: str

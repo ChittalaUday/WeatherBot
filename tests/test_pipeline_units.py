@@ -65,29 +65,37 @@ def check_timewindow():
 def check_places():
     """Self-check for the parts that need no network."""
     from backend.pipeline.places import (
+        ALIAS_FILE,
         ALIASES,
+        RELATIVE_LOCATIONS,
+        SELF_NAMED_STATES,
         STATE_ALIASES,
         _squeeze,
         canonical_state,
-        is_probably_not_a_place,
         is_relative,
         normalize,
+        relative_in,
     )
+    # every lookup is data now: four empty sets would pass every assertion but this one
+    assert ALIASES and STATE_ALIASES and SELF_NAMED_STATES and RELATIVE_LOCATIONS, \
+        f"{ALIAS_FILE} did not load"
     assert normalize("KKD") == "Kakinada"
     assert normalize("bza") == "Vijayawada"
     assert normalize("Kakinada") == "Kakinada"          # unknown text passes through
     assert canonical_state("AP") == "Andhra Pradesh"
     assert canonical_state("andhrapradesh") == "Andhra Pradesh"
     assert canonical_state("Kakinada") is None
-    assert is_probably_not_a_place("I expect") and is_probably_not_a_place("skies")
-    assert is_probably_not_a_place("there") and is_probably_not_a_place("that place")
     # doubled letters are a spelling, not a different place - but a changed letter is
     assert _squeeze("Beeramguda")[:3] == _squeeze("beramguda")[:3]
     assert _squeeze("Kompally")[:3] == _squeeze("kompaly")[:3]
     assert _squeeze("Belamguda")[:3] != _squeeze("beramguda")[:3]
-    assert not is_probably_not_a_place("Kakinada")
     assert is_relative("my field") and not is_relative("Guntur")
-    print(f"locations demo OK: {len(ALIASES)} aliases, {len(STATE_ALIASES)} state aliases")
+    # v4 tags no span for a relative place, so the sentence is where it has to be found
+    assert relative_in("soil moisture in my field") == ["my field"]
+    assert relative_in("will it rain near me") == ["near me"]
+    assert relative_in("will it rain in Guntur") == []
+    print(f"locations demo OK: {len(ALIASES)} aliases, {len(STATE_ALIASES)} state spellings, "
+          f"{len(SELF_NAMED_STATES)} self-named states, {len(RELATIVE_LOCATIONS)} relative")
 
 def check_plan():
     """Self-check: routing, windows and the budget, on a fixed 'now'."""
@@ -320,15 +328,10 @@ def check_analysis():
     assert two[0].kind == "COMPARISON", two
     assert two[0].text.startswith("Guntur leads Vizag"), two[0]
 
-    # v3's selection narrows it
-    only_range = build_insights([rows], [{"name": "Guntur"}], ["Rainfall"], "RAW", False,
-                                wanted=["RANGE"])
-    assert {n.kind for n in only_range} == {"RANGE"}, only_range
-
     # a decision does not come with a graph unless the question asked for one
     assert not wants_chart("should i take raincoat?")
     assert wants_chart("show me a graph of rain this week")
-    assert wants_chart("rain today", kind="LINE") and not wants_chart("rain today", kind="NONE")
+    assert not wants_chart("rain today")
 
     chart = build_chart([rows], [{"name": "Guntur"}], "Rainfall", hourly=False)
     assert chart is not None and chart["type"] == "line" and len(chart["series"][0]["points"]) == 5, chart
@@ -559,12 +562,125 @@ def check_render():
     print("render demo OK")
     print(f"  {said}")
 
+def check_routing():
+    """The route, the profile and the parameters - and the two bugs they surfaced.
+
+    Both bugs were the same shape: an expression the code did not recognise fell through to a
+    default that looked like an answer. Neither failed loudly, and both answered a question
+    about a month with a week of data.
+    """
+    from datetime import datetime
+    from types import SimpleNamespace
+
+    from backend.pipeline import params, profiles
+    from backend.pipeline.timewindow import resolve, select_rows
+
+    now = datetime(2026, 8, 26, 13, 0)
+
+    # --- bug 1: a bare month had no branch in `resolve` and became the forward horizon.
+    # "rainfall last june" was answered with next week, silently, labelled "last june".
+    for text in ("last june", "in june", "june"):
+        window = resolve(text, now)
+        assert window.start.date() < now.date(), f"{text!r} is the past: {window.start}"
+        assert window.start.month == 6 and window.span_days >= 28, (text, window)
+    # asked before June, "last june" is the year before
+    early = resolve("last june", datetime(2026, 3, 4, 9, 0))
+    assert early.start.year == 2025, early
+    # asked during June, it is June so far - the rest has not happened
+    during = resolve("june", datetime(2026, 6, 15, 9, 0))
+    assert during.end.date() == datetime(2026, 6, 15).date(), during
+    # "may" is a month and the commonest modal in a weather question. Bare, it is the modal.
+    assert resolve("may", now).start.date() >= now.date(), "bare 'may' is not the month"
+    assert resolve("last may", now).start.month == 5, "'last may' is"
+
+    # --- bug 2: `select_rows` fell back to rows[:7] for any expression its ladder did not
+    # know. The archive returned all thirty days of June and twenty-three were dropped.
+    june = [{"Date_time": f"2026-06-{day:02d}T00:00:00", "Rainfall": 1.0}
+            for day in range(1, 31)]
+    picked, _ = select_rows(june, "last june", now)
+    assert len(picked) == 30, f"a month is thirty rows, not {len(picked)}"
+    # ...and a row outside the window is still excluded
+    picked, _ = select_rows(june + [{"Date_time": "2026-07-04T00:00:00"}], "last june", now)
+    assert len(picked) == 30, "july is not june"
+
+    # --- the routes, from slots alone
+    said = lambda **kw: SimpleNamespace(**{"activity": "NONE", "action": "GET",
+                                           "variables": ["RAIN"], "aggregation": "RAW",
+                                           "times_normalized": [], "text": "",
+                                           "fields": lambda: ["Rainfall"], **kw})
+    win = lambda c: resolve(c, now)
+    for slots, canonical, wanted in (
+            (said(activity="SPRAY"), "tomorrow", "ACTIVITY"),
+            (said(action="COMPARE"), "tomorrow", "COMPARE"),
+            (said(), "last june", "HISTORICAL"),
+            (said(), "tomorrow", "FORECAST")):
+        got = profiles.pick(slots, win(canonical), now).route
+        assert got == wanted, f"{canonical!r}: routed {got}, wanted {wanted}"
+
+    # --- the parameters: a long look back is reduced, and an advice turn fetches what its
+    # rule reads even though nobody said the word
+    here = [{"name": "Guntur", "lat": 16.3, "lon": 80.4, "type": "village"}]
+    profile = profiles.pick(said(times_normalized=["last june"]), win("last june"), now)
+    reduced = params.resolve(said(times_normalized=["last june"]), profile, here, now=now)
+    assert reduced.aggregation == "SUM", "a month of rain is a total, not thirty rows"
+    assert reduced.assumed, "a reduction nobody asked for has to be admitted"
+
+    sprayed = params.resolve(said(activity="SPRAY", times_normalized=["tomorrow"]),
+                             profiles.pick(said(activity="SPRAY"), win("tomorrow"), now),
+                             here, now=now)
+    assert "Wind_Speed" in sprayed.fields, "a spraying rule cannot answer without wind"
+    for key in ("window", "aggregation", "fields", "places", "source"):
+        assert sprayed.why.get(key), f"no reason recorded for {key}"
+    # --- bug 3: the "today onwards" prefilter exempted the past with a two-name list,
+    # {"yesterday", "last week"}. Every other way of naming the past fell through it, so the
+    # archive's twenty-one rows for "last 7 days" left as one - the row dated today.
+    from datetime import timedelta
+    days = [{"Date_time": (now - timedelta(days=d)).strftime("%Y-%m-%dT00:00:00"),
+             "Rainfall": 1.0} for d in range(10, -4, -1)]
+    for canonical, wanted in (("last 7 days", 7), ("last 2 days", 2), ("yesterday", 1)):
+        picked, _ = select_rows(days, canonical, now)
+        assert len(picked) == wanted, f"{canonical}: {len(picked)} rows, wanted {wanted}"
+    # ...and a forward question still drops the days the feed sent from before today
+    picked, _ = select_rows(days, "tomorrow", now)
+    assert len(picked) == 1 and picked[0]["Date_time"].startswith(
+        (now + timedelta(days=1)).strftime("%Y-%m-%d")), picked
+
+    # --- the time gate: rules place what they can, and nothing else is believed
+    from backend.nlu.times import known, mentions_time
+    assert known("tomorrow") and known("last 7 days") and known("17:30")
+    assert not known("prior days") and not known("last summer") and not known("")
+    assert not known("next few days please"), "a sentence is not a canonical form"
+    # the trigger for spending a model call at all
+    assert mentions_time("can i know yesterday rainfall")
+    assert not mentions_time("will it rain in guntur"), "no time words, no call"
+    # --- what wins over what, when a profile default meets a spoken word. These lived in a
+    # demo() inside params.py, which meant the same rules were asserted in two files.
+    prof = lambda **kw: profiles.Profile(kw.pop("route", "ACTIVITY"), **kw)
+    spoken = params.resolve(said(times_normalized=["tomorrow"]),
+                            prof(window="next 2 days"), here, now=now)
+    assert spoken.window == "tomorrow", "what they said beats the profile"
+    assert not spoken.assumed, "what they said is not an assumption"
+    quiet = params.resolve(said(), prof(window="next 2 days"), here, now=now)
+    assert quiet.window == "next 2 days" and quiet.assumed, "an assumption is admitted"
+
+    loud = params.resolve(said(text="total rainfall last week", aggregation="SUM",
+                               times_normalized=["last week"]),
+                          prof(route="HISTORICAL", aggregation="AVG"), here, now=now)
+    assert loud.aggregation == "SUM", "a spoken reduction beats the profile's default"
+    # a caller's pin beats both, so three compared columns reduce the same way
+    pinned = params.resolve(said(text="total rainfall", aggregation="SUM"),
+                            prof(route="COMPARE"), here, now=now, aggregation="RAW")
+    assert pinned.aggregation == "RAW", "the caller's pin wins"
+    assert sprayed.fields[0] == "Rainfall", "what was asked for still leads the fetch"
+
+    print("routing OK - bare months, whole windows, past rows kept, four routes, time gate")
+
 def main():
     """Every check in this file, in order. Any assertion failure stops it."""
-    for check in (check_timewindow, check_places, check_plan, check_windows, check_analysis, check_quality, check_advice, check_render,):
+    for check in (check_timewindow, check_places, check_plan, check_windows, check_analysis, check_quality, check_advice, check_render, check_routing,):
         print(f"{check.__name__}:")
         check()
-    print("\n8 check(s) passed")
+    print("\n9 check(s) passed")
 
 
 if __name__ == "__main__":

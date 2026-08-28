@@ -292,8 +292,7 @@ One rules table keyed by the 12 activities, plus derived metrics (`rain_window`,
 
 ### Step 4 — v4 model · `src/v4/model.py`
 
-Four heads + tagger on the shared TF-IDF encoder (same shape as
-[src/v3/model.py](src/v3/model.py)).
+Four heads + tagger on the shared TF-IDF encoder (the same shape as the retired v3 model).
 
 - Force `activity=NONE` unless intent is `ADVICE`; force empty variables for `NO_DATA_NEEDED`
 - `evaluate()` reports **per component**, including the derived ones end-to-end

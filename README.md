@@ -52,9 +52,8 @@ backend/
   generation/    retrieval, prompts, the local model that words it
   store.py       SQLite turn log, feedback, the retraining export
 src/
-  v4/            Model 2 - the default: 16 intents, 10 variables, 12 activities
-  v3/            Model 1 - 6 intents, and it predicts its own presentation
-  v2/            Model 1's slot enums and conversation generator
+  v4/            Model 2 - the served model: 16 intents, 10 variables, 12 activities
+  v2/            legacy slot enums and the conversation generator, upstream of the datasets
   nlu.py tagger.py normalize.py schema.py build_dataset.py
 frontend/        Next.js chat UI
 data/            seeds, evaluation sets, the place vocabulary
@@ -101,28 +100,33 @@ preceded by `status`, `nlu`, and any number of `thinking` / `delta` pieces.
 
 ---
 
-## The three models
+## The two models
 
-| | Model 1 (`v3`) | **Model 2 (`v4`) — default** | Model 3 (`llm`) |
-| :--- | :--- | :--- | :--- |
-| Intents | 6 coarse | 16, incl. chat / control / declined | 16, from the prompt |
-| Variables | 13 | 10 | 10 |
-| Activities | — | 12 | 12 |
-| Presentation | predicted | derived | derived |
-| Size / latency | 20.5 MB, ~5 ms | 46.6 MB, ~5 ms | hosted, ~1 s |
+| | **Model 2 (`v4`) — served** | Model 3 (`llm`) |
+| :--- | :--- | :--- |
+| Intents | 16, incl. chat / control / declined | 16, from the prompt |
+| Variables | 10 | 10 |
+| Activities | 12 | 12 |
+| Presentation | derived | derived |
+| Size / latency | 46.6 MB, ~5 ms | hosted, ~1 s |
 
-Model 2 is the default because it can tell a greeting from a question, decide an activity, and
-say which source answered. Model 1 stays selectable so the two can be compared on the same
-sentence — that is what compare mode is for, and what Model 3 is there to benchmark against.
+Model 2 answers every turn: it tells a greeting from a question, decides an activity, and says
+which source answered. Model 3 is a hosted general model with no training on this label set at
+all, working from the schema in its prompt — it exists to benchmark Model 2 on the same
+sentence, which is what compare mode is for.
 
-`everything` (every target right on the same turn): **v4 .762** on its hand-written eval,
-**v3 .680** on its own. Full tables in [ARCHITECTURE.md §6](ARCHITECTURE.md).
+Model 1 (`v3`) — 6 coarse intents, 13 variables, and three heads that predicted their own
+presentation — is retired. What it predicted is now derived; see
+[MODEL_RULES.md](MODEL_RULES.md) for the rules that outlived it.
+
+`everything` (every target right on the same turn): **v4 .762** on its hand-written eval. Full
+tables in [ARCHITECTURE.md §6](ARCHITECTURE.md).
 
 ---
 
 ## Three things it will not do
 
-**It will not ask which city you meant.** Both trained models commit to a reading and report
+**It will not ask which city you meant.** The trained model commits to a reading and reports
 what they assumed (MODEL_RULES Rule 1.1). "Angara" resolves to the ranked best match and the
 answer says which one it took. The only question it will ask back is one the query planner
 genuinely cannot serve — a forecast past the horizon, or an archive it cannot reach.

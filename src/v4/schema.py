@@ -31,6 +31,9 @@ from typing import Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
+from src.dates import MONTH_NAMES as MONTHS
+from src.dates import dates_in
+
 
 class Intent(str, Enum):
     """What kind of request this is - the shape of the answer, not its subject.
@@ -381,6 +384,55 @@ ENTITY_VOCAB = {
 }
 
 
+# --- venue -------------------------------------------------------------------
+# Indoors or outdoors, derived at read time exactly like `sub_activity` and `Action`. Not a
+# label and not a classifier target: it is a closed list of places plus two words, and a
+# lookup over a closed list cannot be 87% right about whether badminton is played indoors.
+#
+# It exists because indoor is not a threshold change, it is a different question. "Should I
+# play badminton at six" is not asking whether the court will be rained on - it is asking
+# about getting there. An activity rule run against an indoor activity answers confidently
+# about weather that never touches it.
+
+INDOOR_SPORTS = frozenset({
+    "badminton", "table tennis", "squash", "chess", "carrom", "billiards", "snooker",
+    "bowling", "gym", "yoga", "swimming pool", "basketball court", "boxing", "wrestling",
+})
+
+# The word in the sentence beats the list: "indoor cricket" is indoors and "outdoor
+# badminton" is not, and both are things people actually say. Checked before the list for
+# exactly that reason.
+VENUE_WORDS = {
+    "indoor": "indoor", "indoors": "indoor", "inside": "indoor", "covered": "indoor",
+    "under a roof": "indoor", "at home": "indoor",
+    "outdoor": "outdoor", "outdoors": "outdoor", "outside": "outdoor",
+    "open ground": "outdoor", "in the open": "outdoor", "terrace": "outdoor",
+    "ground": "outdoor", "field": "outdoor",
+}
+
+OUTDOOR, INDOOR = "outdoor", "indoor"
+
+
+def venue_for(activity, sub_activity: str = "", text: str = "") -> str:
+    """Where this is happening: "outdoor" or "indoor". Outdoor is the default and the safe one.
+
+    Safe because it is the answer that keeps checking the weather. Guessing indoor for
+    something held outside would drop the check entirely and answer "the weather won't reach
+    you" to someone standing in a field.
+
+    Only OUTDOOR_ACTIVITY can be indoors by its sub-activity - a journey, a crop and a line of
+    washing are outdoors by definition. Any activity can be moved indoors by the words though,
+    which is why the word test runs for all of them.
+    """
+    lowered = (text or "").lower()
+    for word in sorted(VENUE_WORDS, key=len, reverse=True):
+        if re.search(rf"\b{re.escape(word)}\b", lowered):
+            return VENUE_WORDS[word]
+    if Activity(activity) is Activity.OUTDOOR_ACTIVITY and sub_activity:
+        return INDOOR if sub_activity.lower() in INDOOR_SPORTS else OUTDOOR
+    return OUTDOOR
+
+
 def group_for(activity) -> Action:
     """Specific activity -> coarse action group."""
     return ACTIVITY_GROUP.get(Activity(activity), Action.NONE)
@@ -442,39 +494,25 @@ WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", 
 PAST_MARKERS = ("yesterday", "last ", "past ", " ago", "previous")
 
 
-MONTHS = ("january", "february", "march", "april", "may", "june", "july", "august",
-          "september", "october", "november", "december")
 # "15 august 2023", "august 2023", "2023-08-15", "15/08/2023" - anything naming a real date.
+#
+# A *detector*, not a parser: `bucket_for` only needs to know that a date was named, and it
+# matches things `src.dates` deliberately will not read as one ("august 2023" is a whole month,
+# a bare "2023" is a year). Reading the date itself is `first_date_in` below, which delegates.
 DATE_PATTERN = re.compile(
     rf"\b(\d{{4}}-\d{{2}}-\d{{2}}|\d{{1,2}}[/-]\d{{1,2}}[/-]\d{{4}}|"
     rf"(?:{'|'.join(MONTHS)})\b[^,]{{0,12}}\b\d{{4}}|\b\d{{4}}\b(?=\s|$))")
 YEAR_PATTERN = re.compile(r"\b(19|20)\d{2}\b")
 
 
-_MONTH_INDEX = {name: i for i, name in enumerate(MONTHS, start=1)}
-_MONTH_INDEX.update({name[:3]: i for i, name in enumerate(MONTHS, start=1)})
-_MONTH_INDEX["sept"] = 9
-_DATE_FORMS = (
-    (r"\b(?P<y>(?:19|20)\d{2})-(?P<m>\d{1,2})-(?P<d>\d{1,2})\b", None),
-    (r"\b(?P<d>\d{1,2})[/-](?P<m>\d{1,2})[/-](?P<y>(?:19|20)\d{2})\b", None),
-    (r"\b(?P<d>\d{1,2})\s+(?P<M>[a-z]+)\.?\s+(?P<y>(?:19|20)\d{2})\b", "M"),
-    (r"\b(?P<M>[a-z]+)\.?\s+(?P<d>\d{1,2}),?\s+(?P<y>(?:19|20)\d{2})\b", "M"),
-)
-
-
 def first_date_in(text: str):
-    """The earliest calendar date named, as a date. None when none is."""
-    found = []
-    for pattern, named in _DATE_FORMS:
-        for match in re.finditer(pattern, (text or "").lower()):
-            parts = match.groupdict()
-            month = _MONTH_INDEX.get(parts["M"].rstrip(".")) if named else int(parts["m"])
-            if not month:
-                continue
-            try:
-                found.append(date(int(parts["y"]), month, int(parts["d"])))
-            except ValueError:
-                continue
+    """The earliest calendar date named, as a date. None when none is.
+
+    `src.dates` does the reading. This module carried its own copy of the same four regexes and
+    the same month table down to the same `["sept"] = 9` line, which is two places for
+    "11/06/2026" to be read differently.
+    """
+    found = dates_in((text or "").lower())
     return min(found) if found else None
 
 

@@ -1,7 +1,7 @@
 """
 NLU - text in, an `Understanding` out, plus what the conversation remembers.
 
-    registry.Registry.understand(text, version)   a trained model (v3 / v4)
+    registry.Registry.understand(text, version)   the trained model (v4)
     llm.understand(text)                          the hosted model (Model 3), same contract
     context.apply(state, ...)                     how one turn changes the conversation
 

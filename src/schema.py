@@ -2,8 +2,8 @@
 Shared contracts: the conversation state, and the v1-era NLU output `src/nlu.py` still emits.
 
 `backend/nlu/context.py` reads `ConversationState`, `Operation` and `Reference`; nothing else
-in the serving path touches this file. The v4 taxonomy lives in `src/v4/schema.py` and the v3
-one in `src/v3/schema.py` - this is not the place for a new label.
+in the serving path touches this file. The served taxonomy lives in `src/v4/schema.py` - this
+is not the place for a new label.
 """
 
 from enum import Enum

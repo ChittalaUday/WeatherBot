@@ -10,7 +10,6 @@ What this deployment is: health, the models it serves, their label sets, place a
 from __future__ import annotations
 
 import json
-from typing import Union
 
 from fastapi import APIRouter
 
@@ -20,7 +19,6 @@ from backend.api.schemas import (
     HealthResponse,
     ModelListResponse,
     SuggestResponse,
-    V3LabelsResponse,
     V4LabelsResponse,
 )
 from backend.nlu import DEFAULT_VERSION, MODELS
@@ -47,8 +45,9 @@ def health():
 def list_models():
     """Every served model and its exported metrics.
 
-    Per model, read from that model's own file. Serving one model's metrics under whichever
-    model answered is how a deployment defaulting to v4 spent months reporting v3's numbers.
+    Per model, read from that model's own file - not one shared metrics blob, because a
+    deployment serving one model's numbers under whichever model answered is a lie that
+    survives for months without anyone noticing.
     """
     metrics = {}
     for version, spec in MODELS.items():
@@ -58,24 +57,11 @@ def list_models():
     return {"available": registry.available(), "default": DEFAULT_VERSION, "metrics": metrics}
 
 
-@router.get("/api/labels", response_model=Union[V3LabelsResponse, V4LabelsResponse])
+@router.get("/api/labels", response_model=V4LabelsResponse)
 def labels(model: str = DEFAULT_VERSION):
-    """The label sets the correction form offers, for the model that answered.
-
-    Per model, because they do not agree: v3 has 6 intents and 13 variables, v4 has 16 and 10.
-    Serving v3's list against a v4 turn offers labels that model cannot predict.
-    """
-    if model == "v3":
-        from src.v2.schema import Intent, Variable
-        from src.v3.schema import ChartKind, Detail, Insight
-
-        return V3LabelsResponse(model="v3", name=MODELS["v3"]["name"],
-                                intents=[i.value for i in Intent],
-                                variables=[v.value for v in Variable],
-                                detail=[d.value for d in Detail],
-                                chart=[c.value for c in ChartKind],
-                                insights=[i.value for i in Insight])
-
+    """The label sets the correction form offers. `model` is accepted and ignored - it is kept
+    so a client that pins a version keeps working, and so a second label set has a place to
+    go if a v5 head ever disagrees with this one."""
     from src.v4.schema import Activity, Aggregation, Intent, Variable, WeatherIntent
 
     return V4LabelsResponse(model="v4", name=MODELS["v4"]["name"],

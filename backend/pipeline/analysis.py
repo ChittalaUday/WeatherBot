@@ -64,15 +64,12 @@ class Note:
         return {"kind": self.kind, "text": self.text, "place": self.place}
 
 
-def wants_chart(text: str, kind: str = "") -> bool:
+def wants_chart(text: str) -> bool:
     """Did this question ask for a picture?
 
-    v3's presentation head read the question and picked a chart kind, so it wins outright. For
-    everything else the wording decides: a decision ("should I take a raincoat") and a single
-    reduced figure are answers in one line, and a temperature curve under them is decoration.
+    The wording decides: a decision ("should I take a raincoat") and a single reduced figure
+    are answers in one line, and a temperature curve under them is decoration.
     """
-    if kind and kind != "NONE":
-        return True
     return any(word in (text or "").lower() for word in CHART_WORDS)
 
 
@@ -165,28 +162,10 @@ def _trend(rows: list[dict], field: str) -> dict | None:
             "peak_at": peak_at, "low_at": low_at}
 
 
-def build_chart(selected: list[list[dict]], places: list[dict], field: str, hourly: bool,
-                kind: str | None = None, fields: list[str] | None = None) -> dict | None:
-    """Line for a series over time, grouped bars for a short comparison, nothing for one point.
-
-    `kind` is v3's decision and wins when given: the model read the question, whereas this
-    function only ever saw row counts. MULTI_LINE plots several variables for one place, which
-    the row-count heuristic could not express at all.
-    """
-    if kind == "NONE":
-        return None
+def build_chart(selected: list[list[dict]], places: list[dict], field: str,
+                hourly: bool) -> dict | None:
+    """Line for a series over time, grouped bars for a short comparison, nothing for one point."""
     granularity = "hourly" if hourly else "daily"
-
-    if kind == "MULTI_LINE" and fields and len(places) == 1 and selected:
-        multi = [{"name": label(f),
-                  "points": [{"t": r["Date_time"], "v": float(r[f])} for r in selected[0]
-                             if r.get(f) is not None]}
-                 for f in fields[:3]]
-        multi = [entry for entry in multi if len(entry["points"]) > 1]
-        if multi:
-            return {"type": "line", "field": field, "label": "Readings", "unit": unit(field),
-                    "granularity": granularity, "series": multi}
-
     series = []
     for place, rows in zip(places, selected):
         points = [{"t": r["Date_time"], "v": float(r[field])} for r in rows
@@ -196,26 +175,17 @@ def build_chart(selected: list[list[dict]], places: list[dict], field: str, hour
     if not series or all(len(s["points"]) < 2 for s in series):
         return None
 
-    if kind in {"GROUPED_BAR", "STAT"}:
-        shape = "bar"
-    elif kind in {"LINE", "MULTI_LINE"}:
-        shape = "line"
-    else:
-        shape = "bar" if len(series) > 1 and max(len(s["points"]) for s in series) <= 8 else "line"
+    shape = "bar" if len(series) > 1 and max(len(s["points"]) for s in series) <= 8 else "line"
     return {"type": shape, "field": field, "label": label(field), "unit": unit(field),
             "granularity": granularity, "series": series}
 
 
 def build_insights(selected: list[list[dict]], places: list[dict], fields: list[str],
-                   aggregation: str, hourly: bool,
-                   wanted: list[str] | None = None) -> list[Note]:
+                   aggregation: str, hourly: bool) -> list[Note]:
     """Two to four things worth saying that the table does not say by itself.
 
-    `wanted` is v3's insight selection. Without it every applicable observation is emitted,
-    which is the behaviour before the model chose for itself.
+    Every applicable observation is emitted; the cap below is what keeps it readable.
     """
-    allow = set(wanted) if wanted else None
-    keep = lambda kind: allow is None or kind in allow
     field = fields[0]
     name, units = label(field).lower(), unit(field)
     out: list[Note] = []
@@ -223,7 +193,7 @@ def build_insights(selected: list[list[dict]], places: list[dict], fields: list[
     # The comparison leads. Built last but placed first, because it is the answer to a
     # comparison question and the per-place notes below fill the cap on their own - with two
     # places their six notes pushed the one line that actually compared them off the end.
-    if len(places) > 1 and keep("COMPARISON"):
+    if len(places) > 1:
         scored, word = [], ""
         for place, rows in zip(places, selected):
             if (numbers := values(rows, field)):
@@ -243,7 +213,7 @@ def build_insights(selected: list[list[dict]], places: list[dict], fields: list[
         where = place["name"] if len(places) > 1 else ""
         prefix = f"{where}: " if where else ""
 
-        if len(numbers) > 1 and aggregation == "RAW" and keep("RANGE"):
+        if len(numbers) > 1 and aggregation == "RAW":
             # `summary_stat` under RAW is a mean, never a total - a week of rain summed and
             # called "rainfall" is a bigger number for the same weather the longer you ask about
             value, word = summary_stat(field, numbers, aggregation)
@@ -251,7 +221,7 @@ def build_insights(selected: list[list[dict]], places: list[dict], fields: list[
                             f"{prefix}{word} {name} {value:.1f}{units}, "
                             f"range {min(numbers):.1f}-{max(numbers):.1f}{units}", where))
 
-        if keep("THRESHOLD") and (threshold := NOTABLE.get(field)):
+        if (threshold := NOTABLE.get(field)):
             low = field in BELOW
             crossings = [v for v in numbers if (v <= threshold[0] if low else v >= threshold[0])]
             if crossings:
@@ -262,7 +232,7 @@ def build_insights(selected: list[list[dict]], places: list[dict], fields: list[
                                 f"({'lowest' if low else 'peak'} {worst:.1f}{threshold[2]})",
                                 where))
 
-        if keep("DRY_SPELL") and field == "Rainfall" and len(numbers) > 2:
+        if field == "Rainfall" and len(numbers) > 2:
             dry = sum(1 for v in numbers if v < 1.0)
             if dry:
                 out.append(Note("DRY_SPELL",

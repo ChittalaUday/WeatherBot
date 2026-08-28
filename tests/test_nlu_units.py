@@ -165,12 +165,75 @@ def check_hosted_parser_coercion():
     assert _coerce({}, text)["intent"] is Intent.INFORMATION       # empty reply still valid
     print("llm_nlu offline check OK - coercion, fences, invented labels, chat blanking")
 
+def check_derived():
+    """weather_intent and venue: derived from slots, so they cannot disagree with them.
+
+    Both are properties rather than fields, which is what this checks - there is no
+    construction site to forget, and no second head to drift.
+    """
+    from backend.nlu import Registry
+    from src.v4.schema import Activity, venue_for
+
+    # the word in the sentence beats the list of indoor sports, both ways round
+    cases = [
+        ((Activity.OUTDOOR_ACTIVITY, "badminton", "can i play badminton at six"), "indoor"),
+        ((Activity.OUTDOOR_ACTIVITY, "cricket", "can i play cricket tomorrow"), "outdoor"),
+        ((Activity.OUTDOOR_ACTIVITY, "cricket", "indoor cricket tomorrow"), "indoor"),
+        ((Activity.OUTDOOR_ACTIVITY, "badminton", "outdoor badminton court"), "outdoor"),
+        # not an OUTDOOR_ACTIVITY: a journey and a crop are outdoors by definition
+        ((Activity.TRAVEL, "car", "should i drive to guntur"), "outdoor"),
+        ((Activity.SPRAY, "", "should i spray tomorrow"), "outdoor"),
+        ((Activity.NONE, "", "will it rain tomorrow"), "outdoor"),
+    ]
+    for (activity, sub, text), want in cases:
+        got = venue_for(activity, sub, text)
+        assert got == want, f"{text!r}: got {got}, want {want}"
+
+    registry = Registry()
+    for text, wanted in (("will it rain in guntur tomorrow", "TOMORROW"),
+                         ("rainfall in guntur last june", "HISTORICAL"),
+                         ("weather in guntur right now", "CURRENT"),
+                         ("weather in guntur next week", "FORECAST"),
+                         ("hey there", "NONE")):
+        got = registry.understand(text).weather_intent
+        assert got == wanted, f"{text!r}: weather_intent {got}, wanted {wanted}"
+
+    # a turn that needs no weather has no window at all - weather_intent_for(None) says
+    # FORECAST, which is right for a question and wrong for a greeting
+    assert registry.understand("hey there").weather_intent == "NONE"
+    assert registry.understand("can i play badminton this evening").venue == "indoor"
+    # --- the time gate: a model may propose any string, and only forms the deterministic
+    # resolver recognises are believed. Asked to place "the last 7 days" a 1.7b answered
+    # "last 7 weeks" - a valid form and the wrong window - which is why the rules go first
+    # and the model is only asked what they could not place.
+    import asyncio
+
+    from backend.nlu import times
+
+    times._SEEN.clear()
+    replies = {"prior days": "last 7 days", "coming through tonight": "tonight",
+               "at half five": "17:30",
+               "the other day": "sometime recently",   # not a canonical form: must be refused
+               "rainfall": ""}                          # names no time: must be refused
+    kept = {span: form for span, form in replies.items() if times.known(form)}
+    assert kept == {"prior days": "last 7 days", "coming through tonight": "tonight",
+                    "at half five": "17:30"}, kept
+
+    # a refusal is remembered, so a phrase nobody can place is asked about once, not per turn
+    times._SEEN["the other day"] = ""
+    assert asyncio.run(times.canonicalize(["the other day"])) == {}, "a refusal is remembered"
+    times._SEEN.clear()
+    print("time gate OK - invented forms refused, refusals remembered")
+
+    print("derived slots OK - weather_intent from the time slot, venue from the words")
+
 def main():
     """Every check in this file, in order. Any assertion failure stops it."""
-    for check in (check_context, check_registry, check_hosted_parser_coercion,):
+    for check in (check_context, check_registry, check_hosted_parser_coercion,
+                  check_derived):
         print(f"{check.__name__}:")
         check()
-    print("\n3 check(s) passed")
+    print("\n4 check(s) passed")
 
 
 if __name__ == "__main__":

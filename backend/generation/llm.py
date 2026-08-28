@@ -21,7 +21,7 @@ import re
 
 import httpx
 
-from backend.config import OLLAMA_MODEL, OLLAMA_TIMEOUT, OLLAMA_URL
+from backend.config import OLLAMA_MODEL, OLLAMA_THINK, OLLAMA_TIMEOUT, OLLAMA_URL
 from backend.generation import prompts
 
 # One line per way a turn can fail, in the reader's terms. The model re-says these; if it is
@@ -78,7 +78,7 @@ REVERSALS = {
 HEDGES = ("but", "though", "however", "only", "watch", "keep an eye", "if ", "tight",
           "not enough", "might", "may ", "risk", "short", "careful", "unless")
 
-MAX_REPLY_CHARS = 700      # four sentences with figures in - the prompt asks for 2-4
+MAX_REPLY_CHARS = 900      # the prompt asks for length to follow the question, not a cap
 NUM_PREDICT = 700          # covers the reasoning AND the answer, hence the room
 # Not 0. At temperature 0 the likeliest continuation of "rewrite this sentence" is that
 # sentence, and a small model duly echoed the conclusion back verbatim - correct, and no
@@ -213,6 +213,8 @@ async def probe() -> dict:
     global _THINKS
     if _THINKS is None:
         _THINKS = "thinking" in capabilities.get(OLLAMA_MODEL, [])
+    if not OLLAMA_THINK:
+        _THINKS = False
     return {"ok": True, "model": OLLAMA_MODEL, "thinking": bool(_THINKS)}
 
 
@@ -221,25 +223,34 @@ async def probe() -> dict:
 # thinking", HTTP 400), and hard-coding think=True meant swapping the model in .env silently
 # turned the whole wording layer off - the 400 was caught, nothing was streamed, and the
 # rule-built sentence went out looking exactly like a working answer.
-_THINKS: bool | None = None
+# turned off outright, and turned off for good, when OLLAMA_THINK is not set.
+_THINKS: bool | None = None if OLLAMA_THINK else False
 
 
-def _body(summary: str, question: str, context: str, answering: bool, think: bool) -> dict:
+def _body(summary: str, question: str, context: str, answering: bool, think: bool,
+          deciding: bool = False, history: list | None = None, headings=()) -> dict:
+    """The request for one turn. `think` decides the reasoning block as well as the field:
+    telling a model with no reasoning mode what to reason about is tokens it cannot spend."""
     body = {"model": OLLAMA_MODEL, "stream": True,
             "options": {"temperature": TEMPERATURE, "num_predict": NUM_PREDICT},
             "messages": [
                 {"role": "system",
-                 "content": prompts.system(answering=answering, grounded=bool(context))},
+                 "content": prompts.system(answering=answering, grounded=bool(context),
+                                           deciding=deciding, thinking=think,
+                                           headings=headings)},
                 {"role": "user",
-                 "content": prompts.user(summary, question, context, answering=answering)}]}
-    if think:
-        # the reasoning is shown, not hidden, so the wait has something in it
-        body["think"] = True
+                 "content": prompts.user(summary, question, context, answering=answering,
+                                         history=history)}]}
+    # Always sent, never omitted. Omitted, a reasoning model reasons anyway - qwen3 spent the
+    # tokens, Ollama streamed them as thinking, and the "this model cannot think" fallback
+    # cost exactly as much as the path it was falling back from.
+    body["think"] = think
     return body
 
 
 async def stream(summary: str, question: str = "", client: httpx.AsyncClient | None = None,
-                 context: str = "", answering: bool = True):
+                 context: str = "", answering: bool = True, deciding: bool = False,
+                 history: list | None = None, headings=()):
     """Yield `(kind, text)` pieces as the local model writes them.
 
     `kind` is "thinking" for the model's reasoning and "answer" for the reply it settles on.
@@ -265,7 +276,8 @@ async def stream(summary: str, question: str = "", client: httpx.AsyncClient | N
             try:
                 async with client.stream(
                     "POST", f"{OLLAMA_URL}/api/chat", timeout=OLLAMA_TIMEOUT,
-                    json=_body(summary, question, context, answering, think),
+                    json=_body(summary, question, context, answering, think, deciding,
+                               history, headings),
                 ) as response:
                     response.raise_for_status()
                     _THINKS = think
@@ -302,22 +314,46 @@ async def stream(summary: str, question: str = "", client: httpx.AsyncClient | N
 
 
 async def say(summary: str, question: str = "", client: httpx.AsyncClient | None = None,
-              context: str = "", answering: bool = True) -> str:
+              context: str = "", answering: bool = True, deciding: bool = False,
+              history: list | None = None, headings=()) -> str:
     """`summary` in plain words, or `summary` itself if the local model cannot answer."""
     said = "".join([text async for kind, text in stream(summary, question, client, context,
-                                                        answering) if kind == "answer"])
+                                                        answering, deciding, history,
+                                                        headings)
+                    if kind == "answer"])
     return said if said else summary
 
 
+# Words of the findings a reply may carry in an unbroken run before it is a copy rather than
+# an answer. Six is a phrase anyone would repeat ("not a good time to spray"); nine is the
+# machine sentence with the punctuation changed.
+ECHO_RUN = 8
+
+
 def echoed(said: str, summary: str) -> bool:
-    """True when the reply is the input back again rather than a rewrite of it.
+    """True when the reply is the input back again rather than an answer built from it.
+
+    Exact equality was the only test, and almost nothing hit it: handed a sentence and told to
+    rewrite it, a small model returns that sentence with the dashes turned into commas, which
+    is a different string and the same non-answer. So the run length is what is measured - the
+    prompt promises "if a whole phrase of your reply also appears in the findings, the reply
+    will be thrown away", and this is that promise kept.
 
     Discarded rather than shown: an echo is the deterministic sentence with a round trip to a
     model in front of it, so returning the deterministic sentence loses nothing and keeps the
     two paths producing one recognisable voice instead of two.
     """
-    strip = lambda s: " ".join((s or "").lower().split()).strip(" .!?")
-    return bool(said) and strip(said) == strip(summary)
+    words = lambda s: re.findall(r"[a-z0-9.]+", (s or "").lower())
+    said_words, given = words(said), words(summary)
+    if not said_words:
+        return False
+    if said_words == given:
+        return True
+    if len(said_words) < ECHO_RUN:
+        return False
+    runs = {tuple(given[i:i + ECHO_RUN]) for i in range(len(given) - ECHO_RUN + 1)}
+    return any(tuple(said_words[i:i + ECHO_RUN]) in runs
+               for i in range(len(said_words) - ECHO_RUN + 1))
 
 
 def scaffolded(said: str) -> bool:

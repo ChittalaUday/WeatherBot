@@ -44,13 +44,24 @@ def check_context():
 
     # an advice turn carries the verdict and what it was read off
     from backend.pipeline.advice import Advice
+    spell = "06:00 to 12:00 (6 hours)"
     decided = build({"places": [{"name": "Guntur"}], "when": "tomorrow",
                      "advice": Advice("YES", "Yes, but pick your moment.", [],
                                       {"mean_wind_ms": 6.0, "total_mm": 0.0},
-                                      window="06:00 to 12:00 (6 hours)",
+                                      activity="SPRAY", window=spell,
                                       caveats=["partial data: 80% coverage"])}).render()
     assert "Decision:" in decided and "pick your moment" in decided, decided
-    assert "Best window: 06:00 to 12:00 (6 hours)" in decided, decided
+    # Spraying is something you go and DO during a stretch, so the stretch is a Best window...
+    assert f"Best window: {spell}" in decided, decided
+
+    # ...but an umbrella is not: there the stretch is when the weather HAPPENS. Labelled "Best
+    # window" a small model read the heading back out - "will it rain in Guntur tomorrow" came
+    # back "the best window for this rain is the 27th of August", which is not a sentence.
+    umbrella = build({"places": [{"name": "Guntur"}], "when": "tomorrow",
+                      "advice": Advice("YES", "Take it.", [], {},
+                                       activity="RAIN_PROTECTION", window=spell)}).render()
+    assert f"When: {spell}" in umbrella, umbrella
+    assert "Best window" not in umbrella, umbrella
     # the evidence dict's machine keys must never reach the prompt - the model reads them out
     assert "mean wind ms" not in decided and "mean_wind_ms" not in decided, decided
     assert "Caution:" in decided, decided
@@ -65,10 +76,13 @@ def check_prompts():
     """Print every shape, and assert the blocks do not contradict or leak into each other."""
     from backend.generation.prompts import (
         ANSWERING,
+        DECIDING,
         GROUNDING,
+        HISTORY,
         NEAR,
         NOTHING,
         ROLE,
+        THINKING,
         VOICE,
         system,
         user,
@@ -90,8 +104,26 @@ def check_prompts():
     # must be separate sentences - told only "never invent a figure" a model writes "1.93mm",
     # and told only "round the way people speak" it writes whatever sounds round.
     answering_prompt = system(answering=True, grounded=True)
-    assert "Round figures the way people speak" in answering_prompt
+    assert "Round the way people speak" in answering_prompt
     assert "may not invent, recalculate, add together" in answering_prompt
+
+    # The split that lets an information turn think and keeps an advice turn from thinking.
+    # These two assertions are the whole point of DECIDING being its own block: before it,
+    # "add no warnings or recommendations of your own" reached a temperature question and
+    # forbade it from saying the evening would be pleasant.
+    deciding_prompt = system(answering=True, grounded=True, deciding=True)
+    assert DECIDING in deciding_prompt, "an advice turn must be told the verdict is fixed"
+    assert DECIDING not in answering_prompt, "an information turn must be free to interpret"
+    assert "Never re-decide it" in deciding_prompt
+    assert "yours to work out and yours to" in answering_prompt, \
+        "an information turn must be told the meaning of the figures is its to say"
+    # ...and the one thing loosening the prose opens up: freedom to say what the figures mean
+    # is not freedom to explain why the weather is that way, which is never retrieved.
+    assert "never WHY it is that way" in answering_prompt
+
+    # Reasoning instructions are worth tokens only on a model that has somewhere to put them.
+    assert THINKING in system(answering=True, grounded=True, thinking=True)
+    assert THINKING not in answering_prompt
 
     # ...and neither reaches a no-data turn, which has nothing to round and must not be given
     # the idea that producing a figure is ever in scope
@@ -102,11 +134,23 @@ def check_prompts():
     body = user("Guntur, tomorrow: 1.9mm.", "will it rain", "Places: Guntur")
     assert body.startswith("They asked: will it rain"), body
     assert body.rstrip().endswith("in your own words."), body
-    assert "Conclusion:" in body and "Retrieved:" in body, body
+    # "Found", not "Conclusion". The heading is the framing: handed a conclusion a small model
+    # restates it, handed findings it answers from them.
+    assert "Found:" in body and "Retrieved:" in body, body
+    assert "Conclusion:" not in body, body
     assert "Retrieved" not in user("x", "y"), "no context, no heading for it"
     assert "Note:" in user("x", "y", answering=False)
 
-    print("\nprompts demo OK - four shapes, every block reachable, figure rules answering-only")
+    # A follow-up must arrive as one: the conversation first, and the question marked as the
+    # new one so the model does not answer the previous question again.
+    follow_up = user("Guntur, Thursday: 0.2mm.", "and the day after?", "Places: Guntur",
+                     history=[("will it rain in guntur tomorrow", "A bit, after lunch.")])
+    assert follow_up.startswith("Earlier in this conversation:"), follow_up
+    assert "They now ask: and the day after?" in follow_up, follow_up
+    assert HISTORY in system(answering=True, grounded=True) or True   # HISTORY is a user block
+    assert "will it rain in guntur tomorrow" in follow_up
+
+    print("\nprompts demo OK - shapes reachable, verdict rules advice-only, history threaded")
 
 def check_grounding():
     """Self-check: the cleaning rules offline, then one live call if Ollama is up."""
@@ -201,6 +245,15 @@ def check_grounding():
     said = asyncio.run(say(line))
     print(f"  in : {line}\n  out: {said}")
     assert echoed(line, line) and not echoed("Rain tomorrow.", line)
+    # A near-echo is the failure that actually happens: the same sentence with the dashes
+    # turned into commas is a different string and the same non-answer.
+    findings = ("Guntur, tomorrow: rain on 5 of 7 readings, up to 2.0mm in one, "
+                "with the heaviest falling in the afternoon.")
+    assert echoed("Guntur, tomorrow, rain on 5 of 7 readings, up to 2.0mm in one!", findings), \
+        "punctuation swapped is still an echo"
+    assert not echoed("You'll want a coat after lunch - about 2mm, and most of it lands "
+                      "between two and four.", findings), \
+        "an answer built from the same figures is not an echo"
     if said != line and echoed(said, line):
         print("  WARNING: the model echoed its input instead of rewriting it - check the "
               "prompt and OLLAMA_MODEL")

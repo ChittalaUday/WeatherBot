@@ -1,20 +1,21 @@
-# WeatherBot ML Model & Training Rules Book — Model 1 (`v3`)
+# WeatherBot ML Model & Training Rules Book — the retired Model 1 (`v3`), and the shared rules
 
-> **Scope.** This is the rules book for **Model 1 only**. Model 2 (`v4`) is the default served
-> model and has a different taxonomy — 16 intents, 10 variables, 12 activities, and it derives
-> what Model 1 predicts. Model 2's contract is [V4_PLAN.md §2](V4_PLAN.md); the machinery for
-> both is [ARCHITECTURE.md](ARCHITECTURE.md).
+> **Scope.** Model 1 (`v3`) is **retired** — `src/v3/`, `models/nlu_v3.joblib` and its test
+> suite are gone, and `v4` is the only served model. The taxonomy sections below (§2, §3, §6)
+> describe what that model predicted and are history, not contract. Model 2's contract is
+> [V4_PLAN.md §2](V4_PLAN.md); the machinery is [ARCHITECTURE.md](ARCHITECTURE.md).
 >
-> Kept because it is still load-bearing: the accuracy floors in §10 are what `test_model.py`
-> asserts, and Rules 1.1, 5.1–5.4 and 8.5 are version-neutral — the span tagger, the
-> normalizer and the human-labels-win policy are shared by both models.
+> This file is kept, and not deleted, because roughly thirty comments in live code cite it by
+> rule number for the rules that were never version-specific: **Rule 1.1** (the model commits,
+> it never asks), **§5** (raw entity spans — the span tagger in `src/tagger.py` is shared),
+> **Rule 8.5** (human labels win) and the dataset rules in §7. Those still govern `v4`.
+>
+> Stored turns tagged `[v3]` remain in the conversation DB; `backend/store.py` reads that tag
+> and does not require the model to exist.
 
 Model 1 replaced two earlier attempts: a 14-class single-variable classifier (v1) and a
-coarse-intent slot filler (v2). Both are gone. Model 1 keeps their taxonomy where it was right
-and predicts three more things neither of them could.
-
-The architecture id is `v3` — it names the bundle (`models/nlu_v3.joblib`), the module
-(`src/v3/`) and the tag on stored turns. "Model 1" is the name everywhere a human looks.
+coarse-intent slot filler (v2). All three are now gone. `v4` kept their taxonomy where it was
+right — see the sections it inherited, and V4_PLAN.md for what it changed.
 
 ---
 
@@ -77,7 +78,8 @@ Model 1 predicts **eight** targets from user text, in one pass over one shared f
 - Resolving location text to lat/lng coordinates (handled downstream via Solr).
 - Normalizing relative time text ("tomorrow", "6 PM") into ISO datetimes (Time Parser).
 - Mapping a `(variable, detail)` pair to exact API field names — `FIELD_SETS` in
-  `src/v3/schema.py`. The model chooses the *detail level*; the table chooses the *columns*.
+  `FIELD_SETS` in `src/v4/schema.py`. Answer width is read off the words
+  (`detail_from_text`); the table chooses the *columns*.
 - Fetching, joining or aggregating the actual weather rows.
 - Rendering the chart the model asked for.
 
@@ -85,8 +87,8 @@ Model 1 predicts **eight** targets from user text, in one pass over one shared f
 
 Model 1 always commits to a reading. There is no clarification path: every turn returns an
 intent, a variable set, a detail level and a chart, and reports what it assumed in `assumed`.
-`backend/nlu/registry.py::NEVER_ASKS` encodes this, and `test_model.py::check_always_decides`
-enforces it — a turn that comes back undecided is a test failure, not a prompt to the user.
+`backend/nlu/registry.py::NEVER_ASKS` encodes this — a turn that comes back undecided is a bug,
+not a prompt to the user.
 
 ---
 
@@ -205,7 +207,7 @@ picks what to do with the **rows** the time expression selected.
 
 ### Rule 5.3: Spans must be verbatim
 Every returned span must appear character-for-character in the prompt. Enforced by
-`test_model.py::check_spans_verbatim` across the whole English eval set.
+`tests/eval_v4.py` across the hand-written eval set.
 
 ### Rule 5.4: `times_normalized` (Canonical Surface Form)
 
@@ -231,59 +233,15 @@ one-to-one, folding each span to a single shape:
 
 ---
 
-## 6. Presentation Rules — What Model 1 Added
+## 6. Presentation Rules — removed with Model 1
 
-v1 and v2 said what was asked and let Python decide how to answer: a lookup table picked the
-columns, a branch on series count picked the chart, and every applicable insight was emitted
-every time. Those choices are in the wording, and the wording is what a model can read.
+Model 1 predicted `detail`, `chart` and `insights`: a head each for how much to show, which
+chart to draw, and which observations to emit. All three are gone, along with the model.
 
-### Rule 6.1: `detail` — How Much To Show
-
-| Label | Meaning | Cue |
-| :--- | :--- | :--- |
-| `MINIMAL` | a single number, no table | "just tell me", "quickly", "only the total" |
-| `NORMAL` | the headline field per variable | the default when nothing is said |
-| `FULL` | every related field | "in detail", "full details", "everything about" |
-
-`detail` selects a column *set* per variable through `FIELD_SETS` — "temperature in detail"
-means `Tmin`, `Tmax` and `Tavg`. The mapping stays deterministic; only the level is predicted.
-
-### Rule 6.2: `chart` — Which Picture Helps
-
-| Label | When |
-| :--- | :--- |
-| `NONE` | one value, or a question a table answers better |
-| `STAT` | a single big number worth showing large |
-| `LINE` | one series over time |
-| `MULTI_LINE` | several variables over time, one place |
-| `GROUPED_BAR` | places or periods side by side |
-
-Decided from the question, not from row counts. `MINIMAL` detail implies `NONE` — asking for
-one number is asking for no chart.
-
-### Rule 6.3: `insights` — What Is Worth Saying (multi-label)
-
-| Label | Observation |
-| :--- | :--- |
-| `TOTAL` | summed over the range |
-| `AVERAGE` | mean over the range |
-| `RANGE` | min–max spread |
-| `PEAK` | highest value and when |
-| `LOW` | lowest value and when |
-| `TREND` | rising, falling, turning point |
-| `THRESHOLD` | crossings worth a warning |
-| `COMPARISON` | which place or period wins |
-| `DRY_SPELL` | consecutive days under a rain threshold |
-
-Two to four per turn is normal; a comparison over a week wants several.
-`backend/pipeline/analysis.py` computes only what the model selected — without a selection it emits
-everything applicable, which is the old pre-Model-1 behaviour.
-
-### Rule 6.4: Presentation is advisory, never load-bearing
-A wrong chart is a worse answer, not a broken one. The deterministic layer must produce a
-correct table whatever the presentation heads predict.
-
----
+What replaced them, and why the heads are not worth rebuilding: answer width is a lexical fact
+(`detail_from_text` reads "full report" vs "just the temperature" off the words), the chart is
+drawn when the wording asks for one (`analysis.wants_chart`) and every applicable observation
+is emitted with a cap on how many (`analysis.build_insights`). None of it needed a prediction.
 
 ## 7. Dataset & Annotation Rules
 
@@ -298,7 +256,7 @@ correct table whatever the presentation heads predict.
    vs time first vs question first), and must carry misspellings, chat fillers ("pls", "asap")
    and dropped question marks. A model that only ever sees clean typing fails on real users.
 4. **Detail phrasings are generated fresh.** No v1 or v2 template ever said "in detail" or
-   "just tell me", so `src/v3/dataset.py::detail_prompts` writes those rows specifically.
+   "just tell me" — `v4` reads this off the words instead (`detail_from_text`).
 5. **The evaluation set is hand-written.** `data/eval_manual.csv` covers typos, code-mixing
    and edge cases no template produces. **Never regenerate it from a script** — the moment
    training material reaches it, it stops measuring generalization.
@@ -350,7 +308,7 @@ correct table whatever the presentation heads predict.
 
 ### Rule 8.3: Floors, Not Targets
 
-`test_model.py::FLOORS` sits below the measured numbers so it catches regressions without
+`tests/test_conversations.py::FLOORS` sits below the measured numbers so it catches regressions without
 going red on run-to-run noise. Raise the floors when the model genuinely improves.
 
 Measured on the 219 hand-written English eval utterances:

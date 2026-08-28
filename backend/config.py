@@ -65,6 +65,10 @@ ARCHIVE_REACHABLE = bool(ZARR_KEY)
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3:0.6b")
 OLLAMA_TIMEOUT = float(os.getenv("OLLAMA_TIMEOUT", "20"))
+# Off by default: measured on qwen3:1.7b, the reasoning block is ~70% of the tokens generated
+# per turn (1.8s vs 0.5s) and the output guards keep the same share of replies without it.
+# On is a product choice - the reasoning is streamed, so a slow answer has something in it.
+OLLAMA_THINK = os.getenv("OLLAMA_THINK", "0").strip().lower() not in ("0", "false", "no", "")
 
 # --- hosted NLU (Model 3, the comparison column) -----------------------------
 AI_BASE_URL = os.getenv("AI_BASE_URL", "https://integrate.api.nvidia.com/v1")

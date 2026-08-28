@@ -8,8 +8,8 @@ backend/api/          HTTP only: routes, SSE framing, the turn log
 backend/nlu/          text -> Understanding; what the conversation remembers
 backend/pipeline/     Understanding -> Answer. No transport, no chat id.
 backend/generation/   the Answer, said in words. Generates nothing it was not handed.
-src/v4/               Model 2 — the default served model
-src/v3/, src/v2/      Model 1 and its slot enums
+src/v4/               Model 2 — the served model
+src/v2/               legacy slot enums and the conversation generator
 ```
 
 Put a change in the layer that owns the thing it changes. A fix to how "tomorrow" is read goes
@@ -52,10 +52,11 @@ in `backend/pipeline/timewindow.py` — not in the caller that noticed.
 
 ## Model contracts
 
-- Model 2 (`v4`) is the default. Its taxonomy is [../V4_PLAN.md](../V4_PLAN.md) §2 —
+- Model 2 (`v4`) is the only served model. Its taxonomy is [../V4_PLAN.md](../V4_PLAN.md) §2 —
   16 intents, 10 variables, 12 activities. Enums live in `src/v4/schema.py`.
-- Model 1 (`v3`) is still served and selectable. Its rules book is
-  [../MODEL_RULES.md](../MODEL_RULES.md); its floors are asserted by `tests/test_model.py`.
+- Model 1 (`v3`) is retired — `src/v3/` and its bundle are gone. [../MODEL_RULES.md](../MODEL_RULES.md)
+  is kept for the rules that outlived it: Rule 1.1, §5 (entity spans), Rule 8.5, §7.
+- Model 3 (`llm`) is hosted and reachable only from `POST /api/compare`.
 - `Understanding` (`backend/nlu/registry.py`) is the only shape the pipeline reads. Adding a
   model means producing one of those, not touching anything downstream.
 

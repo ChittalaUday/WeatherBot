@@ -70,6 +70,16 @@ class Context:
                 out += [f"- {line}" for line in lines]
         return "\n".join(out)
 
+    def headings(self) -> list:
+        """The section names this turn actually retrieved.
+
+        `prompts.grounding` takes these so the model is only ever told what the sections it
+        HAS mean. Told what a "Best window" is on a turn that has none, a small model produces
+        one: a plain "will it rain tomorrow" came back "the best window for this rain is the
+        27th of August".
+        """
+        return [heading for heading, lines in self.sections if lines]
+
     def mentions(self) -> str:
         """Everything retrieved, lowercased - what a reply is allowed to have got its facts
         from. `generation.llm` checks a no-data reply against this."""
@@ -120,7 +130,15 @@ def build(result: dict, *, max_rows: int = MAX_FACT_ROWS,
         # The stretch the verdict points at, named on its own line. Without it the model has
         # a yes and no idea when, and "pick your moment" is the half of the answer that is
         # actually useful.
-        add("Best window", [advice.window] if advice.window else [])
+        #
+        # Two headings, because it is two different things. For spraying or harvesting the
+        # window is when to GO AND DO IT. For an umbrella or a jacket it is when the weather
+        # HAPPENS - and labelled "Best window" a small model read the label back out: asked
+        # "will it rain in Guntur tomorrow" it answered "the best window for this rain is the
+        # 27th of August", which is a heading, not a sentence anyone says.
+        from backend.pipeline.advice import TIMED
+        if advice.window:
+            add("Best window" if advice.activity in TIMED else "When", [advice.window])
         add("Caution", advice.caveats or [])
 
     if (table := result.get("table")):

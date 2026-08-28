@@ -6,6 +6,10 @@ uvicorn[standard]>=0.27.0
 httpx>=0.26.0
 pydantic>=2.0.0
 
+# Date parsing (src/dates.py). Already pulled in by pandas - pinned here so that stays true
+# on purpose rather than by luck, since the pipeline imports it directly.
+python-dateutil>=2.8.0
+
 # Training and inference
 scikit-learn>=1.2.0
 joblib>=1.2.0
