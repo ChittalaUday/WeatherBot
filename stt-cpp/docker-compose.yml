@@ -1,0 +1,48 @@
+services:
+  stt-cpp:
+    image: nemo-speech-runtime:cpu
+    build:
+      context: ./NeMo-Speech.cpp
+      dockerfile: docker/Dockerfile
+      target: runtime
+      args:
+        # No NVIDIA GPU here, so drop CUDA and its ggml patch series (the patches
+        # target CUDA kernels; the CPU build wants stock upstream ggml).
+        ENABLE_CUDA: "OFF"
+        ENABLE_CUDA_GRAPHS: "OFF"
+        ENABLE_GGML_PATCHES: "OFF"
+        # HTTP + realtime WebSocket is the only interface we serve. gRPC/Riva,
+        # Flashlight LM decoding, Sparrowhawk normalisation and NMT are all off:
+        # each pulls a heavy toolchain into the builder and none is used.
+        ENABLE_HTTP: "ON"
+        ENABLE_GRPC: "OFF"
+        ENABLE_FLASHLIGHT: "OFF"
+        ENABLE_NORM: "OFF"
+        ENABLE_NMT: "OFF"
+        # ponytail: 6, not nproc — Docker Desktop has 8 GB and ggml/llama.cpp
+        # translation units peak near 1 GB each. Raise if the VM gets more RAM.
+        JOBS: "6"
+    ports: ["2701:8080"]
+    restart: unless-stopped
+    # The runtime image is FROM scratch and model-free by design; the GGUF is
+    # mounted, not baked in.
+    volumes: ["./models:/models:ro"]
+    command:
+      - serve
+      - --host
+      - "0.0.0.0"
+      - --asr-model
+      - /models/nemotron-3.5-asr-streaming-0.6b.q8_0.gguf
+      # The browser talks to this from the Next.js origin, not from :2701.
+      - --cors-origin
+      - "*"
+    healthcheck:
+      # scratch image: no shell, no curl. The CLI ships its own /ready probe.
+      test: ["CMD", "/opt/nemo-speech/bin/nemo-speech", "health", "--quiet"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 2m
+    deploy:
+      resources:
+        limits: {cpus: "4", memory: 4g}

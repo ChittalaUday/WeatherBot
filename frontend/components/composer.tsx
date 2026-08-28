@@ -5,6 +5,7 @@ import { ArrowUp, ChevronDown, Layers, MapPin } from "lucide-react";
 import { m } from "motion/react";
 import { useRef, useState } from "react";
 import { AIInputDropdown, AIInputPillButton } from "@/components/ai-input";
+import { MicButton } from "@/components/mic-button";
 import { LoaderCircleIcon } from "@/components/ui/loader-circle-icon";
 import { apiUrl, cn } from "@/lib/utils";
 
@@ -134,6 +135,7 @@ export function Composer({
               <MapPin className="h-3 w-3" />
               asks for your location only when needed
             </span>
+            <MicButton value={value} onChange={setValue} disabled={busy} />
             <button
               onClick={submit}
               suppressHydrationWarning

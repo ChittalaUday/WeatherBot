@@ -1,0 +1,25 @@
+services:
+  stt:
+    build: .
+    ports: ["2700:2700"]
+    restart: unless-stopped
+    volumes: ["hf-cache:/cache"]
+    environment:
+      # A locale the model knows. "auto" detects per utterance; hi-IN, te-IN and ta-IN
+      # are supported too, which matters for an app answering questions about India.
+      LANGUAGE: en-US
+    deploy:
+      resources:
+        limits: {cpus: "4", memory: 4g}
+    healthcheck:
+      # /health 503s until the weights are loaded, and urlopen raises on that, so the
+      # container is only healthy once it can actually transcribe.
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:2700/health',timeout=5).read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      # The first run downloads several GB before the model is ready.
+      start_period: 20m
+
+volumes:
+  hf-cache:

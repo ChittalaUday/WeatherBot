@@ -4,14 +4,14 @@ __pycache__/
 *$py.class
 *.so
 .Python
-build/
+/build/
 develop-eggs/
 dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+/lib/
+/lib64/
 parts/
 sdist/
 var/
@@ -110,3 +110,5 @@ temp/
 # collection is a useful API spec and stays; the environment must not be committed.
 *.postman_environment.json
 
+stt-cpp/NeMo-Speech.cpp/
+stt-cpp/models/

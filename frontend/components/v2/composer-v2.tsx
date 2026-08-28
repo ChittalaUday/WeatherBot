@@ -3,6 +3,7 @@
 import { ArrowUp, Cpu, Regex, Sparkles } from "lucide-react";
 import { useRef, useState } from "react";
 import { AIInputDropdown, AIInputPillButton } from "@/components/ai-input";
+import { MicButton } from "@/components/mic-button";
 import { LoaderCircleIcon } from "@/components/ui/loader-circle-icon";
 import { cn } from "@/lib/utils";
 import type { Parser } from "@/lib/v2/types";
@@ -152,6 +153,8 @@ export function ComposerV2({
               Compare both
             </button>
           </div>
+          <div className="flex items-center gap-2">
+          <MicButton value={value} onChange={setValue} disabled={busy} />
           <button
             type="button"
             onClick={() => send(false)}
@@ -161,6 +164,7 @@ export function ComposerV2({
           >
             {busy ? <LoaderCircleIcon size={15} isAnimated /> : <ArrowUp className="h-4 w-4" />}
           </button>
+          </div>
         </div>
       </div>
     </div>
