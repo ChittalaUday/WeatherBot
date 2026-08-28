@@ -5,16 +5,12 @@ The answer path: one Understanding in, one Answer out. No transport, no conversa
 
     route -> places -> plan -> fetch -> columns -> quality -> analyse -> decide -> summarise
 
-This is the *only* implementation. The chat endpoint calls it with the places the conversation
-already resolved, so a follow-up ("and there?") keeps the previous village and nothing is
-looked up twice; the comparison view calls it three times with none and lets it resolve. Two
-copies of this sequence would drift the moment one of them was fixed - and they did: location
-resolution, the "does this need weather at all" branch and the time window each existed twice,
-in versions that disagreed.
+This is the *only* implementation. The chat endpoint passes the places the conversation already
+resolved; the comparison view passes none and lets it resolve. Two copies of this sequence
+drifted the moment one was fixed, and they did.
 
-Nothing here raises. A stage that fails records why and the later stages are skipped, because
-this runs three times side by side in the comparison view and one dead column must not take
-the other two with it.
+Nothing here raises: a stage that fails records why and the later stages are skipped, because
+this runs several times side by side and one dead column must not take the others with it.
 """
 
 from __future__ import annotations
@@ -71,6 +67,9 @@ class Answer:
     insights: list = field(default_factory=list)
     table: dict = field(default_factory=dict)
     chart: dict | None = None
+    # what to open on screen. The rule fills it here; the chat endpoint overwrites it with
+    # the model's pick when there is one. Never empty, so a client always has an answer.
+    presentation: dict = field(default_factory=dict)
     served_by: str = ""
     fell_back_from: str = ""
     rows: list = field(default_factory=list)     # the selected rows, one list per place
@@ -123,6 +122,7 @@ class Answer:
                         "unusable": checked.unusable, "gaps": checked.gaps,
                         "message": checked.message} if checked else None,
             "table": self.table,
+            "presentation": self.presentation or render.presentation(self),
             "series": [{"place": place["name"],
                         "points": [{"t": r["Date_time"], "v": r.get(self.fields[0])}
                                    for r in rows]}
@@ -151,14 +151,10 @@ async def resolve_places(http, names: list[str]) -> tuple[list[dict], list[str]]
 def served_fields(fields: list[str], selected: list[list[dict]]) -> tuple[list[str], list[str]]:
     """Split the asked-for columns into (kept, never sent), by what actually came back.
 
-    A source serves what it serves: the hourly feed has no daily max/min and no day length,
-    the archive has six measurements and their normals and nothing else. Asking for the rest
-    cost twice - a table column of dashes, and a quality verdict of SPARSE, which printed "not
-    enough data to answer that" under an answer that had every number it needed.
-
-    The capability table says what a source *claims*; the rows say what it did. This trusts
-    the rows. When nothing at all came back, nothing is dropped - that is a data problem, and
-    quality has to be left free to say so.
+    Asking a source for what it does not serve cost twice: a table column of dashes, and a
+    SPARSE verdict printing "not enough data" under an answer that had every number it needed.
+    The capability table says what a source *claims*; this trusts the rows. When nothing came
+    back at all, nothing is dropped - that is a data problem, and quality has to say so.
     """
     absent = [f for f in fields if not any(quality.values(rows, f) for rows in selected)]
     if not absent or len(absent) == len(fields):
@@ -208,20 +204,13 @@ async def run(http, understanding, *, places: list[dict] | None = None,
         answer.stages["locations"]["note"] = "no place resolved - the caller must ask for one"
         return finish(needs_location=True)
 
-    # 3. parameters - which API, how many places, which reduction, over which window. One
-    # object now, with the reason for each decision beside it: these used to be made in three
-    # places that recorded nothing, so an answer that came back hourly could not be explained
-    # without a debugger.
+    # 3. parameters - which API, how many places, which reduction, over which window, with
+    # the reason for each decision beside it. The profile is chosen from the window, so the
+    # window is resolved first; a turn that named no time gets one from the profile.
     #
-    # The profile is chosen from the window, so the window is resolved first. A turn that
-    # named no time has none to resolve, and the profile is what supplies one.
-    #
-    # Before that: a span the rule tables could not canonicalise gets one chance from a model,
-    # and if that fails too the turn stops rather than guessing. This is the whole
-    # `time_resolution` cluster in the feedback table - "when i asked last 7 days it showed
-    # next 7days", "when i asked for history it showed next", "when i asked yesterday it is
-    # showing today data". Every one of them was an expression nobody could place, answered
-    # with next week under the user's own words.
+    # A span the rule tables could not canonicalise gets one chance from a model, and if that
+    # fails the turn stops rather than guessing. Every `time_resolution` correction in the
+    # feedback table was an unplaceable expression answered with next week.
     said = understanding.times_normalized[0] if understanding.times_normalized else ""
     spoken, how = await times.place(said, understanding.text, now=now,
                                     hint=getattr(understanding, "time_hint", ""))
@@ -243,8 +232,8 @@ async def run(http, understanding, *, places: list[dict] | None = None,
     # what was assumed on their behalf is the answer's to admit, not the audit trail's to bury
     understanding.assumed.extend(chosen.assumed)
     answer.stages["params"] = chosen.as_dict()
-    answer.stages["plan"] = {**plan.as_dict(), "fields": fields}
-    if plan.verdict in (planner.Verdict.REJECT, planner.Verdict.ASK):
+    answer.stages["plan"] = {**(plan.as_dict() if plan else {}), "fields": fields}
+    if plan and plan.verdict in (planner.Verdict.REJECT, planner.Verdict.ASK):
         return finish(stopped_by=plan.verdict.value)
 
     # 4. fetch
@@ -260,9 +249,9 @@ async def run(http, understanding, *, places: list[dict] | None = None,
     if not fetched.ok:
         return finish(ok=False, failed_at="fetch", error=fetched.error)
 
-    answer.hourly = plan.hourly
+    answer.hourly = plan.hourly if plan else False
     answer.rows = [select_rows(feed, normalized or "", now)[0] for feed in fetched.per_place]
-    answer.when = plan.label or select_rows(fetched.per_place[0], normalized or "", now)[1]
+    answer.when = (plan.label if plan else "") or select_rows(fetched.per_place[0], normalized or "", now)[1]
 
     # 5. columns - everything downstream reads `fields`, so the ones the feed never sent are
     # dropped here, once.
@@ -323,13 +312,13 @@ async def run(http, understanding, *, places: list[dict] | None = None,
 
     answer.table = render.build_table(answer.rows if compare_two else answer.rows[0], fields,
                                       shown, answer.hourly)
-    # A verdict and a single reduced figure are both one-line answers; the numbers under them
-    # are evidence, not a dataset to explore. Only draw the series when the wording asked to
-    # see it.
-    simple = bool(verdict) or bool(answer.reduced)
-    answer.chart = (analysis.build_chart(answer.rows, places, fields[0], answer.hourly)
-                    if not simple or analysis.wants_chart(understanding.text)
-                    else None)
+    # Built whenever there is a series, and *shown* only when the presentation below says so.
+    # Suppressing it here on a keyword left two places deciding what appears on screen.
+    answer.chart = analysis.build_chart(answer.rows, places, fields[0], answer.hourly)
+    # A reader who asked to *see* it has already decided; the model is not consulted about it.
+    answer.presentation = render.presentation(
+        answer, "chart" if answer.chart and analysis.wants_chart(understanding.text) else "",
+        "asked to see it", "question")
     answer.stages["answer"] = {"summary": answer.summary, "when": answer.when,
                                "table_rows": len(answer.rows[0]), "columns": fields}
     return finish()
@@ -338,10 +327,8 @@ async def run(http, understanding, *, places: list[dict] | None = None,
 def _sentences(parts: list[str]) -> str:
     """Join fragments into readable prose, punctuating the ones that forgot to.
 
-    Every piece here is built by a different rule and only some of them end in a full stop.
-    Concatenated with a bare space they ran together - "Take it - up to 1.9mm in one reading,
-    from 19 Aug Guntur, tomorrow: 1.9mm total" reads as one broken sentence, and the model
-    downstream, handed that, copied it rather than rewriting it.
+    Each piece is built by a different rule and only some end in a full stop; concatenated
+    with a bare space they run together into one broken sentence.
     """
     out = []
     for part in parts:
@@ -363,8 +350,7 @@ def _caveats(checked, fetched, plan, absent: list[str], unresolved: list[str]) -
     if plan.unservable:
         out.append(f"(No {', '.join(plan.unservable)} in that archive.)")
     if absent:
-        # said once, plainly - the reader asked for these and is owed the reason they are not
-        # in the table, but it is a footnote, not a failure
+        # a footnote, not a failure - said once, plainly
         out.append("(No " + ", ".join(render.label(f).lower() for f in absent) +
                    " in this feed.)")
     if unresolved:

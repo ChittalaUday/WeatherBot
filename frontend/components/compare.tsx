@@ -5,14 +5,14 @@ import { ResultChart } from "@/components/result-chart";
 import { ResultTable } from "@/components/result-table";
 
 /**
- * Three readings of one sentence, side by side.
+ * Every classifier's reading of one sentence, side by side.
  *
- * Two of these are 20MB of TF-IDF and linear heads answering offline in milliseconds; the
- * third is a network round trip to a hosted model that has never seen this label set and works
- * only from the schema in its prompt. The latency column is not decoration - it is half the
+ * The trained one is 46MB of TF-IDF and linear heads answering offline in milliseconds; a
+ * prompted one is a round trip to a model that has never seen this label set and works only
+ * from the schema in its prompt. The latency column is not decoration - it is half the
  * comparison.
  *
- * Fields the three disagree on are highlighted, because agreement is the boring case and the
+ * Fields they disagree on are highlighted, because agreement is the boring case and the
  * disagreements are the entire reason to look.
  */
 

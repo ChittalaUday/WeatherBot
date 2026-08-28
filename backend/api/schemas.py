@@ -8,10 +8,6 @@ from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel
 
-# ---------------------------------------------------------------------------
-# Request Payloads
-# ---------------------------------------------------------------------------
-
 
 class AskRequest(BaseModel):
     text: str
@@ -43,30 +39,37 @@ class FeedbackRequest(BaseModel):
     note: Optional[str] = None
 
 
-# ---------------------------------------------------------------------------
-# Response Payloads
-# ---------------------------------------------------------------------------
-
-
 class ResetChatResponse(BaseModel):
     chat_id: str
     message: str
 
 
+class ModelInfo(BaseModel):
+    """One switchable model, trained bundle or prompted LLM - `backend.nlu.catalogue`."""
+
+    version: str
+    name: str
+    loaded: bool
+    present: bool
+    size_mb: Optional[float] = None
+    description: str
+    default: bool
+
+
 class HealthResponse(BaseModel):
     status: str
-    models: List[str]
+    models: List[ModelInfo]
     generation: Dict[str, Any]
-    db_path: str
-    archive_url: str
-    solr_url: str
-    ollama_url: str
-    ai_model: str
-    cors_origins: List[str]
+    duckling: Dict[str, Any]
+    # the rest is `backend.config.summary()` - what is configured, with no secrets in it
+    default_model: str
+    archive: bool
+    hosted_nlu: bool
+    generation_model: str
 
 
 class ModelListResponse(BaseModel):
-    available: List[str]
+    available: List[ModelInfo]
     default: str
     metrics: Dict[str, Any]
 
@@ -123,12 +126,6 @@ class StatsResponse(BaseModel):
     thumbs_down: int
     corrections: int
     choices: int
-
-
-# ---------------------------------------------------------------------------
-# Stream Event Models (SSE)
-# ---------------------------------------------------------------------------
-
 
 class StatusEvent(BaseModel):
     type: Literal["status"] = "status"

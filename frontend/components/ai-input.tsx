@@ -85,7 +85,7 @@ interface UploadedFile {
 // Our own NLU bundle - no third-party LLMs are involved anywhere in this app.
 // Fallback only; the live list comes from /api/models.
 const DEFAULT_MODELS: Model[] = [
-  { id: "v4", name: "Model 2", label: "Model 2 · 16 intents, derived window and activity", icon: Layers },
+  { id: "v4", name: "Trained classifier", label: "Trained classifier · 16 intents, derived window and activity", icon: Layers },
 ];
 
 const DEFAULT_PLUS_MENU: MenuItem[] = [

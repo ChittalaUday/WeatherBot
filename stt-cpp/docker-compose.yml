@@ -11,11 +11,11 @@ services:
         ENABLE_CUDA: "OFF"
         ENABLE_CUDA_GRAPHS: "OFF"
         ENABLE_GGML_PATCHES: "OFF"
-        # HTTP + realtime WebSocket is the only interface we serve; gRPC/Riva,
-        # Sparrowhawk normalisation and NMT are off, each pulls a heavy toolchain
-        # into the builder and none is used.
+        # Sparrowhawk normalisation and NMT stay off - each pulls a heavy toolchain into
+        # the builder and neither is used.
         ENABLE_HTTP: "ON"
-        ENABLE_GRPC: "OFF"
+        # Builds the separate riva_server binary (Riva-compatible gRPC) into the same image.
+        ENABLE_GRPC: "ON"
         ENABLE_NORM: "OFF"
         ENABLE_NMT: "OFF"
         # Must stay ON despite nothing here using LM-fused decoding: the
@@ -52,6 +52,32 @@ services:
       timeout: 5s
       retries: 3
       start_period: 2m
+    deploy:
+      resources:
+        limits: {cpus: "4", memory: 4g}
+
+  # The Riva-compatible gRPC front end. Same image, the other binary: upstream ships
+  # riva_server as a separate process that loads its own copy of the model, so this is a
+  # second ~1 GB resident, not a second interface onto the first.
+  stt-cpp-grpc:
+    image: nemo-speech-runtime:cpu
+    depends_on: [stt-cpp]
+    entrypoint: ["/opt/nemo-speech/bin/riva_server"]
+    # riva_server takes only dotted engine keys - none of `serve`'s --asr-model aliases.
+    command:
+      - --asr.model.path
+      - /models/nemotron-3.5-asr-streaming-0.6b.q8_0.gguf
+      # -1 is CPU. Unlike `nemo-speech serve`, riva_server defaults to gpu 0 and then
+      # crash-loops on a machine with no CUDA device rather than falling back.
+      - --asr.backend.gpu
+      - "-1"
+      - --bind
+      - "0.0.0.0:50051"
+    ports: ["50051:50051"]
+    restart: unless-stopped
+    volumes: ["./models:/models:ro"]
+    # No healthcheck: the image is FROM scratch, so there is no shell, curl or grpc_health
+    # probe to run inside it, and `nemo-speech health` only speaks HTTP.
     deploy:
       resources:
         limits: {cpus: "4", memory: 4g}

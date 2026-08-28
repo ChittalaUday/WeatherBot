@@ -163,3 +163,114 @@ def summarize(action: str, rows, fields: list[str], places: list[dict], when: st
     return (f"{name.capitalize()} in {where} for {when}: "
             f"{min(numbers):.1f}-{max(numbers):.1f}{units} "
             f"(avg {sum(numbers) / len(numbers):.1f}{units}).")
+
+
+# ---------------------------------------------------------------------------
+# What to put on screen
+# ---------------------------------------------------------------------------
+#
+# The table and the chart are always in the payload. This only says which of them to *open*,
+# so nothing is hidden from anyone who wants it - it just is not shoved at everyone. A client
+# reads `presentation` and renders; it does not re-derive the decision from row counts, which
+# is how two clients end up disagreeing about the same answer.
+
+VIEWS = ("chart", "table", "none")
+
+CHOOSE = """You pick how a weather answer is shown. Reply with ONLY {"show":"...","why":"..."}.
+
+show is one of:
+  "chart" - the shape over time is the point. Use it when points >= 4: a run of readings
+            across hours or days, a rise, a fall, when rain starts.
+  "table" - the individual values are the point. Use it when there is no series worth a
+            curve but there is a grid to scan: columns >= 3, or several places side by side.
+  "none"  - the sentence already answered it. Use it for a yes/no decision (verdict: True),
+            a single figure (one_figure: True), or one or two rows.
+
+why is at most eight words."""
+# The thresholds are spelled out rather than left to judgement. Without the numbers a small
+# model answers "none" to almost everything - it reads the "when in doubt" instruction that
+# used to be here and stops thinking. With them the counts do the work and the question only
+# breaks the ties.
+
+
+def facts(answer) -> dict:
+    """The countable half of the decision. The rule below and the model both read only this,
+    so what the model is choosing between is exactly what the rule would have chosen."""
+    body = (answer.table or {}).get("rows") or []
+    chart = answer.chart or {}
+    points = max((len(s["points"]) for s in chart.get("series") or []), default=0)
+    return {
+        "rows": len(body),
+        # minus the time column, which is never a value anyone came for
+        "columns": max(len((answer.table or {}).get("columns") or []) - 1, 0),
+        "points": points,
+        "places": len(answer.places),
+        "has_chart": bool(answer.chart),
+        "verdict": bool(answer.advice),
+        "one_figure": bool(answer.reduced),
+    }
+
+
+def presentation(answer, view: str = "", why: str = "", decided_by: str = "rule") -> dict:
+    """What this answer needs on screen, as the wire shape a client renders.
+
+    `view` is a choice already made - the model's. Left empty the rule below decides, and it
+    is also the floor under the model: a "chart" for an answer that has no chart is not a
+    choice, it is a broken screen, so it is corrected here rather than trusted.
+    """
+    seen = facts(answer)
+    if view not in VIEWS:
+        view, decided_by = "", "rule"
+    if not view:
+        why = ""
+        if seen["verdict"] or seen["one_figure"]:
+            # the verdict and its reasons are the answer; a curve under "yes, spray today"
+            # is decoration
+            view = "none"
+        elif seen["points"] >= 4:
+            view = "chart"                       # enough of a series to have a shape
+        elif seen["rows"] >= 6 or seen["columns"] >= 3:
+            view = "table"                       # a lot of values and no single shape
+        else:
+            view = "none"                        # the sentence already said it
+    # A view the payload cannot fill is downgraded, not shown empty.
+    if view == "chart" and not seen["has_chart"]:
+        view, why, decided_by = ("table" if seen["rows"] else "none"), "no series to draw", "rule"
+    if view == "table" and not seen["rows"]:
+        view, why, decided_by = "none", "no rows to show", "rule"
+
+    return {
+        "detail": view,
+        "chart": "open" if view == "chart" else ("available" if seen["has_chart"] else "none"),
+        "table": "open" if view == "table" else ("available" if seen["rows"] else "none"),
+        "rows": seen["rows"], "columns": seen["columns"],
+        "decided_by": decided_by,
+        "why": {"chart": f"{seen['points']} points over time",
+                "table": f"{seen['rows']} rows x {seen['columns']} values",
+                "chose": why},
+    }
+
+
+async def choose(answer, question: str, spec=None, client=None) -> dict:
+    """The same decision, made by the local model instead of the rule.
+
+    Cheap on purpose - the counts and the question, nothing else - because it runs beside the
+    phrasing stream, which is slower by an order of magnitude, and only stays free while it is.
+    A model that is down, slow or talking nonsense falls through to `presentation()`, so the
+    screen is never waiting on it.
+    """
+    from backend.nlu import llm
+
+    spec = spec or llm.LOCAL
+    if (answer.presentation or {}).get("decided_by") == "question":
+        return answer.presentation               # the reader asked to see it; not the model's call
+    seen = facts(answer)
+    if not seen["rows"] and not seen["has_chart"]:
+        return presentation(answer)              # nothing to show; do not spend a call saying so
+    asked = f'Question: "{question}"\n' + ", ".join(f"{k}: {v}" for k, v in seen.items())
+    got = await llm.chat_json(CHOOSE, asked, spec, client, max_tokens=60)
+    if not got.get("ok"):
+        return presentation(answer)
+    said = got.get("json") or {}
+    return presentation(answer, str(said.get("show", "")).strip().lower(),
+                        str(said.get("why", ""))[:80], spec.name)

@@ -3,25 +3,18 @@
     python -m backend.nlu.duckling            # the checks for this module (needs the service)
     docker run -d --name duckling-service -p 8008:8000 rasa/duckling:latest
 
-`src.tagger.normalize_time` holds a few hundred hand-written entries and every one of them was
-added after somebody's question came back wrong. Duckling is the same job done by a grammar
-that already knows the tail: measured against this deployment's own wording, it places "last
-summer", "last few days", "so far today", "between 6pm and 9pm" and "tonight at 6" - five
-expressions that the tables miss and that cost either a wrong window or a call to a local model.
+A grammar that already knows the tail `src.tagger.normalize_time`'s hand-written entries miss:
+"last summer", "last few days", "so far today", "between 6pm and 9pm", "tonight at 6".
 
-**It returns a canonical string, not a window.** That is deliberate, and it is what keeps this
-module a proposer rather than a second authority on dates:
+**It returns a canonical string, not a window** - which keeps this a proposer rather than a
+second authority on dates:
 
     "last summer"   ->  "2025-06-21 to 2025-09-24"   ->  timewindow.resolve  ->  Window
     "at 6"          ->  "18:00"                      ->  timewindow.resolve  ->  Window
     "tomorrow"      ->  "tomorrow"                   ->  timewindow.resolve  ->  Window
 
-`resolve` already reads a two-date range through `parse_dates`, so any window Duckling can
-describe is expressible in a form the existing resolver understands. Nothing downstream changes,
-`resolve` stays the only thing that decides what a date means, and `understood=False` still
-closes the silent-wrong-window class. Handing back a `Window` directly would have made this the
-second place in the codebase that owns a calendar, which is the bug the timewindow docstring was
-written about.
+`resolve` stays the only thing that decides what a date means. Handing back a `Window` would
+make this the second place in the codebase that owns a calendar.
 
 What Duckling does NOT decide, and why each stays here or upstream:
 
@@ -41,9 +34,11 @@ that cannot reach Duckling must fall through to the tables rather than fail.
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timedelta
 
 import httpx
+from dateutil.relativedelta import relativedelta
 
 from backend.config import (
     DUCKLING_ENABLED,
@@ -54,14 +49,16 @@ from backend.config import (
 )
 from src.dates import MONTHS
 
-# Duckling's grain -> whether the answer is about hours or about days. "minute" and "second"
-# are hourly too: the feed has no finer resolution than an hour, so a 6:30 question is an
-# hourly question.
+# "minute" and "second" are hourly too - the feed has no finer resolution than an hour.
 HOURLY_GRAINS = {"second", "minute", "hour"}
 
-# Grain -> how long a bare point covers. Duckling answers "this month" with the first of the
-# month at day zero and `grain: month`, so the grain is what says the answer is a month rather
-# than a midnight.
+# "few hours", "couple of days" and "few days" come back as a `duration`, not as a period -
+# Duckling reads the length and leaves the anchor to the caller. Asked for `time` alone they
+# were dropped on the floor and the turn answered with the default horizon.
+DIMS = ("time", "duration")
+_DURATION_UNITS = {"second": "seconds", "minute": "minutes", "hour": "hours", "day": "days",
+                   "week": "weeks", "month": "months", "year": "years"}
+
 _POINT_SPAN = {"second": timedelta(seconds=1), "minute": timedelta(minutes=1),
                "hour": timedelta(hours=1), "day": timedelta(days=1),
                "week": timedelta(days=7)}
@@ -74,9 +71,8 @@ def _iso(when: datetime) -> str:
 def _parse_stamp(value: str) -> datetime | None:
     """Duckling's "2026-08-29T00:00:00.000+05:30" -> a naive local datetime.
 
-    Naive on purpose. Every other datetime in this pipeline is naive local time, and mixing the
-    two is how a comparison raises `can't compare offset-naive and offset-aware`. The offset is
-    dropped rather than converted because `DUCKLING_TZ` already asked for local time.
+    Naive because every other datetime in this pipeline is. The offset is dropped rather than
+    converted, since `DUCKLING_TZ` already asked for local time.
     """
     if not value:
         return None
@@ -93,37 +89,43 @@ async def _ask(text: str, now: datetime, client: httpx.AsyncClient | None = None
     owns = client is None
     client = client or httpx.AsyncClient(timeout=DUCKLING_TIMEOUT)
     try:
-        # `reftime` rather than the container's clock: a fixed reference is what makes this
-        # testable and what stops two calls a second apart disagreeing across midnight.
+        # `reftime`, not the container's clock: testable, and two calls a second apart
+        # cannot disagree across midnight
         response = await client.post(
             f"{DUCKLING_URL}/parse", timeout=DUCKLING_TIMEOUT,
             data={"locale": DUCKLING_LOCALE, "text": text, "tz": DUCKLING_TZ,
-                  "reftime": int(now.timestamp() * 1000), "dims": json.dumps(["time"])})
+                  "reftime": int(now.timestamp() * 1000),
+                  "dims": json.dumps(["time", "duration"])})
         response.raise_for_status()
         found = response.json()
     except (httpx.HTTPError, ValueError, OSError):
         return []                      # not running, slow, or nonsense - the tables take over
-    return [e for e in found if isinstance(e, dict) and e.get("dim") == "time"]
+    finally:
+        # `owns` was computed and never acted on, so a caller that passed no client leaked one
+        # per call - and a turn now makes up to three of these.
+        if owns:
+            await client.aclose()
+    return [e for e in found if isinstance(e, dict) and e.get("dim") in DIMS]
 
 
 def _best(entities: list) -> dict | None:
     """The entity most likely to be the period asked about.
 
-    Non-latent first: Duckling marks a reading it had to reach for as `latent`, and a latent
-    hit on a bare number is how "rain over 5 acres" would become five o'clock. Then the longest
-    body, because "this time last year" beats the "last year" inside it.
+    Non-latent first - a latent hit on a bare number is how "rain over 5 acres" becomes five
+    o'clock. Then the longest body, because "this time last year" beats the "last year" in it.
     """
     real = [e for e in entities if not e.get("latent")] or entities
-    return max(real, key=lambda e: len(e.get("body") or ""), default=None)
+    # A period beats a duration for the same words: "next 3 days" is read both ways, and the
+    # period is the one that already knows where it starts.
+    timed = [e for e in real if e.get("dim") == "time"] or real
+    return max(timed, key=lambda e: len(e.get("body") or ""), default=None)
 
 
 def _bare_future_month(entity: dict, when: datetime, now: datetime) -> str:
     """A month named with no year resolves forward in English and backward in this product.
 
-    Duckling answers "june", asked in August 2026, with June 2027 - the next one, which is what
-    the words mean. It is also past the ten-day forecast, so it is not answerable, and the only
-    reading worth having is the most recent June. `timewindow._bare_month` already holds this
-    rule; this hands the expression back to it rather than restating it.
+    Duckling answers "june" in August 2026 with June 2027, which is what the words mean and is
+    past the ten-day forecast. `timewindow._bare_month` holds the rule; this hands it back.
     """
     body = (entity.get("body") or "").lower().strip()
     named_month = body in MONTHS or any(w in MONTHS for w in body.split())
@@ -132,8 +134,57 @@ def _bare_future_month(entity: dict, when: datetime, now: datetime) -> str:
     return ""
 
 
-def _canonical(entity: dict, now: datetime) -> str:
-    """One time entity -> a canonical string `timewindow.resolve` understands."""
+# A duration carries a length and no direction, so "couple of days back" and "couple of days"
+# are the same entity. Duckling drops the "back" - and forward is the dangerous default here,
+# because it answers a question about the past with a forecast.
+_LOOKS_BACK = re.compile(r"\b(?:back|ago|last|past|previous|prior|earlier|since|been|was|"
+                         r"were|did)\b", re.I)
+
+
+def _from_duration(entity: dict, now: datetime, text: str = "") -> str:
+    """A length with no anchor -> a window, from now or up to now.
+
+    "whats it like few hours" is a `duration` of 3 hours, not a period: Duckling reads how
+    long and leaves from-when to the caller. From now unless the sentence looks back.
+    """
+    value = entity.get("value") or {}
+    unit = _DURATION_UNITS.get(str(value.get("unit") or ""), "")
+    try:
+        count = int(value.get("value"))
+    except (TypeError, ValueError):
+        return ""
+    if not unit or count <= 0:
+        return ""
+    if _LOOKS_BACK.search(text or ""):
+        start, end = now - relativedelta(**{unit: count}), now
+    else:
+        start, end = now, now + relativedelta(**{unit: count})
+    if unit in ("seconds", "minutes", "hours") and start.date() == end.date():
+        return f"{start:%H:%M}-{end:%H:%M}"
+    return _range(start, end)
+
+
+def _range(start: datetime, end: datetime) -> str:
+    """An absolute span, or a single date when both ends land on one day."""
+    return _iso(start) if _iso(start) == _iso(end) else f"{_iso(start)} to {_iso(end)}"
+
+
+def _range_at(start: datetime, end: datetime) -> str:
+    """An absolute span that keeps its hours. "tomorrow morning" is not tomorrow: collapsed to
+    a date it becomes the whole day, and six hours get answered from a feed chosen for
+    twenty-four."""
+    return f"{start:%Y-%m-%dT%H:%M} to {end:%Y-%m-%dT%H:%M}"
+
+
+def _canonical(entity: dict, now: datetime, text: str = "") -> str:
+    """One entity -> an absolute form `timewindow.resolve` understands.
+
+    Absolute rather than a word: `resolve` used to re-derive "tomorrow" from its own calendar,
+    which is arithmetic Duckling had already done and a second place for the two to disagree.
+    """
+    if entity.get("dim") == "duration":
+        return _from_duration(entity, now, text)
+
     value = entity.get("value") or {}
     kind = value.get("type")
 
@@ -143,20 +194,17 @@ def _canonical(entity: dict, now: datetime) -> str:
         grain = ((value.get("from") or value.get("to") or {}).get("grain")) or "day"
         if start is None and end is None:
             return ""
-        # "since 2018" and "from 2010 to" come back open-ended. Open at the top means "up to
-        # now"; open at the bottom is not a period this product can answer, so it is declined.
+        # open at the top means "up to now"; open at the bottom is not answerable here
         if end is None:
             end = now
         if start is None:
             return ""
-        # Duckling's `to` is exclusive - "last 3 days" ends at the 28th at 00:00 meaning the
-        # 27th is the last full day. Half-open arithmetic left every range a day long.
+        # Duckling's `to` is exclusive: "last 3 days" ends at the 28th at 00:00, so the 27th
+        # is the last full day. Half-open arithmetic left every range a day long.
         end = end - timedelta(seconds=1)
-        if grain in HOURLY_GRAINS and start.date() == end.date():
-            return f"{start:%H:%M}-{end:%H:%M}"
-        if _iso(start) == _iso(end):
-            return _iso(start)
-        return f"{_iso(start)} to {_iso(end)}"
+        if grain in HOURLY_GRAINS:
+            return _range_at(start, end)
+        return _range(start, end)
 
     start = _parse_stamp(value.get("value", ""))
     if start is None:
@@ -167,20 +215,16 @@ def _canonical(entity: dict, now: datetime) -> str:
         return handed_back
 
     if grain in HOURLY_GRAINS:
-        # A clock time on today is just the clock time - `resolve` already rolls it forward to
-        # the next occurrence if it has passed, which is the behaviour asked for.
+        # `resolve` already rolls a passed clock time forward to the next occurrence
         if start.date() == now.date():
             return f"{start:%H:%M}"
-        return f"{_iso(start)} to {_iso(start)}"
+        return _range_at(start, start + timedelta(hours=1))
     if grain == "month":
-        return f"{start:%B %Y}".lower()          # "march 2022" - resolve reads a whole month
+        return _range(start, start + relativedelta(months=1) - timedelta(days=1))
     if grain == "year":
-        return f"{start:%Y}"                     # a bare year - resolve reads the whole of it
+        return _range(start, start + relativedelta(years=1) - timedelta(days=1))
     span = _POINT_SPAN.get(grain, timedelta(days=1))
-    end = start + span - timedelta(seconds=1)
-    if _iso(start) == _iso(end):
-        return _iso(start)
-    return f"{_iso(start)} to {_iso(end)}"
+    return _range(start, start + span - timedelta(seconds=1))
 
 
 async def canonical(text: str, now: datetime | None = None,
@@ -192,17 +236,15 @@ async def canonical(text: str, now: datetime | None = None,
     """
     now = now or datetime.now()
     entity = _best(await _ask(text, now, client))
-    return _canonical(entity, now) if entity else ""
+    return _canonical(entity, now, text) if entity else ""
 
 
 async def probe() -> dict:
     """Is the service actually answering, and with the locale that reads dates day-first?
 
-    Startup-only, and worth a round trip for the same reason `generation.probe` is: every
-    failure inside a turn is deliberately silent - it falls back to the tables, which is right
-    mid-turn and wrong for a deployment. A stopped container and a slow one look identical from
-    inside `_ask`, and so does the far worse case of a container answering with the wrong
-    locale: en_US reads "11/06/2026" as 6 November and nothing downstream can tell.
+    Startup-only. Every failure inside a turn is deliberately silent, which is right mid-turn
+    and wrong for a deployment - and the worst case is silent by design: en_US reads
+    "11/06/2026" as 6 November and nothing downstream can tell.
     """
     if not DUCKLING_ENABLED:
         return {"ok": False, "note": "DUCKLING_ENABLED is off - time expressions fall back to "
@@ -262,10 +304,8 @@ async def demo():
         assert await form("rain in march 2022") == "march 2022"
         assert await form("rain in 2017") == "2017"
 
-        # a bare future month is handed back for timewindow._bare_month to read as the most
-        # recent one - Duckling says June 2027, which is true English and unanswerable weather
-        # the body Duckling matched is what is handed back, preposition and all - "in june" is
-        # a form `_bare_month` reads, and its `_NEEDS_A_PREPOSITION` rule wants that preposition
+        # a bare future month is handed back for timewindow._bare_month, preposition and all -
+        # its `_NEEDS_A_PREPOSITION` rule wants it
         assert await form("rainfall in june") == "in june", await form("rainfall in june")
         assert resolve("in june", now).start.year == 2026, "the most recent June, not 2027"
 

@@ -16,48 +16,33 @@ only for batch transcription of stored files.
 import argparse
 import asyncio
 import json
-import statistics
 import subprocess
 import sys
 import time
 import urllib.request
 import wave
 from dataclasses import dataclass, field
+from pathlib import Path
+
+# Anchored to the repo, not the shell - see stt_transport_bench.py.
+ROOT = Path(__file__).resolve().parent.parent
 
 import websockets
 
 CHUNK = 4096  # 2048 int16 samples = 128 ms, one browser worklet message
 CHUNK_SECONDS = CHUNK / 2 / 16000
 
-# `protocol` picks the wire format, not the service: stt and faster-whisper happen to speak
-# the same one (cumulative {"partial"}, {"eof":1} to finish, {"text"} to close the utterance).
+# `protocol` picks the wire format, not the service. faster-whisper speaks the cumulative
+# {"partial"} / {"eof":1} / {"text"} form that the retired PyTorch service also used.
 SERVICES = {
-    "stt": {
-        "socket": "ws://127.0.0.1:2700",
-        "health": "http://127.0.0.1:2700/health",
-        "container": "stt-stt-1",
-        "protocol": "partial-eof",
-        "what": "Nemotron 0.6B, PyTorch (stt/)",
-    },
     "stt-cpp": {
         "socket": "ws://127.0.0.1:2701/v1/realtime",
         "health": "http://127.0.0.1:2701/health",
         "container": "stt-cpp-stt-cpp-1",
         "protocol": "realtime",
         "what": "Nemotron 0.6B, NeMo-Speech.cpp (stt-cpp/)",
-    },
-    "whisper": {
-        # localhost, not 127.0.0.1, and it matters: Docker publishes this one on IPv6 (*:8000)
-        # and a stray uvicorn was found holding IPv4 127.0.0.1:8000, which answers 404 to
-        # everything. `localhost` resolves to ::1 first and reaches the container.
-        "socket": "ws://localhost:8000/ws",
-        "health": "http://localhost:8000/health",
-        "container": "faster-whisper-server",
-        "protocol": "partial-eof",
-        "what": "faster-whisper (../faster-whisper)",
-    },
+    }
 }
-
 
 @dataclass
 class Result:
@@ -260,7 +245,7 @@ async def main() -> int:
         print("    comparison until they match. Cap them the same way before deciding anything.")
     live = [n for n in names if not check_up(n).startswith("DOWN")]
     if not live:
-        return "no service reachable - docker compose up -d in stt/, stt-cpp/ and faster-whisper/"
+        return "no service reachable - docker compose up -d in stt-cpp/ and faster-whisper/"
     print()
 
     for name in live:  # a cold model would libel the first level, so spend one stream warming

@@ -76,22 +76,22 @@ const MapPinIcon = forwardRef<MapPinIconHandle, MapPinIconProps>(
   });
 
   const handleEnter = useCallback(
-   (e?: React.MouseEvent<HTMLDivElement>) => {
+   (e: React.MouseEvent<HTMLDivElement>) => {
     if (!isAnimated || reduced) return;
     if (!isControlled.current) {
      pathControls.start("animate");
      circleControls.start("animate");
-    } else onMouseEnter?.(e as any);
+    } else onMouseEnter?.(e);
    },
    [pathControls, circleControls, reduced, onMouseEnter, isAnimated],
   );
 
   const handleLeave = useCallback(
-   (e?: React.MouseEvent<HTMLDivElement>) => {
+   (e: React.MouseEvent<HTMLDivElement>) => {
     if (!isControlled.current) {
      pathControls.start("normal");
      circleControls.start("normal");
-    } else onMouseLeave?.(e as any);
+    } else onMouseLeave?.(e);
    },
    [pathControls, circleControls, onMouseLeave],
   );

@@ -1,63 +1,65 @@
 """
 The pipeline's unit checks. Run: python tests/test_pipeline_units.py
-
-These were `demo()` functions living inside the modules they check. Same assertions, same
-comments, now in one place that can be run without importing a module for its side effect - and
-`backend/pipeline/*.py` is left with nothing in it but the code that runs in production.
 """
 
 from _root import ROOT  # noqa: F401 - puts the repo root on sys.path
 
 
 def check_timewindow():
-    """Self-check: the calendar arithmetic and the row picker, on a fixed 'now'."""
+    """Self-check: the forms Duckling cannot produce, and the row picker.
+
+    Relative wording is not tested here and no longer belongs here - `backend.nlu.duckling`
+    resolves it and hands these dates over already absolute. What is left is the gap list.
+    """
     from backend.pipeline.timewindow import date, datetime, resolve, select_rows
     now = datetime(2026, 8, 13, 15, 30)          # a Thursday
 
-    assert resolve("tomorrow", now).start.date() == date(2026, 8, 14)
-    assert resolve("day after tomorrow", now).start.date() == date(2026, 8, 15)
-    assert resolve("yesterday", now).start.date() == date(2026, 8, 12)
-    assert resolve("monday", now).start.date() == date(2026, 8, 17)      # next, never today
+    # absolute forms, which is what arrives now
+    assert resolve("2026-08-14", now).start.date() == date(2026, 8, 14)
+    span = resolve("2026-08-14 to 2026-08-16", now)
+    assert span.start.date() == date(2026, 8, 14) and span.end.date() == date(2026, 8, 16)
+    assert resolve("2026-08-14", now).span_days == 1
 
-    evening = resolve("this evening", now)
-    assert evening.granularity == "hourly" and evening.start.hour == 17
-
+    # clock forms, from Duckling or from the tables
     assert resolve("18:45", now).start == datetime(2026, 8, 13, 18, 45)
     assert resolve("06:00", now).start == datetime(2026, 8, 14, 6, 0)    # already gone
-
-    span = resolve("next 3 days", now)
-    assert span.start.date() == date(2026, 8, 13) and span.end.date() == date(2026, 8, 15)
-    assert resolve("this weekend", now).start.date() == date(2026, 8, 15)   # Saturday
+    evening = resolve("17:00-21:00", now)
+    assert evening.granularity == "hourly" and evening.start.hour == 17
 
     default = resolve(None, now)
     assert default.label == "next few days" and default.granularity == "daily"
 
-    # calendar wording, which the relative resolver alone could never do
-    assert resolve("in august 2019", now).start.date() == date(2019, 8, 1)
-    assert resolve("in august 2019", now).end.date() == date(2019, 8, 31)
-    assert resolve("from 2010 to 2025", now).span_days == 5844
-    assert resolve("on 15 august 2023", now).span_days == 1
+    # --- the gap list: what Duckling has no rule for -------------------------
+    early = resolve("early morning", now)
+    assert early.granularity == "hourly" and early.start.hour == 4, early
     assert resolve("for all of 2023", now).start.date() == date(2023, 1, 1)
+    assert resolve("the last decade", now).span_days > 3600
+    # a date range must not collapse to its first date - Duckling returns only the first
+    assert resolve("11 jan 2026 and 17 jan 2026", now).span_days == 7
     # the abbreviated-month bug: this must be one day, not the whole of 2026
     assert resolve("11 jun 2026", now).span_days == 1, resolve("11 jun 2026", now)
-    # a date range must not collapse to its first date
-    assert resolve("11 jan 2026 and 17 jan 2026", now).span_days == 7
+    assert resolve("in august 2019", now).start.date() == date(2019, 8, 1)
+    assert resolve("in august 2019", now).end.date() == date(2019, 8, 31)
 
-    # ...and the row picker reads the same calendar
+    # wording that is nobody's - neither Duckling's nor the gap list's - is refused, not
+    # answered with the horizon and a straight face
+    assert not resolve("sometime soonish", now).understood
+
+    # ...and the row picker filters by that one window rather than a second calendar
     daily = [{"Date_time": f"2026-08-{d:02d}T00:00:00"} for d in range(12, 22)]
-    picked, label = select_rows(daily, "tomorrow", now)
+    picked, label = select_rows(daily, "2026-08-14", now)
     assert len(picked) == 1 and picked[0]["Date_time"].startswith("2026-08-14"), picked
-    assert select_rows(daily, "next 3 days", now)[0] == daily[1:4]       # 12 Aug is past
-    assert len(select_rows(daily, "", now)[0]) == 7 and label == "tomorrow"
+    assert select_rows(daily, "2026-08-13 to 2026-08-15", now)[0] == daily[1:4]  # 12 Aug is past
+    assert len(select_rows(daily, "", now)[0]) == 7 and label == "14 Aug 2026"
     assert select_rows(daily, "15 august 2026", now)[0][0]["Date_time"].startswith("2026-08-15")
-    assert select_rows([], "tomorrow", now) == ([], "no data")
+    assert select_rows([], "2026-08-14", now) == ([], "no data")
 
     hourly = [{"Date_time": f"2026-08-13T{h:02d}:00:00"} for h in range(24)]
-    assert len(select_rows(hourly, "this evening", now)[0]) == 5        # 17:00-21:00
+    assert len(select_rows(hourly, "17:00-21:00", now)[0]) == 5        # 17:00-21:00
 
     print("timewindow demo OK")
-    for wording in ("tomorrow", "this evening", "in august 2019", "from 2010 to 2025",
-                    "over the last 5 years", "11 jun 2026", None):
+    for wording in ("2026-08-14", "17:00-21:00", "in august 2019", "early morning",
+                    "the last decade", "11 jun 2026", None):
         w = resolve(wording, now)
         print(f"  {str(wording):22s} {w.start:%Y-%m-%d %H:%M} -> {w.end:%Y-%m-%d %H:%M}  "
               f"{w.span_days:>5}d  {w.granularity:6s} {w.label}")
@@ -103,39 +105,39 @@ def check_plan():
     now = datetime(2026, 8, 13, 15, 30)
     here = [{"name": "Guntur", "lat": 16.3, "lon": 80.4}]
     two = here + [{"name": "Vizag", "lat": 17.7, "lon": 83.2}]
-    # routing is what this checks; whether the internal archive answers today is a separate
-    # question, so the archive-backed cases are asserted with it assumed up
+    # archive-backed cases are asserted with the archive assumed up - routing is the subject
     up = lambda **kw: plan(**{"archive": True, "now": now, **kw})
 
-    # Inside the hourly feed's 24h reach -> hourly, so the answer can say *when*.
-    for wording in ("now", "today", "tonight", "this evening"):
+    # Inside the hourly feed's 24h reach -> hourly, so the answer can say *when*. These are
+    # what Duckling hands over for "now", "today", "tonight" and "this evening".
+    for wording in ("15:30", "2026-08-13", "2026-08-13T18:00 to 2026-08-13T23:59"):
         assert up(times_normalized=[wording], places=here).source is Source.GFS_HOURLY, wording
 
-    # ...and outside it -> daily. "tomorrow" asked at 15:30 ends 32h out, past what /hrlydata
-    # holds; serving it hourly would drop tomorrow evening and make the answer depend on the
-    # clock.
-    for wording in ("tomorrow", "this week", "day after tomorrow"):
+    # ...and outside it -> daily. "tomorrow" at 15:30 ends 32h out, past /hrlydata's reach;
+    # hourly would drop tomorrow evening and make the answer depend on the clock.
+    for wording in ("2026-08-14", "2026-08-14 to 2026-08-20", "2026-08-15"):
         p = up(times_normalized=[wording], places=here)
         assert p.source is Source.GFS_DAILY and p.resolution is Resolution.DAILY, (wording, p)
 
     # The rule is the reach, not the word: the same wording flips as the clock moves.
-    assert plan(times_normalized=["tomorrow morning"], places=here, archive=True,
+    morning = "2026-08-14T06:00 to 2026-08-14T11:59"
+    assert plan(times_normalized=[morning], places=here, archive=True,
                 now=datetime(2026, 8, 13, 6, 0)).source is Source.GFS_DAILY
-    assert plan(times_normalized=["tomorrow morning"], places=here, archive=True,
+    assert plan(times_normalized=[morning], places=here, archive=True,
                 now=datetime(2026, 8, 13, 22, 0)).source is Source.GFS_HOURLY
 
-    assert up(times_normalized=["yesterday"], places=here).source is Source.GFS_HISTORICAL
-    assert up(times_normalized=["yesterday"], places=here,
+    assert up(times_normalized=["2026-08-12"], places=here).source is Source.GFS_HISTORICAL
+    assert up(times_normalized=["2026-08-12"], places=here,
               level="district").source is Source.POSTGRES_AGG          # an area, not a point
-    assert up(times_normalized=["last week"], places=two).source is Source.ZARR_BULK
+    assert up(times_normalized=["2026-08-03 to 2026-08-09"],
+              places=two).source is Source.ZARR_BULK
 
     p = up(times_normalized=["in august 2019"], places=here)
     assert p.source is Source.ZARR_POINT and p.start.startswith("2019-08-01"), p
     assert p.end.startswith("2019-08-31"), p.end
     assert up(times_normalized=["on 15 august 2023"], places=here).span_days == 1
 
-    # 5,844 days. The ladder already answers this in YEARLY, so it is affordable as asked -
-    # 16 rows out of a GROUP BY rather than a million observations.
+    # 5,844 days, answered YEARLY - 16 rows out of a GROUP BY, not a million observations
     p = up(times_normalized=["from 2010 to 2025"], places=here)
     assert p.verdict is Verdict.EXECUTE and p.resolution is Resolution.YEARLY and p.rows == 16, p
 
@@ -145,7 +147,8 @@ def check_plan():
     p = up(times_normalized=["for all of 2023"], places=three)
     assert p.verdict is Verdict.COARSEN and p.rows <= MAX_ROWS and p.offer, p
 
-    assert up(times_normalized=["next month"], places=here).verdict is Verdict.REJECT
+    assert up(times_normalized=["2026-09-01 to 2026-09-30"],
+              places=here).verdict is Verdict.REJECT
     p = up(times_normalized=["tomorrow"], places=[])
     assert p.verdict is Verdict.ASK and "place" in p.reason, p
 
@@ -201,8 +204,7 @@ def check_windows():
 
     dry = below("Rainfall", 1.0)
 
-    # A day that rains only in the afternoon has a usable morning. This is the whole point:
-    # the total is 12mm either way, and only one of these two is a wet morning.
+    # 12mm either way, and only one of these two is a wet morning
     afternoon = hours([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 4.0, 5.0, 3.0])       # 06:00, rain from 12
     found = runs(afternoon, dry, hourly=True)
     assert len(found) == 1, found
@@ -231,9 +233,8 @@ def check_windows():
     assert longest([]) is None
     assert not fragmented([], hours([3.0] * 6), 4, hourly=True), "no window is not fragmented"
 
-    # A missing reading breaks the run rather than being assumed dry. This is why the
-    # conditions are built here: `row.get("Rainfall") or 0` reads None as zero, which for
-    # rainfall means "dry" and would have quietly bridged the gap.
+    # A missing reading breaks the run rather than being assumed dry: `or 0` reads None as
+    # zero, which for rainfall means "dry" and would quietly bridge the gap.
     gappy = hours([0.0, 0.0, None, 0.0, 0.0])
     assert [w.hours for w in runs(gappy, dry, hourly=True)] == [2.0, 2.0], runs(gappy, dry, hourly=True)
     assert [w.hours for w in runs(hours([0.0, -999, 0.0]), dry, hourly=True)] == [1.0, 1.0]
@@ -403,8 +404,7 @@ def check_advice():
         return res
 
     # ---- the whole point: the same total, two different answers -------------------
-    # 12mm either way. In the afternoon it leaves a clear morning; spread through the day it
-    # leaves nothing. The old engine summed and said no to both.
+    # 12mm either way; only the afternoon case leaves a clear morning. A sum says no to both.
     afternoon = hourly_rows([0.0] * 6 + [4.0, 5.0, 3.0], RH=60.0)
     scattered = hourly_rows([2.0, 0.0, 2.0, 0.0, 2.0, 0.0, 2.0, 0.0, 4.0], RH=60.0)
     assert round(sum(values(afternoon, "Rainfall"))) == round(sum(values(scattered, "Rainfall")))
@@ -447,8 +447,7 @@ def check_advice():
               hourly=False).verdict == CAUTION
 
     # ---- the length of the period must not change the answer ---------------------
-    # A sum only grows, so the old engine answered "can I go out today" and "...this week"
-    # differently for identical weather. The window is the same window either way.
+    # A sum only grows, so "today" and "this week" used to differ for identical weather.
     drizzle = [0.3, 0.0, 0.4, 0.0, 0.3, 0.0, 0.4]
     short = ev("RAIN_PROTECTION", days(3, Rainfall=drizzle[:3]), hourly=False)
     long = ev("RAIN_PROTECTION", days(7, Rainfall=drizzle), hourly=False)
@@ -501,9 +500,8 @@ def check_advice():
 def check_render():
     """Self-check: a comparison names the winner, and says which way it won.
 
-    "Min temp: A 21.3 · B 20.5. Highest: A." was true and unreadable - both a human skimming
-    and the phrasing model downstream read "min ... A" as "A is the lower one", and the chat
-    duly said the opposite of the data.
+    "Min temp: A 21.3 · B 20.5. Highest: A." was true and unreadable - it reads as "A is the
+    lower one", and the chat duly said the opposite of the data.
     """
     from backend.pipeline.render import build_table, format_value, summarize, summary_stat
     places = [{"name": "Hyderabad"}, {"name": "Vijawada"}]
@@ -513,22 +511,19 @@ def check_render():
     assert said.startswith("Hyderabad has the higher"), said
     assert "21.3" in said and "Vijawada 20.5" in said, said
 
-    # Adding happens only when a total was asked for. This is the whole rule: the same week
-    # of rain is a mean under RAW and a total under SUM, and never a total by accident.
+    # the same week of rain is a mean under RAW and a total under SUM, never by accident
     assert summary_stat("Rainfall", [1.0, 2.0, 3.0], "SUM") == (6.0, "total")
     assert summary_stat("Rainfall", [1.0, 2.0, 3.0], "RAW") == (2.0, "average")
     assert summary_stat("Tmax", [10.0, 20.0], "SUM") == (15.0, "average")   # never additive
     assert summary_stat("Rainfall", [], "SUM") == (0.0, "")
 
-    # ...and the sentence follows it. A week of rain under RAW describes the series; the total
-    # appears only when the question said "total".
+    # ...and the sentence follows it: the total appears only when the question said "total"
     week = [{"Date_time": f"2026-08-{d:02d}T00:00:00", "Rainfall": v}
             for d, v in enumerate([0.2, 6.0, 0.0, 0.1, 3.0], start=14)]
     raw = summarize("GET", week, ["Rainfall"], places[:1], "this week")
     assert "total" not in raw and "rain on 2 of 5 readings" in raw, raw
     assert "up to 6.0mm" in raw, raw
-    # the description does not change when a total was asked for - the total is said once, by
-    # `analysis.apply_aggregation`, and this sentence follows it
+    # the total is said once, by `analysis.apply_aggregation`; this sentence follows it
     assert summarize("GET", week, ["Rainfall"], places[:1], "this week", "SUM") == raw
     dry = summarize("GET", [{"Date_time": "2026-08-14T00:00:00", "Rainfall": 0.1},
                             {"Date_time": "2026-08-15T00:00:00", "Rainfall": 0.0}],
@@ -563,12 +558,9 @@ def check_render():
     print(f"  {said}")
 
 def check_routing():
-    """The route, the profile and the parameters - and the two bugs they surfaced.
-
-    Both bugs were the same shape: an expression the code did not recognise fell through to a
-    default that looked like an answer. Neither failed loudly, and both answered a question
-    about a month with a week of data.
-    """
+    """The route, the profile and the parameters - and the two bugs they surfaced, both the
+    same shape: an unrecognised expression falling through to a default that looked like an
+    answer."""
     from datetime import datetime
     from types import SimpleNamespace
 
@@ -593,8 +585,8 @@ def check_routing():
     assert resolve("may", now).start.date() >= now.date(), "bare 'may' is not the month"
     assert resolve("last may", now).start.month == 5, "'last may' is"
 
-    # --- bug 2: `select_rows` fell back to rows[:7] for any expression its ladder did not
-    # know. The archive returned all thirty days of June and twenty-three were dropped.
+    # --- bug 2: `select_rows` fell back to rows[:7] for anything its ladder did not know,
+    # so all thirty days of June came back as seven.
     june = [{"Date_time": f"2026-06-{day:02d}T00:00:00", "Rainfall": 1.0}
             for day in range(1, 31)]
     picked, _ = select_rows(june, "last june", now)
@@ -610,10 +602,10 @@ def check_routing():
                                            "fields": lambda: ["Rainfall"], **kw})
     win = lambda c: resolve(c, now)
     for slots, canonical, wanted in (
-            (said(activity="SPRAY"), "tomorrow", "ACTIVITY"),
-            (said(action="COMPARE"), "tomorrow", "COMPARE"),
+            (said(activity="SPRAY"), "2026-08-27", "ACTIVITY"),
+            (said(action="COMPARE"), "2026-08-27", "COMPARE"),
             (said(), "last june", "HISTORICAL"),
-            (said(), "tomorrow", "FORECAST")):
+            (said(), "2026-08-27", "FORECAST")):
         got = profiles.pick(slots, win(canonical), now).route
         assert got == wanted, f"{canonical!r}: routed {got}, wanted {wanted}"
 
@@ -625,46 +617,48 @@ def check_routing():
     assert reduced.aggregation == "SUM", "a month of rain is a total, not thirty rows"
     assert reduced.assumed, "a reduction nobody asked for has to be admitted"
 
-    sprayed = params.resolve(said(activity="SPRAY", times_normalized=["tomorrow"]),
-                             profiles.pick(said(activity="SPRAY"), win("tomorrow"), now),
+    sprayed = params.resolve(said(activity="SPRAY", times_normalized=["2026-08-27"]),
+                             profiles.pick(said(activity="SPRAY"), win("2026-08-27"), now),
                              here, now=now)
     assert "Wind_Speed" in sprayed.fields, "a spraying rule cannot answer without wind"
     for key in ("window", "aggregation", "fields", "places", "source"):
         assert sprayed.why.get(key), f"no reason recorded for {key}"
-    # --- bug 3: the "today onwards" prefilter exempted the past with a two-name list,
-    # {"yesterday", "last week"}. Every other way of naming the past fell through it, so the
-    # archive's twenty-one rows for "last 7 days" left as one - the row dated today.
+    # --- bug 3: the "today onwards" prefilter exempted the past with a two-name list, so
+    # the archive's twenty-one rows for "last 7 days" left as one - the row dated today.
     from datetime import timedelta
     days = [{"Date_time": (now - timedelta(days=d)).strftime("%Y-%m-%dT00:00:00"),
              "Rainfall": 1.0} for d in range(10, -4, -1)]
-    for canonical, wanted in (("last 7 days", 7), ("last 2 days", 2), ("yesterday", 1)):
+    iso = lambda d: (now - timedelta(days=d)).strftime("%Y-%m-%d")
+    for canonical, wanted in ((f"{iso(7)} to {iso(1)}", 7), (f"{iso(2)} to {iso(1)}", 2),
+                              (iso(1), 1)):
         picked, _ = select_rows(days, canonical, now)
         assert len(picked) == wanted, f"{canonical}: {len(picked)} rows, wanted {wanted}"
     # ...and a forward question still drops the days the feed sent from before today
-    picked, _ = select_rows(days, "tomorrow", now)
+    picked, _ = select_rows(days, (now + timedelta(days=1)).strftime("%Y-%m-%d"), now)
     assert len(picked) == 1 and picked[0]["Date_time"].startswith(
         (now + timedelta(days=1)).strftime("%Y-%m-%d")), picked
 
     # --- the time gate: rules place what they can, and nothing else is believed
     from backend.nlu.times import known, mentions_time
-    assert known("tomorrow") and known("last 7 days") and known("17:30")
+    # `known` gates what `resolve` recognises, and that is now absolute forms plus the gap
+    # list. "tomorrow" is Duckling's to place, not this module's.
+    assert known("2026-08-27") and known("17:30") and known("early morning")
     assert not known("prior days") and not known("last summer") and not known("")
-    assert not known("next few days please"), "a sentence is not a canonical form"
+    assert not known("tomorrow"), "relative wording is resolved upstream, not here"
     # the trigger for spending a model call at all
     assert mentions_time("can i know yesterday rainfall")
     assert not mentions_time("will it rain in guntur"), "no time words, no call"
-    # --- what wins over what, when a profile default meets a spoken word. These lived in a
-    # demo() inside params.py, which meant the same rules were asserted in two files.
+    # --- what wins over what, when a profile default meets a spoken word
     prof = lambda **kw: profiles.Profile(kw.pop("route", "ACTIVITY"), **kw)
-    spoken = params.resolve(said(times_normalized=["tomorrow"]),
+    spoken = params.resolve(said(times_normalized=["2026-08-27"]),
                             prof(window="next 2 days"), here, now=now)
-    assert spoken.window == "tomorrow", "what they said beats the profile"
+    assert spoken.window == "2026-08-27", "what they said beats the profile"
     assert not spoken.assumed, "what they said is not an assumption"
     quiet = params.resolve(said(), prof(window="next 2 days"), here, now=now)
     assert quiet.window == "next 2 days" and quiet.assumed, "an assumption is admitted"
 
     loud = params.resolve(said(text="total rainfall last week", aggregation="SUM",
-                               times_normalized=["last week"]),
+                               times_normalized=["2026-08-17 to 2026-08-23"]),
                           prof(route="HISTORICAL", aggregation="AVG"), here, now=now)
     assert loud.aggregation == "SUM", "a spoken reduction beats the profile's default"
     # a caller's pin beats both, so three compared columns reduce the same way
@@ -675,12 +669,52 @@ def check_routing():
 
     print("routing OK - bare months, whole windows, past rows kept, four routes, time gate")
 
+def check_presentation():
+    """Self-check: what goes on screen. Offline - the model's pick is an input here, so the
+    rule, the correction of an impossible pick, and the wire shape are all checkable without
+    a model being up."""
+    from backend.pipeline import Answer
+    from backend.pipeline.render import presentation
+
+    def answer(rows=0, columns=0, points=0, **kw):
+        a = Answer(places=[{"name": "Guntur"}])
+        a.table = {"columns": [{"key": "time"}] * (columns + 1),
+                   "rows": [{"time": str(i)} for i in range(rows)]}
+        a.chart = ({"series": [{"points": [{}] * points}]}) if points else None
+        for key, value in kw.items():
+            setattr(a, key, value)
+        return a
+
+    # the rule, with nothing chosen for it
+    assert presentation(answer(rows=7, points=7))["detail"] == "chart", "a series is a shape"
+    assert presentation(answer(rows=7, columns=4))["detail"] == "table", "a grid is a grid"
+    assert presentation(answer(rows=2, columns=2))["detail"] == "none", "the sentence said it"
+    assert presentation(answer(rows=7, points=7, advice=object()))["detail"] == "none", \
+        "a verdict is a one-line answer, whatever is under it"
+
+    # the model's pick, taken - and corrected when the payload cannot fill it
+    picked = presentation(answer(rows=7, points=7), "table", "scan the values", "gemma")
+    assert picked["detail"] == "table" and picked["decided_by"] == "gemma", picked
+    impossible = presentation(answer(rows=7), "chart", "", "gemma")
+    assert impossible["detail"] == "table" and impossible["decided_by"] == "rule", impossible
+    assert presentation(answer(), "table", "", "gemma")["detail"] == "none", "no rows, no table"
+    assert presentation(answer(rows=7, points=7), "sideways")["decided_by"] == "rule", \
+        "a view that does not exist is not a choice"
+
+    # the wire shape: what is not open is still offered, never silently dropped
+    offered = presentation(answer(rows=7, points=7), "chart", "", "gemma")
+    assert offered["chart"] == "open" and offered["table"] == "available", offered
+    assert offered["rows"] == 7 and offered["columns"] == 0, offered
+    print("  rule -> chart/table/none, model's pick honoured, impossible pick downgraded")
+    print("presentation OK - one decision, and it is never allowed to be unrenderable")
+
+
 def main():
     """Every check in this file, in order. Any assertion failure stops it."""
-    for check in (check_timewindow, check_places, check_plan, check_windows, check_analysis, check_quality, check_advice, check_render, check_routing,):
+    for check in (check_timewindow, check_places, check_plan, check_windows, check_analysis, check_quality, check_advice, check_render, check_routing, check_presentation,):
         print(f"{check.__name__}:")
         check()
-    print("\n9 check(s) passed")
+    print("\n10 check(s) passed")
 
 
 if __name__ == "__main__":

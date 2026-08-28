@@ -1,4 +1,4 @@
-"""The trained model's raw output for one sentence, or a REPL, or the eval suite.
+"""The trained classifier's raw output for one sentence, or a REPL, or the eval suite.
 
 Usage:
     python scripts/test_model.py                                     # interactive console
@@ -6,8 +6,9 @@ Usage:
     python scripts/test_model.py --eval                              # eval suite
     python scripts/test_model.py --demo                              # self-check
 
-One model is served, so there is no version flag and no compare mode. Side-by-side against the
-hosted model lives at POST /api/compare, which runs the whole pipeline per column.
+One bundle is served, so there is no version flag and no compare mode here. Side-by-side
+against the prompted classifiers lives at POST /api/compare, which runs the whole pipeline
+per column.
 """
 
 import argparse

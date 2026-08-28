@@ -3,10 +3,10 @@ The same sentence through every model, streamed as each one finishes.
 
     python -m backend.api.compare "should i spray in Guntur tomorrow"
 
-The trained model answers in milliseconds offline; the hosted one is a network round trip to a
+The trained classifier answers in milliseconds offline; a prompted one is a round trip to a
 model with no training on this label set at all, working purely from the schema in its prompt.
 Putting them side by side on the same sentence is the only honest way to know what the trained
-model is worth - and where a general model is simply better, which is worth knowing too.
+one is worth - and where a general model is simply better, which is worth knowing too.
 
 Each column carries the *same* payload a chat turn produces, built by the same
 `Answer.payload`, so a compared answer and a chatted answer are the same object and the UI
@@ -25,7 +25,7 @@ import asyncio
 import time
 
 from backend.api.deps import registry
-from backend.nlu import MODELS, Understanding, normalize_text
+from backend.nlu import MODELS, normalize_text
 from backend.nlu import llm as hosted
 from backend.pipeline import run, sources
 from src.v4.schema import weather_intent_for
@@ -36,27 +36,8 @@ SCALAR_FIELDS = ("intent", "weather_intent", "activity", "aggregation")
 LIST_FIELDS = ("variables", "locations", "times")
 
 
-def _from_hosted(column: dict, text: str) -> Understanding | None:
-    """The hosted model's JSON, in the same Understanding the trained models produce.
-
-    Built here rather than in `nlu.llm` so that module stays a pure client - and so the
-    downstream pipeline genuinely cannot tell which model it is running for.
-    """
-    if not column.get("ok"):
-        return None
-    return Understanding(
-        text=text, version="llm", intent=column["intent"],
-        action="COMPARE" if column["intent"] == "COMPARISON" else "GET",
-        aggregation=column["aggregation"], variables=column["variables"],
-        locations=column["locations"], times=column["times"],
-        times_normalized=column["times_normalized"], confidence=1.0,
-        activity=column["activity"], sub_activity=column.get("sub_activity", ""),
-        entities=column.get("entities", {}), family=column["family"],
-        reply=column.get("reply", ""), detail="NORMAL")
-
-
 def contenders() -> list[dict]:
-    """Every model this deployment can compare, the trained one first."""
+    """Every classifier this deployment can compare, the trained one first."""
     entries = [{"version": v, "name": spec["name"], "kind": "local", "provider": ""}
                for v, spec in MODELS.items()]
     entries.append({"version": "llm", "name": hosted.NAME, "kind": "hosted",
@@ -73,7 +54,7 @@ async def _column(version: str, text: str) -> dict:
             if not got.get("ok"):
                 return {"version": version, "ok": False, "error": got["error"],
                         "latency_ms": got.get("latency_ms", 0)}
-            understanding = _from_hosted(got, text)
+            understanding = hosted.to_understanding(got, text)
             nlu_ms, usage = got.get("latency_ms", 0), got.get("usage", {})
         else:
             understanding = registry.understand(text, version)

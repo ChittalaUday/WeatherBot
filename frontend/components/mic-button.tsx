@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { Loader2, Mic } from "lucide-react";
+import { Loader2, Mic, X } from "lucide-react";
 import { useRef } from "react";
 import { Waveform } from "@/components/waveform";
 import { useDictation } from "@/lib/use-dictation";
@@ -57,7 +57,7 @@ export function MicButton({
   return (
     <>
       {recording && analyser && (
-        <Waveform analyser={analyser} className="h-5 w-16 shrink-0 text-red-500 sm:w-24" />
+        <Waveform analyser={analyser} className="h-5 w-32 shrink-0 text-red-500 sm:w-48" />
       )}
       {/* A disabled button swallows hover in Chrome and Safari, so the tooltip has to sit
           on a wrapper that is not itself disabled. */}
@@ -67,9 +67,10 @@ export function MicButton({
       >
         <button
           type="button"
+          suppressHydrationWarning
           // The closing words land just after the mic is released, so a stopped mic is
           // not a finished one: block a restart until the server has closed the utterance.
-          disabled={disabled || pending || unavailable !== null}
+          disabled={Boolean(disabled || pending || unavailable !== null)}
           onClick={() => {
             if (!recording) base.current = value;
             toggle();
@@ -86,7 +87,13 @@ export function MicButton({
             error && !recording && "border-red-500/40 text-red-500",
           )}
         >
-          {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mic className="h-4 w-4" />}
+          {pending ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : recording ? (
+            <X className="h-4 w-4" />
+          ) : (
+            <Mic className="h-4 w-4" />
+          )}
         </button>
       </span>
     </>

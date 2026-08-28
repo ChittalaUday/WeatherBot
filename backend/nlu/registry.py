@@ -1,17 +1,18 @@
 """
-Model registry - the trained model, and the shape everything downstream reads.
+Model registry - the trained classifier, and the shape everything downstream reads.
 
-    Model 2  v4  four heads and a tagger; everything derivable is derived, not predicted
+    Trained classifier  v4  four heads and a tagger; everything derivable is derived,
+                            not predicted
 
 `Understanding` is the common denominator the rest of the backend consumes, so the pipeline,
-the generation layer and the context engine never touch a model directly. `backend.nlu.llm`
-(Model 3, hosted) produces the same shape without being in this registry: it loads no bundle,
-and it is only reachable through /api/compare.
+the generation layer and the context engine never touch a classifier directly. The prompted
+classifiers in `backend.nlu.llm` produce the same shape without being in this registry: they
+load no bundle, and they are reached through the model switch and /api/compare.
 
 The bundle keeps its on-disk name (models/nlu_v4.joblib) and its version id ("v4"): that names
-the architecture, and the conversation store has turns tagged that way. "Model 2" is what a
-human sees. A registry with one entry is kept because it is what makes adding v5 a data
-change - `MODELS` and a loader branch - rather than a rewrite of every caller.
+the architecture, and the conversation store has turns tagged that way. "Trained classifier"
+is what a human sees. A registry with one entry is kept because it is what makes adding v5 a
+data change - `MODELS` and a loader branch - rather than a rewrite of every caller.
 """
 
 from __future__ import annotations
@@ -36,12 +37,12 @@ from src.v4.schema import Intent as V4Intent
 from src.v4.schema import fields_for as v4_fields_for
 
 MODELS = {
-    "v4": {"name": "Model 2", "path": V4_BUNDLE,
+    "v4": {"name": "Trained classifier", "path": V4_BUNDLE,
            "description": "16 intents incl. chat and control, 12 activities, entity gazetteer; "
                           "weather window, action group and sub-activity are derived, not predicted"},
 }
 DEFAULT_VERSION = DEFAULT_MODEL if DEFAULT_MODEL in MODELS else "v4"
-# The trained model commits to a reading rather than stopping to ask (MODEL_RULES Rule 1.1),
+# The trained classifier commits to a reading rather than stopping to ask (MODEL_RULES 1.1),
 # so the clarify branches downstream are dead for it - kept only because a future head that
 # does ask would need them back.
 NEVER_ASKS = frozenset(MODELS)
@@ -110,8 +111,8 @@ class Understanding:
         return venue_for(self.activity, self.sub_activity, self.text)
 
     def fields(self) -> list:
-        """Columns to fetch. Model 3 speaks the v4 schema too - it is prompted with those
-        enums - so both versions map the same way."""
+        """Columns to fetch. A prompted classifier speaks the v4 schema too - it is given
+        those enums - so every version maps the same way."""
         return v4_fields_for(self.variables, self.detail or "NORMAL")
 
 
@@ -145,7 +146,7 @@ def _understand_v4(model, text: str) -> Understanding:
         sub_activity=sub_activity_for(parsed.activity, parsed.slots.entities, text),
         entities=dict(parsed.slots.entities),
         family=family,
-        reply=(REPLIES.get(parsed.intent) or [""])[0] if family != "data" else "",
+        reply=(REPLIES.get(parsed.intent, "")[0] if isinstance(REPLIES.get(parsed.intent), list) else REPLIES.get(parsed.intent, "")) if family != "data" else "",
         # width is a lexical fact, not a prediction - "full report" vs "just the temperature"
         detail=detail_from_text(text),
     )

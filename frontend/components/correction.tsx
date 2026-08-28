@@ -38,7 +38,7 @@ export function Correction({
     staleTime: 10 * 60_000,
   });
 
-  // Model 1 predicts a set of variables, never a single intent, so this is always multi-select
+  // The classifier predicts a set of variables, never a single intent, so this is always multi-select
   const options: string[] = data?.variables ?? [];
   const [picked, setPicked] = useState<string[]>(variables);
   const [place, setPlace] = useState(locations.join(", "));

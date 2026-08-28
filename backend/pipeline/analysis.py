@@ -72,10 +72,6 @@ def wants_chart(text: str) -> bool:
     """
     return any(word in (text or "").lower() for word in CHART_WORDS)
 
-
-# The subset of AGG_WORDS that can only mean a reduction. "how much" and "overall" are in the
-# table above because they *support* a prediction; they are too loose to *make* one - "how much
-# rain tomorrow" is a question about tomorrow, not a request for a sum.
 EXPLICIT = {
     "SUM": ("total", "cumulative", "sum", "add up", "altogether"),
     "AVG": ("average", "avg", "mean", "on average"),

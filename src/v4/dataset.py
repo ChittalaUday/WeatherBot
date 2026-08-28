@@ -6,21 +6,16 @@ v4 dataset - built for uniqueness rather than row count.
     python -m src.v4.dataset --check           # the quality invariants, as assertions
     python -m src.v4.dataset --samples 12
 
-v3 shipped 16,362 rows of which only 13,978 texts were distinct - 14.6% of the file was the
-same sentence again. Six follow-up templates accounted for 1,455 rows on their own ("what
-about @ then?" appeared 307 times), and HISTORICAL got 71 rows, 0.4% of the set. A model
-trained on that learns the popular templates very well and the rare cell not at all.
-
-So this builder is bounded by diversity instead of by a row target:
+v3 was 14.6% duplicate text - one follow-up template alone produced 307 rows. So this builder
+is bounded by diversity instead of by a row target:
 
   1. every text is unique, case-folded, across the whole file
   2. no template may produce more than MAX_PER_SKELETON rows - a skeleton is the text with
      its location and time spans masked out, so it identifies the template, not the sentence
   3. locations are drawn from a shuffled cycle over the whole vocabulary, so all 1,166 names
      appear rather than the first few hundred appearing often
-  4. every name contributes four surface forms - canonical, qualified address, a misspelling
-     and a code ("Hyderabad" / "Hyderabad, Telangana" / "Hydrabad" / "HYD"), all from
-     data/locations.csv, and each is annotated verbatim as its own span
+  4. every name contributes four surface forms - "Hyderabad" / "Hyderabad, Telangana" /
+     "Hydrabad" / "HYD" - each annotated verbatim as its own span
   5. cells are quota'd per (intent, weather_intent), and a cell that cannot be filled with
      unique rows is reported short instead of padded with repeats
 
@@ -79,20 +74,15 @@ FIELDS = ["chat_id", "turn", "text", "intent", "weather_intent", "variables", "a
 # --- quality knobs ----------------------------------------------------------
 MAX_PER_SKELETON = 6      # rows one template may contribute, per split. v3's worst was 307.
 # Rows per (source, weather_intent) cell, as a multiple of --per-cell. Reductions and
-# comparisons are real but not half of what anyone asks, so they get a smaller share than the
-# plain information and advice frames.
+# comparisons are real but not half of what anyone asks.
 QUOTA = {"information": 1.0, "aggregation": 0.45, "comparison": 0.6, "advice": 1.0,
          "implicit": 1.0, "confusion": 0.45, "comparative": 0.5, "history": 0.8,
          "longrange": 0.5}
-# Share of emissions realised as a paraphrase group: same slots, same labels, different
-# wording. Not duplicates - the text differs and `check` still refuses an exact repeat - but
-# deliberately identical in meaning, which is what teaches invariance to phrasing. Anything
-# under ~8% and the model has no evidence that wording is not meaning.
-REDUNDANCY = 0.065       # ~2.25 rows per group; the comparative source diluted 0.05 below the floor
-# Natural language really does name the action most of the time - "should i wash my car" is
-# not a defect. What matters is that EVERY activity also has keyword-free examples, so the
-# model has evidence that the keyword is not the label. Hence a per-activity floor rather than
-# a global ceiling, which would only push the metric around without guaranteeing coverage.
+# Share of emissions realised as a paraphrase group: same slots and labels, different wording.
+# Under ~8% the model has no evidence that wording is not meaning.
+REDUNDANCY = 0.065
+# A per-activity floor, not a global ceiling: every activity needs keyword-free examples, or
+# the model learns "spray" -> SPRAY and never reads the sentence.
 MIN_IMPLICIT_SHARE = 0.20  # per activity: share of its ADVICE rows naming no cue for itself
 MAX_ENTITY_LEAK = 0.25     # entity terms that only ever appear with one activity
 TYPO_RATE = 0.22          # share of prompts with a misspelling outside every span
@@ -100,25 +90,19 @@ GRAMMAR_RATE = 0.18       # dropped articles, chat filler, missing question mark
 QUALIFIED_RATE = 0.20     # "Guntur, Andhra Pradesh" instead of "Guntur"
 MISSPELT_LOC_RATE = 0.16  # the place name itself misspelt, span updated to match
 CODE_RATE = 0.08          # "HYD" instead of "Hyderabad"
-# Every place name in locations.csv is Title case, so a generator that never lowercases one
-# teaches the tagger that Title case IS the location feature - and then "rain in guntur",
-# which is how people actually type, finds no place at all.
+# Every name in locations.csv is Title case. Without this the tagger learns Title case IS the
+# location feature, and "rain in guntur" finds no place at all.
 LOWER_RATE = 0.25
 BARE_RATE = 0.30          # no location and/or no time at all - advisory questions omit both
 
 
 # --- vocabulary -------------------------------------------------------------
-# Several words per variable so the same label is reached by different wording. This is the
-# single biggest source of uniqueness in the file, so it is worth keeping rich.
 VARIABLE_WORDS = {
-    # "report", "summary", "update" ask for everything, not for one measurement - and none of
-    # them appeared anywhere in 24,000 rows, so "last 7 days report" fell back on context and
-    # came out as RAIN. A whole-picture word has to be a GENERAL word.
+    # "report"/"summary" ask for everything, and appeared nowhere in 24,000 rows - so
+    # "last 7 days report" fell back on context and came out as RAIN.
     Variable.GENERAL: ["weather", "conditions", "forecast", "climate", "weather conditions",
-                       # Only words that are unambiguously "the whole picture" in a weather
-                       # sentence. Bare "update", "data", "details", "numbers" were tried and
-                       # measurably hurt: "can you update where you check" is a verb, and
-                       # "details" collides with the "in detail" width cue.
+                       # "update", "data", "details", "numbers" were tried and measurably
+                       # hurt: "can you update where you check" is a verb.
                        "outlook", "report", "weather report", "weather summary",
                        "weather update", "weather data", "full report", "rundown",
                        "overview", "snapshot"],
@@ -139,9 +123,8 @@ VARIABLE_WORDS = {
 }
 
 TIMES = {
-    # Span quantifiers live here, not in some blocklist: "whole day" IS a time expression, and
-    # a user hit "rainfall fro whole day" resolving "whole" against the village index because
-    # no training text ever used one. Teaching them as times fixes the tag and the window.
+    # Span quantifiers are times, not a blocklist: "rainfall fro whole day" once resolved
+    # "whole" against the village index because no training text ever used one.
     WeatherIntent.CURRENT: ["now", "right now", "today", "this morning", "this afternoon",
                             "this evening", "tonight", "at the moment", "currently",
                             "later today", "in the next few hours", "at 6pm", "around noon",
@@ -161,11 +144,8 @@ TIMES = {
                              "next month", "in 2 days", "this saturday", "this monday",
                              "next friday", "coming sunday", "on saturday", "on tuesday",
                              "this thursday", "by friday"],
-    # explicit dates included: the archive serves any date, so a dated question is a normal
-    # HISTORICAL turn and the model has to read the date rather than refuse the year
-    # Long spans sit here as ordinary wording. The model's job is to report the span that was
-    # asked for; deciding whether ten years comes back as 120 monthly rows, 10 yearly ones, or
-    # a request to narrow it, belongs to the query planner.
+    # Explicit dates and long spans are ordinary wording here - the archive serves any date,
+    # and what a ten-year span comes back as is the query planner's decision, not the model's.
     WeatherIntent.HISTORICAL: ["yesterday", "last week", "last night", "last month",
                                "over the last few days", "the past week", "last sunday",
                                "on 15 august 2023", "in march 2022", "on 2023-08-15",
@@ -182,16 +162,13 @@ TIMES = {
                                "over the past 6 months", "each year since 2018"],
 }
 
-# How a place is worked into a sentence. Kept separate from the frames so every frame gets
-# every preposition instead of each frame hard-coding one.
+# Kept separate from the frames so every frame gets every preposition.
 PLACE_FORMS = ["in {loc}", "at {loc}", "for {loc}", "around {loc}", "near {loc}", "{loc}"]
 
-# The windows that actually carry data. WeatherIntent.NONE is a real label but has no wording
-# to draw from - it is what a greeting gets, not something to generate a time span for.
+# The windows that carry data. WeatherIntent.NONE is what a greeting gets - no span to draw.
 WINDOWS = tuple(TIMES)
 
-# Spans long enough for "year by year" or "monthly totals" to mean anything. Pairing a
-# long-range frame with "yesterday" produces text no user would type.
+# Long enough for "year by year" to mean anything - "yesterday" would not.
 LONG_TIMES = {
     WeatherIntent.HISTORICAL: ["in 2017", "from 2010 to 2025", "over the last 5 years",
                                "for all of 2023", "every year since 2015", "in the last decade",
@@ -222,9 +199,8 @@ INFORMATION_FRAMES = [
     "update on the {v} {loc} {t}",
     "{t} {v} {loc}",
     "{loc} {v} {t}",
-    # "will it rain tomorrow" is the single most asked weather question and no frame said it,
-    # so the nearest thing in the file was RAIN_PROTECTION's "will it rain on me" and plain
-    # forecast questions were being classified as advice.
+    # No frame said "will it rain tomorrow", so the nearest match was RAIN_PROTECTION's
+    # "will it rain on me" and plain forecast questions came back as advice.
     "{v} {t}",
     "{v} {t} {loc}",
     "how much {v} {t}",
@@ -240,10 +216,8 @@ INFORMATION_FRAMES = [
     "is {v} expected {loc} {t}",
 ]
 
-# Comparative adjectives, bound to the variable they mean. This is where "which one is cooler"
-# was going wrong: the old frame "which is hotter, {a} or {b}" carried no {v}, so the row's
-# variable label was whatever the generator happened to pick - the model learned that "hotter"
-# and "cooler" mean nothing. Six users' worth of corrections said so.
+# Comparative adjectives bound to the variable they mean. "which is hotter, {a} or {b}"
+# carried no {v}, so the label was whatever the generator picked and "hotter" meant nothing.
 COMPARATIVE = {
     Variable.TEMPERATURE: ["hotter", "cooler", "warmer", "colder", "milder"],
     Variable.RAIN: ["wetter", "rainier", "drier"],
@@ -276,9 +250,8 @@ COMPARISON_FRAMES = [
     "between {a} and {b}, where is the {v} better {t}",
 ]
 
-# One entry per activity: the ways people actually ask, phrased as a decision rather than a
-# measurement. {loc} and {t} are optional in every one of them - real advisory questions very
-# often name neither, which is why BARE_RATE exists.
+# One entry per activity, phrased as a decision rather than a measurement. {loc} and {t} are
+# optional in all of them - real advisory questions often name neither.
 ADVICE_FRAMES = {
     Activity.RAIN_PROTECTION: [
         "should i take an umbrella {loc} {t}", "do i need an umbrella {loc} {t}",
@@ -359,9 +332,8 @@ ADVICE_FRAMES = {
     ],
 }
 
-# Frames that name no keyword for their own activity. Without these the model learns
-# "spray" -> SPRAY and nothing else, which is what the shortcut metric measures: 61% of
-# ADVICE rows gave the label away in a single word before these existed.
+# Frames naming no keyword for their own activity. Before these, 61% of ADVICE rows gave the
+# label away in a single word.
 IMPLICIT_FRAMES = {
     Activity.SPRAY: [
         "should i protect the {crop} from insects {loc} {t}",
@@ -429,10 +401,8 @@ IMPLICIT_FRAMES = {
     ],
 }
 
-# Deliberate crossings. The material does not decide the activity - the verb does. Spraying a
-# fertiliser is foliar feeding and is genuinely SPRAY; mixing a pesticide into the soil is
-# genuinely not. Without these, 51 of 131 entity terms mapped to exactly one activity and the
-# model could skip reading the sentence.
+# Deliberate crossings: the verb decides the activity, not the material. Without these, 51 of
+# 131 entity terms mapped to exactly one activity and the model could skip the sentence.
 CONFUSION_FRAMES = [
     ("should i spray {material} on the {crop} {loc} {t}", Activity.SPRAY,
      {EntityType.MATERIAL: "FERTILIZE"}),
@@ -469,8 +439,7 @@ CROSS_POOLS = {
     "WARM": ["jacket", "sweater", "woollens", "shawl"],
 }
 
-# Fragments that lean on the previous turn. v3 let six of these produce 1,455 rows; here they
-# obey MAX_PER_SKELETON like everything else.
+# Fragments that lean on the previous turn. In v3 six of these produced 1,455 rows.
 FOLLOW_FRAMES = {
     Operation.REPLACE: ["what about {loc}", "and {loc}", "how about {loc}", "and in {loc}",
                         "{loc}", "same for {loc}", "now {loc}", "ok and {loc}",
@@ -504,9 +473,8 @@ HISTORY_FRAMES = [
     "check {v} {loc} {t}",
 ]
 
-# "history" as a NOUN, where the word itself is the time span: "history of rainfall",
-# "rainfall history for Guntur". The modifier form ("historical rainfall") was learned; these
-# were not, because no frame ever put a time word in that position.
+# "history" as a NOUN, where the word is the time span. The modifier form was learned; this
+# was not, because no frame ever put a time word in that position.
 HISTORY_NOUN_FRAMES = [
     "{t} of {v} for {loc}",
     "{t} of {v} in {loc}",
@@ -556,9 +524,8 @@ AGG_VARIABLES = {
     Aggregation.TREND: [Variable.TEMPERATURE, Variable.RAIN, Variable.WIND, Variable.CLOUD],
 }
 
-# Turns that never reach the weather API. Written out rather than generated from slots: the
-# whole point of these classes is the phrasings a weather template could never produce, and
-# there is no {loc}/{t} combinatorics to lean on - the variety has to be in the wording.
+# Turns that never reach the weather API. Written out rather than generated: the whole point
+# is the phrasings a weather template could never produce.
 CHITCHAT_FRAMES = {
     Intent.GREETING: [
         "hi", "hello", "hey", "hey there", "good morning", "good afternoon", "good evening",
@@ -724,8 +691,8 @@ def skeleton(text: str, spans: list[str]) -> str:
 def load_locations(path: Path = LOCATIONS_CSV) -> dict[str, list[dict]]:
     """data/locations.csv -> per-split place records carrying every surface form.
 
-    The codes and misspellings columns are what src/fetch_locations.py added: "HYD" and
-    "Hydrabad" are how people type, and until now the tagger only ever saw "Hyderabad".
+    The codes and misspellings columns come from src/fetch_locations.py - "HYD" and "Hydrabad"
+    are how people type.
     """
     if not path.exists():
         raise SystemExit(f"{path} missing - run: python src/fetch_locations.py")
@@ -750,9 +717,8 @@ def fill_entities(rng: random.Random, text: str, activity=Activity.NONE,
                   pool=None) -> tuple[str, dict[str, list[str]]]:
     """Swap {sport} / {crop} / {material} ... for a real term, and record what went in.
 
-    The generator knows the entity because it chose it, so the annotation is exact - no
-    regex over the finished sentence. `check` then confirms the gazetteer finds the same
-    term back, which is what keeps ENTITY_VOCAB and the frames from drifting apart.
+    The annotation is exact because the generator chose the entity. `check` confirms the
+    gazetteer finds it back, which keeps ENTITY_VOCAB and the frames from drifting apart.
     """
     entities: dict[str, list[str]] = {}
     for slot, kind in ENTITY_SLOTS.items():
@@ -864,12 +830,8 @@ def _noise(rng: random.Random, text: str, spans: list[str]) -> str:
 
 
 def _capitalise(text: str, spans: list[str]) -> tuple[str, list[str]]:
-    """Sentence case, carrying any span that starts the sentence along with it.
-
-    "tomorrow evening weather in Karivane" becomes "Tomorrow evening weather ..." and the
-    span has to become "Tomorrow evening" with it, or it is no longer verbatim in its own
-    prompt (Rule 4.1) and the row is thrown away.
-    """
+    """Sentence case, carrying any span that starts the sentence along with it - or the span
+    is no longer verbatim in its own prompt (Rule 4.1) and the row is thrown away."""
     if not text or not text[0].islower():
         return text, spans
     head = text[0].upper() + text[1:]
@@ -894,14 +856,11 @@ def generate(rng: random.Random, places: list[dict], split: str, per_cell: int) 
     def emit(intent, want, frames, *, activity=Activity.NONE, variables=None,
              aggregation=Aggregation.RAW, operation=Operation.SET, source="gen",
              bare_ok=False, second=None, pool=None, times_pool=None):
-        """`want` chooses which time wordings to draw from; the label is then derived from
-        the span that was actually drawn, so weather_intent and times cannot disagree.
+        """`want` chooses which time wordings to draw from; the label is derived from the
+        span actually drawn, so weather_intent and times cannot disagree.
 
-        `frames` is a list. With probability REDUNDANCY the same slots are realised through
-        two or three of them, producing rows that are textually different and semantically
-        identical - the paraphrase groups the model needs to learn that wording is not
-        meaning. They share a `para_group` so the redundancy can be measured, and held out
-        together if you ever want a paraphrase-invariance eval.
+        With probability REDUNDANCY the same slots are realised through two or three of
+        `frames`, giving paraphrase groups that share a `para_group`.
         """
         if isinstance(frames, str):
             frames = [frames]
@@ -910,8 +869,8 @@ def generate(rng: random.Random, places: list[dict], split: str, per_cell: int) 
         time_span = rng.choice(wordings) if (place or not bare_ok
                                              or rng.random() < 0.7) else None
         weather_intent = weather_intent_for(normalize_time(time_span) if time_span else None)
-        # the source is part of the cell key: without it the plain information frames fill
-        # every INFORMATION cell first and the reduction frames are all refused
+        # the source is part of the cell key, or the plain information frames fill every
+        # INFORMATION cell first and the reduction frames are all refused
         cell = (source, weather_intent)
         if counter[cell] >= round(per_cell * QUOTA.get(source, 1.0)):
             return False
@@ -936,8 +895,8 @@ def generate(rng: random.Random, places: list[dict], split: str, per_cell: int) 
                 text = _clean(text.replace("{t}", time_span or ""))
             else:
                 text, locations, times = _phrase(rng, place, time_span, text)
-            # entity spans join locations and times as protected text: a typo inside "cotton"
-            # would leave the annotation pointing at a word that is no longer there
+            # entity spans are protected text too: a typo inside "cotton" would leave the
+            # annotation pointing at a word that is no longer there
             all_spans = locations + times + entity_spans
             text, all_spans = _capitalise(_noise(rng, text, all_spans), all_spans)
             n_places, n_stamps = len(locations), len(times)
@@ -957,8 +916,7 @@ def generate(rng: random.Random, places: list[dict], split: str, per_cell: int) 
     # INFORMATION - the plain "what is the X" requests, every variable, every window
     for weather_intent in WINDOWS:
         for _ in range(per_cell * 4):                       # over-offer; the cap does the rest
-            # "what's the weather" is the single most common thing anyone asks, so GENERAL is
-            # drawn far more often than a uniform pick over the ten would give it
+            # GENERAL is drawn far more often than a uniform pick would give it
             variables = [Variable.GENERAL if rng.random() < 0.25 else rng.choice(list(Variable))]
             if rng.random() < 0.12:                         # "rain and temperature"
                 other = rng.choice([v for v in Variable if v != variables[0]])
@@ -1051,9 +1009,8 @@ def generate_chitchat(rng: random.Random, places: list[dict], split: str,
                       per_intent: int, builder: Builder) -> None:
     """The turns that never reach the weather API.
 
-    weather_intent is NONE for all of them, including OUT_OF_RANGE: "weather in December" does
-    name a window, but we decline before any window is resolved, so labelling it FORECAST
-    would promise a fetch that never happens.
+    weather_intent is NONE for all of them, OUT_OF_RANGE included: "weather in December" names
+    a window, but we decline before resolving one, and FORECAST would promise a fetch.
     """
     for intent, frames in CHITCHAT_FRAMES.items():
         made = 0
@@ -1080,9 +1037,8 @@ def generate_conversations(rng: random.Random, places: list[dict], split: str,
                            count: int, builder: Builder) -> None:
     """Multi-turn chats: a full question, then fragments that inherit from it.
 
-    The fragments are where v3 duplicated worst, so they are added last and share the same
-    skeleton cap as everything else - once "and @?" has appeared MAX_PER_SKELETON times it is
-    refused like any other template.
+    The fragments are where v3 duplicated worst, so they obey MAX_PER_SKELETON like everything
+    else.
     """
     for chat in range(count):
         place = surface(rng, rng.choice(places))
@@ -1119,7 +1075,7 @@ def generate_conversations(rng: random.Random, places: list[dict], split: str,
             else:
                 fragment, spans = frame, []
             fragment, spans = _capitalise(fragment + ("?" if rng.random() < 0.6 else ""), spans)
-            # context is set from the *final* spans: "{t}" alone becomes "Tomorrow", and a
+            # context comes from the *final* spans: "{t}" alone becomes "Tomorrow", and a
             # context still holding "tomorrow" would drop the span from the annotation
             if operation is Operation.REPLACE:
                 context_places = list(spans)
@@ -1136,10 +1092,8 @@ def generate_conversations(rng: random.Random, places: list[dict], split: str,
                 split=split, source="chats")
 
 
-# Import shim, and only that: the hand-written seed files predate the activity column, so the
-# activity has to be read back out of the sentence. Generated rows never go through this - they
-# know their activity because the frame was chosen for it. A seed that matches no cue is kept
-# as INFORMATION rather than guessed at, so a mislabelled ADVICE row never enters training.
+# Import shim only: the seed files predate the activity column, so it is read back out of the
+# sentence. A seed matching no cue stays INFORMATION rather than being guessed at.
 ACTIVITY_CUES = {
     Activity.RAIN_PROTECTION: ("umbrella", "raincoat", "rain gear", "get wet", "getting wet"),
     Activity.SUN_PROTECTION: ("sunscreen", "sunblock", "sun protection", "sunburn", "a cap",
@@ -1194,15 +1148,14 @@ def load_seeds(builder: Builder, split: str) -> int:
                     times = [t for t in json.loads(record[5] or "[]") if t in text]
                 except (ValueError, IndexError):
                     continue
-                # "soon and back by evening" carries two spans and only the second buckets:
-                # take the first that does, so the temporal label is not lost to span order
+                # "soon and back by evening" has two spans and only the second buckets - take
+                # the first that does, so the label is not lost to span order
                 spans = [normalize_time(t) for t in times]
                 normalized = next((s for s in spans if bucket_for(s) is not TimeBucket.NONE),
                                   spans[0] if spans else None)
                 activity = (activity_from_seed(text, record[1]) if intent is Intent.ADVICE
                             else Activity.NONE)
-                # an ADVICE seed whose activity we cannot read is still a perfectly good
-                # INFORMATION row - better that than an ADVICE row with nothing to decide
+                # an ADVICE seed with no readable activity is still a good INFORMATION row
                 row_intent = Intent.INFORMATION if activity is Activity.NONE else intent
                 variables = (ACTIVITY_VARIABLES.get(activity) or [Variable.GENERAL])
                 added += builder.add(
@@ -1279,12 +1232,8 @@ def load(path: Path | str = CSV_PATH, split: str | None = None,
 
 
 def shortcut_rate(rows: list[dict]) -> tuple[float, dict]:
-    """Share of ADVICE rows that name a keyword for their own activity.
-
-    The number that says whether the model can skip reading the sentence. A row matching its
-    own cue is not wrong - "should i spray" really is SPRAY - but a set where nearly every row
-    does teaches keyword lookup rather than intent.
-    """
+    """Share of ADVICE rows that name a keyword for their own activity - whether the model can
+    skip reading the sentence. One such row is fine; a set of them teaches keyword lookup."""
     advice = [r for r in rows if r["intent"] == "ADVICE"]
     if not advice:
         return 0.0, {}
@@ -1309,8 +1258,7 @@ def entity_leak(rows: list[dict]) -> tuple[float, list[str]]:
             per_type[kind].add(row["activity"])
             for term in terms:
                 seen[f"{kind}={term.lower()}"].add(row["activity"])
-    # A sport only ever belongs to OUTDOOR_ACTIVITY - that is the ontology, not a leak. Only
-    # types that genuinely span several activities can leak.
+    # A sport only ever belongs to OUTDOOR_ACTIVITY - ontology, not a leak.
     crossable = {kind for kind, acts in per_type.items() if len(acts) > 1}
     scored = {k: v for k, v in seen.items() if k.split("=")[0] in crossable}
     if not scored:
@@ -1329,8 +1277,7 @@ def stats(rows: list[dict]) -> dict:
     texts = [r["text"].lower() for r in rows]
     shapes = Counter(skeleton(r["text"], r["locations"] + r["times"]) for r in rows)
     names = {name for r in rows for name in r["locations"]}
-    # the cap is per split, so the busiest template is reported per split too - a template at
-    # the cap in all three splits is not a template that ran away
+    # the cap is per split, so this is reported per split too
     per_split = Counter()
     for row in rows:
         per_split[(row["split"], skeleton(row["text"], row["locations"] + row["times"]))] += 1

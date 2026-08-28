@@ -16,15 +16,17 @@ correct but blunt. `probe()` exists so a *deployment* is not silent about it.
 
 from backend.generation.context import Context, build
 from backend.generation.llm import (
-                                    TROUBLE_LINES,
-                                    explain,
-                                    grounded,
-                                    probe,
-                                    say,
-                                    stream,
-                                    trouble_line,
-                                    usable,
+    TROUBLE_LINES,
+    explain,
+    grounded,
+    probe,
+    say,
+    say_conversational,
+    stream,
+    trouble_line,
+    usable,
 )
 
-__all__ = ["Context", "build", "explain", "grounded", "probe", "say", "stream",
-           "trouble_line", "usable", "TROUBLE_LINES"]
+__all__ = ["Context", "build", "explain", "grounded", "probe", "say", "say_conversational",
+           "stream", "trouble_line", "usable", "TROUBLE_LINES"]
+

@@ -39,9 +39,7 @@ from src.schema import Action, Aggregation, WeatherIntent
 
 # --- vocabulary -------------------------------------------------------------
 
-# Real place names come from data/locations.csv (villages / blocks / districts / states
-# sampled read-only from the `shapes` schema by src/fetch_locations.py). The list below is
-# only the fallback for when that CSV is absent, so a build never requires DB access.
+# Fallback for when data/locations.csv is absent, so a build never requires DB access.
 # (surface text inserted into the prompt, annotated span inside that text)
 FALLBACK_LOCATIONS = [(x, x) for x in [
     "Hyderabad", "Vizag", "Visakhapatnam", "Rajahmundry", "Guntur", "Vijayawada",
@@ -52,8 +50,8 @@ FALLBACK_LOCATIONS = [(x, x) for x in [
     "London", "New York", "Tokyo", "Dubai", "Singapore", "Sydney", "Toronto",
 ]]
 
-# Relative locations (Rule 4.1). Surface carries its own preposition, so these are
-# only used in BARE_* frames where {loc} is not preceded by "in"/"for".
+# Relative locations (Rule 4.1). The surface carries its own preposition, so these are used
+# only in BARE_* frames where {loc} has no "in"/"for" before it.
 RELATIVE = [
     ("near me", "near me"), ("here", "here"), ("around here", "here"),
     ("at my location", "my location"), ("in this area", "this area"),
@@ -438,9 +436,8 @@ EXTRA = {
 }
 
 # --- location vocabulary from the shapes DB ----------------------------------
-# A fifth of the sampled names is reserved (split == "eval" in data/locations.csv) and never
-# generated into train/test, so the hand-written evaluation set can use place names this
-# model has genuinely never seen.
+# A fifth of the sampled names is reserved (split == "eval") and never generated into
+# train/test, so the eval set uses place names the model has never seen.
 
 FALLBACK_HELDOUT_LOCATIONS = [(x, x) for x in [
     "Eluru", "Machilipatnam", "Srikakulam", "Adilabad", "Chittoor", "Bhimavaram",
@@ -483,9 +480,8 @@ def _qualified(rng, chain):
 def _load_location_vocab(path=LOCATIONS_CSV):
     """(train pool, eval-only pool) of place names, from the shapes-DB sample when present.
 
-    Each row contributes its bare name and, most of the time, one address form built from
-    its village/block/district/state ancestry. The eval pool is held out by
-    src/fetch_locations.py so eval keeps unseen entity spans.
+    Each row contributes its bare name and usually one address form from its ancestry. The
+    eval pool is held out by src/fetch_locations.py so eval keeps unseen entity spans.
     """
     if not path.exists():
         print(f"  ! {path.name} missing - using the built-in city list "
@@ -495,8 +491,8 @@ def _load_location_vocab(path=LOCATIONS_CSV):
     pools = {"train": [], "eval": []}
     with path.open(newline="", encoding="utf-8") as fh:
         for row in csv.DictReader(fh):
-            # collapse internal whitespace: _clean() does the same to the prompt, and a
-            # "Ghagrapar  Circle" span would then no longer be verbatim in its own sentence
+            # _clean() collapses whitespace in the prompt, so a "Ghagrapar  Circle" span
+            # would no longer be verbatim in its own sentence
             row = {k: " ".join(v.split()) if isinstance(v, str) else v for k, v in row.items()}
             names = [row["name"]]
             if rng.random() < QUALIFIED_RATE:
@@ -554,9 +550,8 @@ AGG_FRAMES = {
     ],
 }
 
-# Sentences with real conversational padding. The tagger kept labelling "expect", "plan"
-# and "skies" as places because every training prompt was a bare command - these teach it
-# what an ordinary noun looks like next to a place name.
+# The tagger labelled "expect", "plan" and "skies" as places because every training prompt
+# was a bare command. These teach it what an ordinary noun looks like next to a place name.
 CHATTY_GET_FRAMES = [
     "i am planning a trip to {loc} {t}, what kind of {m} should i expect?",
     "i might be driving through {loc} {t}, any chance of {m}?",
@@ -581,15 +576,13 @@ CHATTY_COMPARE_FRAMES = [
     "we might go to {loc} or {loc2} {t}, how does the {m} compare?",
     "which one should i pick for {m} {t}, {loc} or {loc2}?",
     "is {loc} or {loc2} the safer bet for {m} {t}?",
-    # comma lists always carry "and"/"vs" as well: a bare comma belongs to an address
-    # ("Taloda, Nandurbar, Maharashtra"), not to a list of places
+    # a bare comma belongs to an address ("Taloda, Nandurbar, Maharashtra"), not to a list
     "compare the {m} in {loc}, {loc2} and {loc3} {t}",
     "{m} in {loc}, {loc2} and {loc3} {t}",
 ]
 
-# Comparatives where the adjective is the ONLY signal - no metric noun anywhere. "will X be
-# cooler than Y" has to reach TEMPERATURE on the strength of "cooler" alone, which is what
-# real users type and what every template so far avoided.
+# Comparatives where the adjective is the ONLY signal: "will X be cooler than Y" has to reach
+# TEMPERATURE on the strength of "cooler" alone.
 COMPARATIVE_EXTRA = {
     "TEMPERATURE": [
         "will {loc} be cooler than {loc2} {t}?",
@@ -639,8 +632,8 @@ ADJECTIVE_EXTRA = {
     "RAIN": ["is {loc} going to be wet {t}?", "will {loc} stay dry {t}?"],
 }
 
-# Conversational ALERT wording. Without these the chatty GET frames were being generated as
-# ALERT rows too, which taught the model that "can you check ..." means ALERT.
+# Without these the chatty GET frames were generated as ALERT rows too, teaching the model
+# that "can you check ..." means ALERT.
 CHATTY_ALERT_FRAMES = [
     "can you keep an eye on the {m} in {loc} {t}?",
     "let me know if the {m} changes in {loc} {t}",
@@ -662,9 +655,8 @@ CHATTY_RATE = 0.20   # share of prompts wrapped in conversational padding
 
 
 def _clock(rng):
-    """One clock label: '6 PM', '5:30 am', '7:05 PM'. Round hours and half hours dominate,
-    because that is how people speak, but odd minutes keep their tail so the model never
-    learns that ':00' and ':30' are the only shapes a time can have."""
+    """One clock label: '6 PM', '5:30 am', '7:05 PM'. Round and half hours dominate, but odd
+    minutes keep their tail so ':00' and ':30' are not the only shapes a time can have."""
     hour = rng.randint(1, 12)
     minute = rng.choices([0, 30, 15, 45, None], weights=[52, 24, 7, 7, 10])[0]
     if minute is None:
@@ -818,9 +810,8 @@ def _typo(rng, text, spans):
 def _typo_span(rng, text, spans):
     """Misspell a place name and update its annotation to match.
 
-    _typo() deliberately never touches spans, which left the tagger having seen every
-    village spelled perfectly - so "hyderbad" and "angara" went unrecognised. Here the
-    corruption is applied to text and annotation together, so the span stays verbatim.
+    _typo() never touches spans, which left the tagger seeing every village spelled perfectly
+    and missing "hyderbad". Here text and annotation are corrupted together.
     """
     candidates = [s for s in spans if len(s) >= 6 and s in text]
     if not candidates:
@@ -889,8 +880,8 @@ def _cell_rows(rng, intent: str, action: str, n: int, avoid=()):
             picked = [_pick_time(rng, times, clocks)] if n_time else []
         text, loc_spans, time_spans = _render(frame, rng.choice(metrics), locs, picked)
         text, loc_spans, time_spans = _style(rng, text, loc_spans, time_spans)
-        # Noise on purpose: a model that only ever sees clean templates scores 100% on more
-        # templates and falls over on the first real user. Spans survive untouched.
+        # Noise on purpose: clean templates score 100% on more templates and fall over on
+        # the first real user. Spans survive untouched.
         typo_rate = TYPO_RATE + (COMPARE_TYPO_BONUS if action == "COMPARE" else 0)
         for _ in range(2):
             if rng.random() < typo_rate:
@@ -938,9 +929,8 @@ def validate_row(row) -> str:
         for span in spans:
             if span not in text:
                 return f"{field} span {span!r} not verbatim in text"
-    # "on Friday" / "at 6 PM" must be annotated as "Friday" / "6 PM": the preposition belongs
-    # to the sentence, not the temporal expression. Mixing both conventions teaches the model
-    # two different right answers for the same phrase.
+    # "on Friday" is annotated "Friday": the preposition belongs to the sentence, not the
+    # expression, and mixing conventions teaches two right answers for one phrase.
     for span in row["time"]:
         if _LEADING_PREP.match(span):
             return f"time span {span!r} includes a leading preposition"
@@ -950,13 +940,12 @@ def validate_row(row) -> str:
 
 
 def india_share(rows) -> float:
-    """Share of real place names (relative spans like "near me" excluded) that the shapes DB
-    puts inside the India bbox. Names absent from data/locations.csv - the hand-written seed
-    cities - count as outside, so this number never flatters itself."""
+    """Share of real place names the shapes DB puts inside the India bbox. Names absent from
+    data/locations.csv count as outside, so the number never flatters itself."""
     relative = {span.lower() for _, span in RELATIVE}
     places = [s.lower() for r in rows for s in r["location"] if s.lower() not in relative]
-    # deliberately misspelt names match nothing in the vocabulary; scoring them as
-    # "outside India" would measure the typo rate rather than the geography
+    # misspelt names match nothing, and scoring them "outside India" would measure the typo
+    # rate rather than the geography
     known = [s for s in places if s in ALL_NAMES]
     return sum(s in INDIA_NAMES for s in known) / len(known) if known else 0.0
 

@@ -16,6 +16,10 @@ import { SunIcon } from "@/components/ui/sun-icon";
 export function ThemeToggle() {
   const { resolvedTheme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
+  // next-themes' documented hydration guard, and the one case the lint rule cannot allow for:
+  // the flag has to flip *after* the first client render or the server's markup and the
+  // client's disagree. There is nothing to synchronise it with but the render itself.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => setMounted(true), []);
 
   const dark = mounted && resolvedTheme === "dark";

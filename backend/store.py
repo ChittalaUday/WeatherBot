@@ -5,10 +5,9 @@ Every turn of every conversation, in SQLite, so real usage can retrain the model
     python -m backend.store --export data/from_users.csv    # gold rows for the next build
     python tests/test_store_units.py                        # the checks for this module
 
-Honest naming: this is not reinforcement learning. There is no reward signal and no policy -
-it is the same supervised loop MODEL_RULES.md already describes, fed by real users instead of
-templates: collect turns, keep the ones a human labelled, fold them into `data/intents.csv`,
-rebuild, retrain, and check the frozen hand-written eval set still improves.
+Not reinforcement learning: the same supervised loop MODEL_RULES.md describes, fed by real
+users instead of templates. Collect turns, keep the ones a human labelled, fold them into
+`data/intents.csv`, rebuild, retrain, check the frozen eval set still improves.
 
 The labels worth trusting, in order:
   1. `choice`     - the user picked an intent from a clarify prompt. A gold label, free.
@@ -118,8 +117,8 @@ BROKEN = ("malformed", "not a database", "disk image", "corrupt")
 class _Rows:
     """A cursor's results, already read, so nothing touches the connection after the lock.
 
-    `execute(...).fetchone()` looks atomic and is not: the fetch goes back to the connection
-    after the lock would have been released. Materialising here keeps every touch inside it.
+    `execute(...).fetchone()` looks atomic and is not - the fetch goes back to the connection
+    after the lock would have been released.
     """
 
     __slots__ = ("rows", "lastrowid", "rowcount")
@@ -145,26 +144,18 @@ class _Rows:
 class Resilient:
     """A connection that survives its file being replaced or going bad underneath it.
 
-    Two things happen in practice and both used to take the whole UI down with 500s:
-
-      - the file is swapped while the server is running (restoring a backup, say). The open
-        handle still maps the old image, so every read fails until a restart.
-      - the image is genuinely corrupt, and the frontend polls /api/feedback per turn, so one
-        bad page turns into a wall of errors.
-
-    Either way the answer is the same: reopen once and retry. If the file itself is the
-    problem it is moved aside - never deleted, it is the only copy of those turns - and a
-    fresh one takes its place, so the app keeps working and the wreck stays available.
+    A swapped file leaves the open handle mapping the old image; a corrupt one turns the
+    frontend's per-turn polling into a wall of 500s. Either way: reopen once and retry, and if
+    the file itself is the problem move it aside - never delete it, it is the only copy.
     """
 
     def __init__(self, path: Path):
         self.path = Path(path)
         self._connection = _open(self.path)
-        # sqlite3.threadsafety is 1 on this build: "threads may share the module, but not
-        # connections". FastAPI runs every sync endpoint in an anyio worker thread while the
-        # websocket writes turns from the event loop, so one shared connection was being used
-        # from several threads at once. check_same_thread=False turns off the warning, not the
-        # hazard - it corrupted the database one night and segfaulted the interpreter the next.
+        # sqlite3.threadsafety is 1 here: threads may share the module, not connections.
+        # FastAPI runs sync endpoints in worker threads, so one shared connection was used from
+        # several at once. check_same_thread=False turns off the warning, not the hazard - it
+        # corrupted the database one night and segfaulted the interpreter the next.
         self._lock = threading.RLock()
 
     def _quarantine(self) -> None:
@@ -269,13 +260,9 @@ def record_feedback(connection, turn_id, kind, *, intent=None, action=None, vari
                     model=None) -> int:
     """The user's current verdict on one turn - inserted once, updated thereafter.
 
-    `correction` and `choice` carry what it *should* have been; `down` on its own only says
-    something was wrong, which is triage, not training data. A thumbs-down followed by a
-    correction is one opinion refined, so it replaces the earlier row rather than adding to
-    it - otherwise the same turn would train twice, once with a label and once without.
-
-    Fields left as None keep whatever the previous revision held: correcting only the place
-    should not erase the intent that was already right.
+    A thumbs-down followed by a correction is one opinion refined, so it replaces the earlier
+    row; otherwise the same turn trains twice, once with a label and once without. Fields left
+    as None keep what the previous revision held.
     """
     connection.execute(
         """INSERT INTO feedback (turn_id, ts, updated_at, revisions, kind, intent, action,
@@ -384,12 +371,9 @@ def conversation(connection, chat_id: str) -> list[dict]:
 def recent_exchanges(connection, chat_id: str, limit: int = 3) -> list[tuple]:
     """The last few (question, answer) pairs of one chat, oldest first.
 
-    What the generation layer is handed so a follow-up is answered as one. Only turns that
-    actually answered: a "which place did you mean?" in the history reads to a small model as
-    a question it still owes a reply to, and it answers that instead of the one in front of it.
-
-    The model tag `record_turn` prefixes onto the text ("[v4] will it rain") is stripped - it
-    is for the training log, and in a prompt it is one more thing to copy.
+    Only turns that actually answered: a "which place did you mean?" in the history reads to a
+    small model as a question it still owes a reply to. The "[v4] " tag is stripped - in a
+    prompt it is one more thing to copy.
     """
     rows = connection.execute(
         "SELECT text, detail FROM turns WHERE chat_id = ? AND outcome IN "
@@ -422,11 +406,8 @@ def stats(connection) -> dict:
 
 
 def confusion(connection) -> dict:
-    """Predicted-vs-actual counts over human-labelled turns.
-
-    Accuracy alone hides which pair is the problem; this shows whether FORECAST keeps
-    swallowing CURRENT_CONDITIONS, which is what tells you what to write next.
-    """
+    """Predicted-vs-actual counts over human-labelled turns - accuracy alone hides which pair
+    is the problem, and the pair is what tells you what to write next."""
     pairs = Counter()
     for row in connection.execute(
             """SELECT t.intent predicted, f.intent actual FROM feedback f
@@ -452,11 +433,11 @@ def competing_intents(connection, limit: int = 10) -> list[tuple[str, float, str
 
 
 def training_rows(connection, include_approved=False, min_confidence=0.9) -> list[dict]:
-    """Human-labelled turns, ready to append to data/intents.csv (v1) or feed src.v2.dataset.
+    """Human-labelled turns, ready to append to data/intents.csv or feed src.v2.dataset.
 
-    A `choice` or `correction` supplies the label; the model's own prediction fills whatever
-    the human did not touch. `up` is only taken when the model was already confident, and
-    never by default: approving a guess does not make it evidence.
+    A `choice` or `correction` supplies the label; the prediction fills what the human did not
+    touch. `up` is only taken when the model was already confident - approving a guess does
+    not make it evidence.
     """
     wanted = ["choice", "correction"] + (["up"] if include_approved else [])
     placeholders = ",".join("?" * len(wanted))
@@ -512,14 +493,9 @@ def review_queue(connection, limit: int = 50) -> list[dict]:
 def failed_turns(connection, limit: int = 500) -> list[dict]:
     """Every turn that did not answer, with what the model read and why it stopped.
 
-    `training_rows` only sees turns a human took the trouble to label. These are the ones that
-    failed on their own - the location that resolved to nothing, the date that came back as a
-    place, the fetch that died - and they are the cheapest labels in the database, because the
-    failure itself says what the right answer was not.
-
-    Grouped by `error_type` so the shape of the failure is visible before anything is
-    retrained: 12 turns spread evenly over four causes is four small problems, and 12 turns of
-    one cause is one worth fixing properly.
+    The cheapest labels in the database: the failure itself says what the right answer was not.
+    Grouped by `error_type`, because 12 turns over four causes is four small problems and 12
+    of one cause is one worth fixing properly.
     """
     rows = []
     for record in connection.execute(

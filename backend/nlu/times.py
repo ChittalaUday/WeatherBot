@@ -4,29 +4,19 @@ Time expressions the rule tables do not know, canonicalised by a model.
     python tests/test_nlu_units.py          # the checks for this module
     ollama pull qwen3:1.7b                  # OLLAMA_MODEL and OLLAMA_URL in .env
 
-`src.tagger.normalize_time` holds 248 hand-written entries - 132 aliases, 102 span quantifiers,
-14 words for "the past" - and every one of them was added after somebody's question came back
-wrong. It still misses thirteen of the fourteen phrasings taken from this deployment's own
-history: "prior days", "previous days", "last few days", "earlier today", "so far today",
-"since morning", "the other day", "couple of days back", "last summer", "this time last year".
-
-That table cannot be finished. English has no closed set of ways to say "the last few days",
-so a lookup plus a difflib fallback will always be one bug report behind, and the bug it is
-behind is silent - an expression it cannot place passes through raw, and the window resolver
-answers with next week under the user's own words.
+`src.tagger.normalize_time`'s 248 hand-written entries still miss thirteen of the fourteen
+phrasings taken from this deployment's own history ("prior days", "last summer", "so far
+today"), and the miss is silent: an expression it cannot place passes through raw and the
+resolver answers with next week under the user's own words. That table cannot be finished.
 
 So the open half moves to a model and the closed half stays here:
 
     model   an arbitrary phrase  ->  one of the canonical forms      open vocabulary, semantic
     code    a canonical form     ->  absolute dates                  arithmetic, must be exact
 
-The split is not a preference. A model that does date arithmetic is a model that will one day
-put "last 7 days" three days out and be believed, because the answer will look like every
-other answer. `backend.pipeline.timewindow.resolve` keeps that half and always will.
-
-**The model proposes; this module disposes.** Whatever comes back is fed to `resolve` and kept
-only if `resolve` recognises it. A model free to invent a canonical form would simply move the
-silent-wrong-answer one layer along, which is the failure this exists to close.
+A model that does date arithmetic will one day put "last 7 days" three days out and be
+believed. **The model proposes; this module disposes** - whatever comes back is fed to
+`resolve` and kept only if `resolve` recognises it.
 """
 
 from __future__ import annotations
@@ -38,29 +28,19 @@ import httpx
 
 from backend.config import OLLAMA_MODEL, OLLAMA_THINK, OLLAMA_URL
 from backend.nlu import duckling
-from backend.pipeline.timewindow import resolve
+from backend.pipeline.timewindow import parse_dates, resolve
+from src.tagger import normalize_time
 
-# Every phrase ever asked about, and what it came back as. Novel wording costs one call for the
-# life of the process and nothing after that; this deployment's whole history is 173 distinct
-# questions, so the cache is small and the hit rate is high.
+# Every phrase ever asked about. Novel wording costs one call for the life of the process.
 _SEEN: dict = {}
 
-# A reasoning model spends the budget on reasoning FIRST, and the reasoning grows with the
-# number of spans - so a budget that fits three spans returns nothing at all for ten, and
-# `done_reason: "length"` with an empty content field looks exactly like a model that cannot
-# do the task. Measured on qwen3:1.7b: three spans thought for ~1.1k characters, ten for
-# ~4.9k, and the same ten-span call came back truncated on one run and complete on the next.
-#
-# So the batch is bounded instead of the budget being guessed. Small chunks keep the thinking
-# short enough to be predictable, and a real turn carries one unplaceable span, not ten.
-#
-# The bound stays even with OLLAMA_THINK off: it is what keeps the reply short enough to be
-# reliable, and it is the safety net for anyone who switches reasoning back on.
+# A reasoning model spends its budget on reasoning first, and the reasoning grows with the
+# span count: measured on qwen3:1.7b, three spans thought for ~1.1k characters and ten for
+# ~4.9k, truncating on one run and not the next. So the batch is bounded rather than the budget
+# guessed. The bound stays with OLLAMA_THINK off - it is the net for switching it back on.
 CHUNK, NUM_PREDICT = 3, 1200
-# Twenty seconds is the wording layer's timeout, where a slow reply only costs a blunter
-# sentence; here it costs the dates, so this waits longer. Generous rather than tight: with
-# reasoning off a call lands in ~0.15s, and the only thing this bound protects against is a
-# machine under load.
+# Longer than the wording layer's 20s: there a slow reply costs a blunter sentence, here it
+# costs the dates. With reasoning off a call lands in ~0.15s.
 TIMEOUT = 45.0
 
 FORMS = """Allowed canonical forms, and nothing else:
@@ -96,29 +76,26 @@ Example:
 {"prior days":"last 7 days","coming through tonight":"tonight","at half five":"17:30"}"""
 
 
-# Words that mean a time at all. The trigger for reading the sentence: without one of these
-# there is nothing to find, and asking a model to look costs a second per turn for nothing.
+# The trigger for reading the sentence: without one of these there is nothing to find.
 _TIMEY = re.compile(
     r"\b(now|today|tonight|tomorrow|tommorow|tommorrow|tmrw|yesterday|last|next|past|prior|"
     r"previous|earlier|later|recent|history|historical|ago|since|till|until|"
     r"hour|hours|day|days|week|weeks|month|months|year|years|weekend|"
     r"morning|afternoon|evening|night|noon|midnight|summer|winter|monsoon|"
     r"mon|tue|wed|thu|fri|sat|sun|am|pm|"
+    # Full month names and a bare year, both of which the abbreviations miss: `\bjun\b` does
+    # not fire inside "june", so "rain in june" and "rain for all of 2023" were gated out
+    # before anything could read them and answered with the default horizon.
+    r"january|february|march|april|may|june|july|august|september|october|november|december|"
     r"jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)\b"
-    # A clock time is time-shaped and matches none of the words above: "6pm" is one token, so
-    # `\bpm\b` never fires inside it, and "between 6pm and 9pm" was gated out before anything
-    # could read it - answered with the default horizon, silently.
+    r"|\b(?:19|20)\d{2}\b"
+    # "6pm" is one token, so `\bpm\b` never fires inside it and "between 6pm and 9pm" was
+    # gated out before anything could read it.
     r"|\d{1,2}\s*(?:am|pm)\b|\d{1,2}:\d{2}"
-    # "at 6" - a bare hour, which only reads as a time after "at". Anchored to the preposition
-    # on purpose: a loose `\d{1,2}` would send "rain over 5 acres" and "guntur 500" to be read
-    # as clock times.
-    #
-    # The lookahead is not optional. "soil moisture at 5 cm" is a depth, and Duckling reads
-    # "at 5" out of it as five in the afternoon with no latent flag - it cannot tell a unit
-    # from an hour, so this has to. Measured, not guessed: that question came back with a
-    # 17:00 window.
-    # `%` is outside the `\b` group on purpose: it is not a word character, so a trailing
-    # `\b` after it never matches and "humidity at 80 %" slipped straight through.
+    # "at 6" - a bare hour, anchored to the preposition so "rain over 5 acres" is not a clock
+    # time. The lookahead is not optional: "soil moisture at 5 cm" is a depth, and Duckling
+    # reads "at 5" out of it as five in the afternoon. `%` sits outside the `\b` group because
+    # it is not a word character, so "humidity at 80 %" slipped straight through.
     r"|\bat\s+\d{1,2}\b(?!\s*(?:%|(?:cm|mm|km/?h|kmph|kph|m/s|mps|knots?|kg|ha|deg|"
     r"degrees?|acres?|ft|feet|inch|inches|litres?|hectares?|m)\b))", re.I)
 
@@ -152,14 +129,9 @@ def mentions_time(text: str) -> bool:
 async def for_question(text: str, client: httpx.AsyncClient | None = None) -> str:
     """The canonical period this question asks about, read from the whole sentence.
 
-    This exists because the span tagger is the half that fails now, not the normaliser. Handed
-    "can i know yesterday rainfall" it returned no span at all, and "rainfall in hyderabad last
-    summer" gave it "last" - which normalises to "last 7 days" and answers a question about a
-    season with a week, confidently. Neither is fixable by a bigger alias table: a truncated
-    span and a missing one both look like "no time was named" from downstream.
-
-    So the model reads the sentence instead of the tagger's guess at part of it. Whatever it
-    says still has to survive `known()`.
+    The span tagger is the half that fails: "can i know yesterday rainfall" returned no span,
+    and "last summer" gave it "last", which normalises to "last 7 days". Neither is fixable by
+    a bigger alias table. Whatever the model says still has to survive `known()`.
     """
     text = (text or "").strip()
     if not text or not mentions_time(text):
@@ -176,7 +148,7 @@ async def for_question(text: str, client: httpx.AsyncClient | None = None) -> st
     if not placed:
         return ""                       # a failed call is not an answer - do not remember it
     candidate = str(placed.get("time", "") or "").strip().lower()
-    _SEEN[text] = candidate if known(candidate) else ""
+    _SEEN[text] = await placeable(candidate, client=client)
     return _SEEN[text]
 
 
@@ -184,40 +156,48 @@ async def place(span: str, text: str, client: httpx.AsyncClient | None = None,
                 now=None, hint: str = "") -> tuple:
     """The period this turn is about: `(canonical, how)`. The one entry point.
 
-    Rules first, always. They place "tomorrow", "next 3 days" and "last week" in microseconds
-    and they are right about them; the model is for the tail they cannot reach, and only for
-    that. Asked to place "the last 7 days" a 1.7b answered "last 7 weeks" - a form the
-    resolver accepts and a window nobody asked for - so the cheapest protection against a
-    small model is not asking it questions that are already answered.
+    Duckling first, on the sentence. It reads the whole thing, answers in single-digit
+    milliseconds and hands back absolute dates, so nothing downstream has to own a calendar.
+    The classifier's own time slot is not consulted while Duckling has an answer - it is a
+    span tagger, and a truncated span ("last summer" -> "last") normalises to a confident
+    wrong window.
 
-        rules       the tables placed the span                      no call
         duckling    a grammar read the sentence                     one call, ~5ms
+        tables      duckling read nothing; the span normalises, and
+                    duckling places the canonical form it becomes   one more call
         model       neither could, so a model read it               one call, cached
         none        no period is named, and none is needed          no call
         unplaceable something was named and nothing could place it  the turn stops
 
-    "unplaceable" is the outcome that did not exist before. Every `time_resolution` correction
-    in the feedback table is a turn that should have returned it and answered with next week
-    instead, printing the user's own words over the wrong dates.
+    Every `time_resolution` correction in the feedback table is a turn that should have
+    returned "unplaceable" and answered with next week instead.
     """
-    if span and known(span):
-        return span, "rules"
     if not span and not mentions_time(text):
         return "", "none"
 
-    # Duckling before the model. It reads the whole sentence, answers in single-digit
-    # milliseconds against ~150ms for the local model, and is right about the expressions the
-    # tables were losing - "last summer", "last few days", "so far today", "between 6pm and
-    # 9pm", "tonight at 6". Whatever it says still has to survive `known()`, so it is a
-    # proposer like the model is, not a second authority.
-    #
-    # `hint` is that same answer already fetched, alongside the intent model instead of after
-    # it - the endpoint runs the two together because Duckling needs only the raw text, so its
-    # round trip costs nothing on the wall clock. Falling back to calling it here keeps every
-    # other caller (the compare endpoint, the tests) working unchanged.
+    # Two written dates are read here, not by Duckling: it returns the first of "11 jan 2026
+    # and 17 jan 2026" and drops the six days in between, and it says so confidently.
+    if len(written := parse_dates(text)) >= 2:
+        return f"{min(written)} to {max(written)}", "dates"
+
+    # `hint` is the same call already made beside the classifier, so its round trip costs
+    # nothing on the wall clock. `known()` still gates it - Duckling proposes, `resolve`
+    # disposes.
     placed = hint or await duckling.canonical(text, now, client=None)
     if placed and known(placed):
         return placed, "duckling"
+
+    # Duckling read nothing. The tables are the spelling half it has no rules for - "whole
+    # day", "aaj", "2moro", "past records" - and they normalise to a vocabulary Duckling does
+    # place (29 of its 30 forms, measured), so the arithmetic stays in one place.
+    if span and (placed := await placeable(normalize_time(span), now, client)):
+        return placed, "tables"
+
+    # The gap list, read straight off the sentence: "for all of 2023", "from 2010 to 2025",
+    # "the last decade", "early morning" - the forms `resolve` keeps precisely because
+    # Duckling has no rule for them. Cheaper than a model call, and it cannot invent a window.
+    if known(text):
+        return text, "edge"
 
     # a span that exists but cannot be placed is still the best clue there is - try it alone
     # before the sentence, because it is smaller and the model is likelier to get it right
@@ -227,6 +207,22 @@ async def place(span: str, text: str, client: httpx.AsyncClient | None = None,
             return placed, "model"
     placed = await for_question(text, client)
     return (placed, "model") if placed else ("", "unplaceable")
+
+
+async def placeable(form: str, now=None, client: httpx.AsyncClient | None = None) -> str:
+    """A proposed wording -> the absolute form it means, or "" if nothing can place it.
+
+    The one gate every proposer goes through - the tables, the model, and Duckling's own
+    answer. Anything already absolute (or on `resolve`'s gap list) passes straight through;
+    anything still in words is handed to Duckling, which owns the arithmetic.
+    """
+    form = (form or "").strip().lower()
+    if not form:
+        return ""
+    if known(form):
+        return form
+    placed = await duckling.canonical(form, now, client)
+    return placed if placed and known(placed) else ""
 
 
 def known(canonical: str) -> bool:
@@ -256,16 +252,15 @@ async def canonicalize(spans: list, client: httpx.AsyncClient | None = None) -> 
         for start in range(0, len(asking), CHUNK):
             chunk = asking[start:start + CHUNK]
             placed = await _ask(client, chunk)
-            # An empty result is a call that failed, not ten phrases nobody can place.
-            # Caching "" for each of them would refuse those words for the life of the
-            # process - one truncated reply, and the repair is silently off from then on.
+            # An empty result is a failed call, not ten unplaceable phrases. Caching "" for
+            # each would refuse those words for the life of the process.
             if not placed:
                 continue
             for span in chunk:
                 candidate = str(placed.get(span, "") or "").strip().lower()
-                # the model proposes, the resolver disposes - anything it does not recognise
-                # is remembered as "could not place" rather than believed
-                _SEEN[span] = candidate if known(candidate) else ""
+                # the model proposes, Duckling and the resolver dispose - anything neither can
+                # place is remembered as "could not place" rather than believed
+                _SEEN[span] = await placeable(candidate, client=client)
                 if _SEEN[span]:
                     out[span] = _SEEN[span]
     finally:
@@ -279,18 +274,10 @@ async def _ask(client: httpx.AsyncClient, payload, system: str = "",
     """One call. {} when it failed - never raises, so a turn is never blocked on this."""
     think = OLLAMA_THINK if think is None else think
     try:
-        # The local model, the one already running for the wording layer. No quota to run out
-        # of and no per-turn cost, which matters because this is on the path of every question
-        # carrying a phrase the tables do not hold.
-        #
-        # `format: "json"` is Ollama constraining the decode to valid JSON, so the reply is
-        # parsed rather than fished out of prose. `_json_from` stays anyway: a reasoning model
-        # can still wrap it in a <think> block.
-        # `think` is sent explicitly and never omitted. Omitted, a reasoning model reasons
-        # anyway: measured on qwen3:1.7b this call spent 1.0-1.5k characters thinking and took
-        # 1.95s for one span, against 0.15s with it off - and returned the same answer on every
-        # case tried. Thirteen times the latency for no change in what came back. The flag is
-        # `backend.generation.llm`'s, so one switch covers both callers of the local model.
+        # The local model already running for the wording layer - no quota, no per-turn cost.
+        # `format: "json"` constrains the decode; `_json_from` stays because a reasoning model
+        # can still wrap it in a <think> block. `think` is sent explicitly and never omitted:
+        # measured on qwen3:1.7b it cost 1.95s against 0.15s for the same answer every time.
         response = await client.post(
             f"{OLLAMA_URL}/api/chat", timeout=TIMEOUT,
             json={"model": OLLAMA_MODEL, "stream": False, "format": "json",
@@ -302,10 +289,9 @@ async def _ask(client: httpx.AsyncClient, payload, system: str = "",
         response.raise_for_status()
         return _json_from(response.json()["message"]["content"])
     except httpx.HTTPStatusError as exc:
-        # A model with no reasoning mode answers `think: true` with a 400 ("gemma3:1b does not
-        # support thinking"). Swallowed, that turns every time expression unplaceable for as
-        # long as nobody connects the two - so it downgrades once instead. `think: false` is
-        # accepted by every model, reasoning or not, so the retry cannot loop.
+        # A model with no reasoning mode 400s on `think: true`. Swallowed, that turns every
+        # time expression unplaceable, so it downgrades once. `think: false` never 400s, so
+        # the retry cannot loop.
         if think and exc.response.status_code == 400:
             return await _ask(client, payload, system, think=False)
         return {}

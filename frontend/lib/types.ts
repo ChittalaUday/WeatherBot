@@ -50,7 +50,7 @@ export type Nlu = {
   confidence: number;
 };
 
-/** Model 2 only: the decision, when to act on it, and the numbers it was read off. */
+/** The decision, when to act on it, and the numbers it was read off. */
 export type Advice = {
   verdict: "YES" | "NO" | "CAUTION" | "UNKNOWN";
   headline: string;
@@ -164,10 +164,36 @@ export type CompareColumn = {
   };
 };
 
+/**
+ * What to put on screen, decided by the backend - by the local model where it answered, by a
+ * row-count rule where it did not. The table and the chart are in the payload either way;
+ * this only says which to open, so a client renders it rather than re-deriving it and
+ * disagreeing with every other client about the same answer.
+ */
+export type Presentation = {
+  detail: "chart" | "table" | "none";
+  chart: "open" | "available" | "none";
+  table: "open" | "available" | "none";
+  rows: number;
+  columns: number;
+  /** the model that chose, "question" when the words asked to see it, or "rule". */
+  decided_by: string;
+  why: { chart: string; table: string; chose: string };
+};
+
 export type ServerEvent =
   | { type: "status"; stage: "understanding" | "locating" | "fetching" | "writing"; places?: Place[] }
   | ({ type: "nlu" } & Nlu)
   | { type: "need_location"; reason: string; text: string; message: string }
+  // one name, several real places. The backend will not pick for you - a forecast for the
+  // wrong district is acted on long before anyone reads a footnote saying which was assumed.
+  | {
+    type: "confirm_location";
+    text: string;
+    raw: string;
+    message: string;
+    options: { name: string; district: string; state: string; type: string }[];
+  }
   // the answer as the local model writes it; the `result` below repeats it in full
   | { type: "delta"; text: string }
   // the same model's reasoning, on its own channel so it is shown as thinking, not as answer
@@ -193,9 +219,10 @@ export type ServerEvent =
     assumed?: string[];
     unresolved: string[];
     table: TableData;
+    presentation: Presentation;
     series: { place: string; points: { t: string; v: number | null }[] }[];
     metrics?: Metrics;
-    // Model 2 only
+    // the trained classifier only
     advice?: Advice | null;
     plan?: PlanInfo;
     quality?: Quality;
@@ -241,6 +268,15 @@ export type ChatMessage =
   | { id: string; role: "thinking"; text: string }
   | { id: string; role: "assistant"; result: Extract<ServerEvent, { type: "result" }> }
   | { id: string; role: "ask-location"; text: string; message: string; answered: boolean }
+  | {
+    id: string;
+    role: "pick-location";
+    text: string;
+    raw: string;
+    message: string;
+    options: { name: string; district: string; state: string; type: string }[];
+    answered: boolean;
+  }
   | {
     id: string;
     role: "clarify";

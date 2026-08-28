@@ -9,20 +9,15 @@ sees the figure rules it has no figures for. Less to read is the point - a small
 every rule for every case follows none of them.
 
 The model is a *writer with a head*, not a forecaster and not a printer. Every **fact** it may
-state has been retrieved for it by `backend.generation.context`. What those facts mean for the
-person asking is its own to work out, and saying it is the whole reason a language model is in
-this path at all.
-
-That distinction is the thing this file exists to draw:
+state was retrieved for it by `backend.generation.context`; what those facts mean is its own to
+work out. That distinction is what this file exists to draw:
 
     entailment   allowed    "29 with humidity that high will feel sticky by afternoon"
     invention    forbidden  "it might clear up later"      - nothing retrieved says so
 
-Entailment is safe because `llm.grounded()` enforces the numeric half mechanically - a figure
-that was not given, at any sensible rounding, is rejected whatever the prose around it says.
-So the prose can be loosened without loosening what may be *claimed*. It was not always: the
-rules below used to forbid every judgement on every turn, which is the rule the advice path
-needs and which turned an information turn into a label printer.
+Entailment is safe because `llm.grounded()` enforces the numeric half mechanically, so the prose
+can be loosened without loosening what may be *claimed*. Forbidding every judgement on every
+turn is the advice path's rule, and it turned an information turn into a label printer.
 
 Where each rule lives matters:
 
@@ -43,11 +38,8 @@ ROLE = ("You are a friendly, knowledgeable weather assistant for people across I
         "You MUST answer strictly in plain, standard English. Do not output any Chinese characters, "
         "foreign words, or text in any other language.")
 
-# Applies to every turn, whatever went right or wrong.
-#
-# The sentence cap used to be a flat "two to four". It is now a shape, because the cap was
-# doing damage on both sides: a one-figure question got padded to three sentences, and an
-# answer that had a real "so what" to add got cut off before it could add it.
+# Applies to every turn. The sentence cap is a shape, not a flat "two to four": that padded a
+# one-figure question to three sentences and cut off an answer with something to add.
 VOICE = """How to talk:
 - Write strictly in plain, standard English. Never include Chinese characters or non-English words.
 - Sound like a person, not a readout. Contractions are good. "It'll be a wet one tomorrow"
@@ -69,9 +61,8 @@ VOICE = """How to talk:
   reply that got it right then ended "this shows Hyderabad's cooler temperatures", which is
   the opposite of the sentence above it."""
 
-# Only sent to a model that has a reasoning mode (`llm._THINKS`). Reasoning was already being
-# streamed to the reader and nothing had ever told the model what to reason *about*, so it
-# spent it restating the prompt. Four questions, in the order a person answers them.
+# Only for a model with a reasoning mode (`llm._THINKS`). Nothing had told it what to reason
+# *about*, so it spent the reasoning restating the prompt.
 THINKING = """Before you write, think it through in this order:
 1. What did they actually want? Not the words - the decision behind them. "Will it rain
    tomorrow" from someone who asked about their washing yesterday is a different question from
@@ -82,13 +73,9 @@ THINKING = """Before you write, think it through in this order:
    thing that changes the plan. This is where the answer earns its keep.
 4. What are you about to say that you were not given? Cut it. Every time."""
 
-# The turn produced figures. The question goes in with it: without the question the model has
-# nothing to answer and simply copies the findings back, which is why the chat once read like
-# a label printer.
-#
-# Framing matters more than the rules here. This block used to open "the system has already
-# worked out the answer" and order a rewrite of it - and a rewrite is what came back, every
-# time. What is handed over is evidence; the answer is the thing being asked for.
+# The turn produced figures. The question goes in with them, or the model copies the findings
+# back. Framing matters more than the rules: opening "the system has already worked out the
+# answer" and ordering a rewrite got a rewrite, every time. What is handed over is evidence.
 ANSWERING = """Below is what was found for this question - measured figures, and the notes the
 numbers support. It is evidence, not a draft. Nobody has answered them yet. You are.
 
@@ -115,12 +102,9 @@ numbers support. It is evidence, not a draft. Nobody has answered them yet. You 
   geographical positioning, as Hyderabad lies in a hotter region", which is a claim about
   climate invented to pad a correct comparison."""
 
-# Only when a verdict was reached. These are the rules that used to sit in ANSWERING and apply
-# to every turn - which is how a temperature question ended up forbidden from mentioning that
-# it would feel warm. Here they are, on the one path where they are load-bearing.
-#
-# Asked whether clothes would dry, a 1b model was given "No - 2.4mm expected from 06:00" and
-# answered "making it ideal for drying clothes". Someone acts on that.
+# Only when a verdict was reached. In ANSWERING these applied to every turn, which forbade a
+# temperature question from mentioning it would feel warm. Given "No - 2.4mm expected from
+# 06:00", a 1b model answered "making it ideal for drying clothes".
 DECIDING = """A decision has already been made for this question, by rules that read the whole
 forecast. It is in the Decision section below.
 
@@ -133,14 +117,12 @@ forecast. It is in the Decision section below.
 - Add no warnings, cautions or recommendations of your own on top of it. The rules considered
   what you are about to add and did not say it."""
 
-# Only when something was retrieved. The findings are one sentence about one thing, so a model
-# given only them answered "compare A and B" with A's number and a shrug.
+# Only when something was retrieved: given the findings alone, a model answered "compare A
+# and B" with A's number and a shrug.
 #
-# One line per heading, and only the headings this turn actually has. Describing all of them
-# every time is how a plain "will it rain tomorrow" came back with "the best window for this
-# rain is the 27th of August" - there was no Best window section, and a small model told what
-# one is will produce one. The rule at the top of this file - what the turn has decides what
-# it is told - was being applied between blocks and not inside them.
+# One line per heading, and only the headings this turn has. Describing all of them is how
+# "will it rain tomorrow" came back with "the best window for this rain is the 27th" - there
+# was no Best window section, and a model told what one is will produce one.
 GROUNDING_HEAD = """The labelled sections below are what was retrieved for this question. Read
 all of them before you write, and use them to cover what was actually asked - every place
 named, and what the numbers do across the whole period."""
@@ -165,8 +147,7 @@ GROUNDING_LINES = {
     "Caution": "- Caution is what the numbers could not support. If it is there it belongs in "
                "the answer, not as an afterthought.",
 }
-# Notable and Dry spell are covered by the Range line, so they earn no line of their own -
-# three near-identical instructions for three sections a model reads the same way.
+# Notable and Dry spell are covered by the Range line - a model reads all three the same way.
 GROUNDING_LINES["Notable"] = GROUNDING_LINES["Dry spell"] = GROUNDING_LINES["Range"]
 
 GROUNDING_TAIL = ("- What these sections mean together is yours to say. What is not in them "
@@ -174,11 +155,8 @@ GROUNDING_TAIL = ("- What these sections mean together is yours to say. What is 
 
 
 def grounding(headings=()) -> str:
-    """The section rules for the sections this turn actually retrieved.
-
-    With no headings given every rule is sent, which is the old behaviour - a caller that does
-    not know what it retrieved is no worse off than before.
-    """
+    """The section rules for the sections this turn actually retrieved. With no headings given
+    every rule is sent, so a caller that does not know what it retrieved is no worse off."""
     if not headings:
         lines = list(dict.fromkeys(GROUNDING_LINES.values()))
     else:
@@ -190,9 +168,8 @@ def grounding(headings=()) -> str:
 # The whole thing, for a caller that wants the block itself (and for the tests).
 GROUNDING = grounding()
 
-# Only when this chat has turns before it. Without it every turn was answered cold: "and
-# tomorrow?" arrived as a complete question about nothing, and the reply introduced the place
-# and the period from scratch as though nobody had been talking.
+# Only when this chat has turns before it. Without it "and tomorrow?" arrived as a complete
+# question about nothing.
 HISTORY = """Earlier in this conversation is below. Use it the way a person would:
 - If this is a follow-up, answer it as one. Do not re-introduce the place, the period or
   yourself - they know, they were here.
@@ -202,10 +179,8 @@ HISTORY = """Earlier in this conversation is below. Use it the way a person woul
 - Never restate an earlier answer, and never treat what you said before as a fact you were
   given. Only the sections retrieved for THIS turn are known to you."""
 
-# The turn produced NOTHING. Stated as a prohibition and not an omission: asked "will it rain
-# tomorrow" with no data at all, a small model answered the question anyway - "It's likely to
-# rain tomorrow, but I can't provide the exact details right now" - which is a forecast
-# invented inside an error message.
+# The turn produced NOTHING. A prohibition, not an omission: with no data at all a small model
+# answered anyway - "It's likely to rain tomorrow, but I can't provide the exact details".
 NOTHING = """You have NO weather data for this question. Nothing was retrieved.
 
 - You must not state any weather at all: no forecast, no temperature, no rainfall, no
@@ -215,9 +190,8 @@ NOTHING = """You have NO weather data for this question. Nothing was retrieved.
 - No technical words: no services, systems, indexes, databases, APIs, models or error names.
   The reader does not know or care which part of the software gave way."""
 
-# Retrieved when a name did not resolve: the closest names the location index does hold. The
-# model decides whether any is worth offering, because "Vedurumudi" for "veedurumudi" is the
-# answer and "Belamguda in Odisha" for "beramguda" is 800km of wishful thinking.
+# The closest names the index holds, when one did not resolve. The model decides whether any
+# is worth offering: "Vedurumudi" for "veedurumudi" is the answer, "Belamguda" is 800km away.
 NEAR = """Under "Closest names in the list:" are the nearest entries to what the user typed.
 If one is plainly the place they meant - the same name spelled differently - offer just that
 one back as a question, like "did you mean X?". If none of them looks like it, ignore them
@@ -228,10 +202,8 @@ def system(*, answering: bool, grounded: bool, deciding: bool = False,
            thinking: bool = False, headings=()) -> str:
     """The system prompt for this turn, and nothing the turn cannot use.
 
-    `deciding` adds the verdict rules; without it an information turn is free to say what its
-    numbers mean. `thinking` adds what to reason about, and is only worth sending to a model
-    that has a reasoning mode to spend on it. `headings` are the sections actually retrieved,
-    so the model is never told what a section it does not have would have meant.
+    `deciding` adds the verdict rules, `thinking` what to reason about, and `headings` limits
+    the section rules to the sections actually retrieved.
     """
     blocks = [ROLE, ANSWERING if answering else NOTHING]
     if answering and deciding:
@@ -248,15 +220,10 @@ def user(summary: str, question: str = "", context: str = "", *, answering: bool
          history: list | None = None) -> str:
     """The turn itself: what was asked before, what is asked now, and what was found.
 
-    "Found" rather than "Conclusion": the heading is the framing, and a model handed a
-    "Conclusion" restates it while a model handed findings answers from them. Same text, and
-    measurably different replies.
-
-    The order is the order it is read in. The conversation first, because it is the setting;
-    the question next, because it is what the reply has to answer; the findings last and
-    nearest the instruction, because they are what the reply is built out of. It closes by
-    asking for the answer, because a small model handed three labelled blocks and no
-    instruction describes the blocks.
+    "Found" rather than "Conclusion" - a model handed a conclusion restates it, and handed
+    findings answers from them. Same text, measurably different replies. The order is the
+    order it is read in, and it closes by asking for the answer, because a model handed three
+    labelled blocks and no instruction describes the blocks.
     """
     parts = []
     if history:
@@ -271,3 +238,35 @@ def user(summary: str, question: str = "", context: str = "", *, answering: bool
     parts.append("Now answer them, in your own words." if answering
                  else "Now tell them, kindly, in your own words.")
     return "\n\n".join(parts)
+
+
+CONVERSATIONAL_ROLE = (
+    "You are WeatherBot, a friendly and direct assistant for people across India.\n\n"
+    "STRICT GUIDELINES:\n"
+    "1. Respond strictly and entirely in plain, standard English. Never use non-English words or foreign scripts.\n"
+    "2. Pay attention to earlier exchanges in the conversation history to maintain context.\n"
+    "3. Be direct, helpful, and friendly (1 to 3 short sentences). Never output meta-commentary, system notes, or ask for extra context on simple greetings.\n"
+    "4. For general chat or non-weather questions, answer naturally. Remind the user when relevant that for "
+    "real-time weather forecasts, rainfall, temperature, soil moisture, or agricultural weather advice anywhere in India, "
+    "they can name any town or district and ask."
+)
+
+
+def conversational_system() -> str:
+    """The system prompt for non-weather conversational turns."""
+    return CONVERSATIONAL_ROLE
+
+
+def conversational_user(question: str, intent: str = "", family: str = "", history: list | None = None) -> str:
+    """The user prompt for non-weather conversational turns with intent and context."""
+    parts = []
+    if history:
+        parts.append("Earlier in this conversation:\n" +
+                     "\n".join(f"User: {asked}\nAssistant: {said}"
+                               for asked, said in history))
+    if intent:
+        parts.append(f"Detected intent: {intent}")
+    parts.append(f"User now says: {question}" if history else f"User says: {question}")
+    parts.append("Respond to the user naturally in plain English, keeping previous context and the detected intent in mind.")
+    return "\n\n".join(parts)
+

@@ -21,10 +21,18 @@ from backend.api.schemas import (
     SuggestResponse,
     V4LabelsResponse,
 )
-from backend.nlu import DEFAULT_VERSION, MODELS
+from backend.nlu import DEFAULT_VERSION, MODELS, catalogue
 from backend.pipeline import sources
 
 router = APIRouter()
+
+
+def served() -> list[dict]:
+    """The switchable models. The local one is only offered if it actually answered at
+    startup - a dropdown entry for a model that is not installed is a turn that fails."""
+    from backend.api import GENERATION
+
+    return catalogue(registry, bool(GENERATION.get("ok")))
 
 
 @router.get("/api/health", response_model=HealthResponse)
@@ -39,7 +47,7 @@ def health():
 
     # `config.summary()` first: it carries a plain `duckling` URL and the probe below carries
     # whether that URL actually answered, which is the more useful of the two.
-    return {"status": "ok", **config.summary(), "models": registry.available(),
+    return {"status": "ok", **config.summary(), "models": served(),
             "generation": dict(GENERATION), "duckling": dict(DUCKLING)}
 
 
@@ -56,7 +64,7 @@ def list_models():
         path = spec["path"].with_name(f"metrics_{version}.json")
         if path.exists():
             metrics[version] = json.loads(path.read_text())
-    return {"available": registry.available(), "default": DEFAULT_VERSION, "metrics": metrics}
+    return {"available": served(), "default": DEFAULT_VERSION, "metrics": metrics}
 
 
 @router.get("/api/labels", response_model=V4LabelsResponse)

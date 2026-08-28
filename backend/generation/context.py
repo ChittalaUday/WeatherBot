@@ -122,20 +122,7 @@ def build(result: dict, *, max_rows: int = MAX_FACT_ROWS,
         add(heading, [n.text for n in notes if getattr(n, "kind", None) == kind])
 
     if (advice := result.get("advice")):
-        # The headline and the reasons, not `advice.evidence`. Its keys are machine names -
-        # `peak_mm`, `wet_readings`, `in_window_readings` - and a small model handed them
-        # writes them out: "with one wet reading from peak mm 1.9 and total mm 1.9". Every
-        # figure in there is already in the conclusion or the sections above, said in words.
         add("Decision", [advice.headline, *advice.reasons])
-        # The stretch the verdict points at, named on its own line. Without it the model has
-        # a yes and no idea when, and "pick your moment" is the half of the answer that is
-        # actually useful.
-        #
-        # Two headings, because it is two different things. For spraying or harvesting the
-        # window is when to GO AND DO IT. For an umbrella or a jacket it is when the weather
-        # HAPPENS - and labelled "Best window" a small model read the label back out: asked
-        # "will it rain in Guntur tomorrow" it answered "the best window for this rain is the
-        # 27th of August", which is a heading, not a sentence anyone says.
         from backend.pipeline.advice import TIMED
         if advice.window:
             add("Best window" if advice.activity in TIMED else "When", [advice.window])

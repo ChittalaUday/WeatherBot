@@ -17,13 +17,9 @@ The chat endpoint: one POST, the turn streamed back as server-sent events.
     data: {"type":"need_location", ...}               ask the browser, then resend with lat/lon
     data: {"type":"error",   "message":"..."}
 
-SSE over POST, not a WebSocket. One question has one answer, so there is nothing to hold open
-between turns: no reconnect loop, no ping, no half-open socket that silently stops answering,
-and it survives any proxy that speaks HTTP. The streaming that mattered - the phrasing, which
-is the slowest step by a wide margin - is exactly what SSE is for.
-
-`turn()` is an async generator, so the transport is somebody else's problem: the endpoint below
-streams it and the self-check just collects it into a list.
+SSE over POST, not a WebSocket: one question has one answer, so there is nothing to hold open
+between turns, and it survives any proxy that speaks HTTP. `turn()` is an async generator, so
+the transport is somebody else's problem.
 """
 
 from __future__ import annotations
@@ -46,17 +42,21 @@ from backend.api.schemas import (
 )
 from backend.config import CONFIDENT, MIN_CONFIDENCE
 from backend.nlu import context, duckling, normalize_text
+from backend.nlu import understand as read
 from backend.pipeline import places as place_index
-from backend.pipeline import resolve_places, run, sources
+from backend.pipeline import render, resolve_places, run, sources
 from src.schema import Operation
 
 router = APIRouter()
 
-# How many previous exchanges the wording model is shown. Three is two follow-ups deep, which
-# is where "and there?" -> "what about next week?" stops being resolvable from the last turn
-# alone. More is not free: every turn of history is read on every turn, by a small model that
-# has a fixed budget of attention and spends it on whatever is in front of it.
+# Three is two follow-ups deep, which is where "and there?" -> "what about next week?" stops
+# being resolvable from the last turn alone. More is not free: a small model has a fixed
+# budget of attention and spends it on whatever is in front of it.
 HISTORY_TURNS = 3
+
+# How long a turn will wait for the model's pick of table-or-chart once the phrasing is done.
+# It runs beside the phrasing, so this is only ever reached when the phrasing did not happen.
+VIEW_TIMEOUT = 1.0
 
 
 async def turn(text: str, *, chat_id: str, model: str | None = None,
@@ -77,16 +77,12 @@ async def turn(text: str, *, chat_id: str, model: str | None = None,
     yield {"type": "status", "stage": "understanding"}
     cleaned = normalize_text(text)              # shorthand and typos folded, audit kept
     began = time.perf_counter()
-    # The intent model and the time reading go out together. They need nothing from each other
-    # - Duckling reads the raw sentence and the model reads the same sentence - so run serially
-    # the HTTP round trip was pure added latency on every turn that named a period. The model
-    # is CPU-bound sklearn, so it goes to a thread to let the socket actually make progress;
-    # left on the event loop it would block the request it was supposed to be overlapping with.
-    #
-    # `time_hint` is consumed by `backend.nlu.times.place`, which still puts it through
-    # `known()` before believing it.
+    # The classifier and the time reading go out together - they need nothing from each other,
+    # and run serially the HTTP round trip was pure added latency on every turn naming a
+    # period. `read` keeps the trained head off the event loop and awaits a prompted one, so
+    # the overlap holds whichever is switched on. `time_hint` still goes through `known()`.
     understanding, hint = await asyncio.gather(
-        asyncio.to_thread(registry.understand, cleaned.normalized, model),
+        read(registry, cleaned.normalized, model),
         duckling.canonical(cleaned.normalized, started_at),
     )
     understanding.time_hint = hint
@@ -111,13 +107,19 @@ async def turn(text: str, *, chat_id: str, model: str | None = None,
         return turn_id
 
     # 1. A turn that needs no weather is answered here and goes no further. A "hi" that
-    # reaches location resolution comes back asking which city you meant, which is the single
-    # worst thing this bot can do.
+    # reaches location resolution comes back asking which city you meant.
     if not understanding.needs_weather:
-        turn_id = log(understanding.family, understanding.reply)
+        began_llm = time.perf_counter()
+        history = store.recent_exchanges(db, chat_id, HISTORY_TURNS)
+        llm_reply = await generation.say_conversational(
+            text, intent=understanding.intent, family=understanding.family, history=history, fallback=understanding.reply
+        )
+        timing["llm_ms"] = ms(began_llm)
+        message = llm_reply or understanding.reply
+        turn_id = log(understanding.family, message)
         yield {"type": "chat", "turn_id": turn_id, "chat_id": chat_id,
                "model": understanding.version, "intent": understanding.intent,
-               "family": understanding.family, "message": understanding.reply,
+               "family": understanding.family, "message": message,
                "confidence": round(understanding.confidence, 3),
                # CHANGE_LOCATION carries the place it wants switched to
                "locations": understanding.locations,
@@ -170,10 +172,8 @@ async def turn(text: str, *, chat_id: str, model: str | None = None,
             places, unresolved = await resolve_places(http, named)
             timing["solr_ms"] += ms(began)
 
-            # A name the index does not hold is a dead end as an error: it says what failed
-            # and nothing about what would work. Retrieve before generating - the nearest
-            # names the index *does* hold are what turn "I could not find veedurumudi" into
-            # "did you mean Vedurumudi, in East Godavari?".
+            # Retrieve before generating: the nearest names the index *does* hold are what
+            # turn "I could not find veedurumudi" into "did you mean Vedurumudi?".
             if unresolved and not places and not (coords or state.coords):
                 solr = lambda q, rows=8: sources.solr_query(http, q, rows)
                 near = await place_index.suggest(solr, unresolved[0])
@@ -202,21 +202,29 @@ async def turn(text: str, *, chat_id: str, model: str | None = None,
                                "Which place should I check? Share your location or name one.")}
             return
 
-        # One name, several real places ("Angara" is in Jharkhand and in Andhra Pradesh). Both
-        # models commit to a reading rather than interrupting (Rule 1.1), so the ranked best
-        # wins and the answer says which one it took.
-        for place in places:
-            if place.get("ambiguous") and len(named) == 1:
-                understanding.assumed.append(
-                    f"{place['raw']} = {place['normalized']}, {place['state']}")
+        # One name, several real places ("Angara" is in Jharkhand and in Andhra Pradesh).
+        # Committing to the ranked best and admitting it in `assumed` was Rule 1.1 applied
+        # where it does not belong: a reading the model picked can be corrected afterwards,
+        # but a forecast for the wrong district is acted on before anyone reads the footnote.
+        # Only a genuine tie asks - `places._is_ambiguous` already refuses to raise one
+        # between a district seat and a same-named hamlet.
+        undecided = next((p for p in places if p.get("ambiguous")), None)
+        if undecided is not None and len(named) == 1:
+            options = [{"name": m.get("normalized") or m.get("name", ""),
+                        "district": m.get("district", ""), "state": m.get("state", ""),
+                        "type": m.get("type", "")}
+                       for m in (undecided.get("matches") or [])][:5]
+            if len(options) > 1:
+                log("need_location", f"ambiguous: {undecided['raw']}", places=places)
+                yield {"type": "confirm_location", "text": text,
+                       "raw": undecided["raw"], "options": options,
+                       "message": f"There is more than one {undecided['raw']}. Which one?"}
+                return
         state.resolved = places
 
         yield {"type": "status", "stage": "fetching", "places": places}
-        # The merged state is the source of truth from here on, so the pipeline is handed what
-        # the conversation means rather than what this sentence said on its own. Skipping this
-        # is how "rain in Guntur tomorrow" -> "and there?" fetched the default seven-day
-        # horizon while the label above the table still read "tomorrow": the window came from
-        # the state and the rows came from the bare fragment.
+        # The merged state is the source of truth from here on. Skipping this is how "and
+        # there?" fetched a seven-day horizon under a label still reading "tomorrow".
         understanding.variables = state.variables or understanding.variables
         if state.time_normalized:
             understanding.times_normalized = [state.time_normalized]
@@ -243,11 +251,8 @@ async def turn(text: str, *, chat_id: str, model: str | None = None,
         yield {"type": "error", "message": await generation.explain(answer.failed_at)}
         return
 
-    # 5. Everything this turn knows that the pipeline did not goes on the sentence *before* it
-    # is phrased. Appended afterwards these read as a footnote contradicting the paragraph
-    # above them - and the phrasing model, asked about one place and handed figures for
-    # another with nothing joining the two, answered "not covered in the provided data" under
-    # a complete forecast.
+    # 5. What this turn knows and the pipeline did not goes on the sentence *before* it is
+    # phrased. Appended after, it reads as a footnote contradicting the paragraph above it.
     for place in places:
         if place.get("fuzzy"):
             answer.summary += (f" (No exact match for \"{place['raw']}\" - showing the "
@@ -259,21 +264,22 @@ async def turn(text: str, *, chat_id: str, model: str | None = None,
                           f"these readings are for {places[0]['name']}, the place those "
                           f"coordinates fall in. ") + answer.summary
 
-    # 6. The phrasing, streamed. It is the slowest step by a wide margin (a local model), and
-    # a chat that sits on "fetching" for all of it looks hung. The `result` that follows
+    # 6. The phrasing, streamed - the slowest step by a wide margin. The `result` that follows
     # carries the finished text anyway, so a client that missed a piece is still correct.
     yield {"type": "status", "stage": "writing"}
     began = time.perf_counter()
+    # Which of the table and the chart to open. Started here and collected after the stream:
+    # phrasing is seconds and this is a couple of hundred milliseconds, so it costs nothing as
+    # long as it runs beside it. `answer.presentation` already holds the rule's answer.
+    view = asyncio.create_task(render.choose(answer, text))
     # not `context` - that name is the NLU module this endpoint already imports
     sections = generation.build(answer.as_context())
     retrieved = sections.render()
-    # What came before, so a follow-up is answered as one. Without it every turn arrived cold:
-    # "and tomorrow?" read as a complete question about nothing, and the reply re-introduced
-    # the place and the period from scratch to someone who had just named them.
+    # What came before, so a follow-up is answered as one. Without it "and tomorrow?" read as
+    # a complete question about nothing.
     history = store.recent_exchanges(db, chat_id, HISTORY_TURNS)
-    # An advice turn is the one place the wording must not think for itself - the verdict was
-    # reached by rules that read the whole forecast. Everywhere else it may say what the
-    # figures mean, which is the difference between an answer and a label printer.
+    # An advice turn is the one place the wording must not think for itself. Everywhere else
+    # it may say what the figures mean - the difference between an answer and a label printer.
     deciding = answer.advice is not None
     said = ""
     async for kind, piece in generation.stream(answer.summary, text, context=retrieved,
@@ -283,16 +289,21 @@ async def turn(text: str, *, chat_id: str, model: str | None = None,
             said += piece
         yield {"type": "thinking" if kind == "thinking" else "delta", "text": piece}
     timing["llm_ms"] = ms(began)
-    # The wording is kept only if it invented no figure, reversed no verdict, said something
-    # the conclusion did not already say, and did not narrate the machinery. Checked after the
-    # stream rather than during it, because a reply is only wrong once it is whole - and the
-    # client renders `result.summary`, not what it watched being typed, so a late rejection is
-    # invisible rather than a sentence rewriting itself on screen.
+    # Checked after the stream, not during: a reply is only wrong once it is whole, and the
+    # client renders `result.summary` rather than what it watched being typed, so a late
+    # rejection is invisible instead of a sentence rewriting itself on screen.
     kept = generation.usable(said, answer.summary, answer.summary + " " + retrieved,
                              answer.advice.verdict if answer.advice else "")
     if said and not kept:
         print(f"generation: dropped a reply for {text!r}: {said[:140]!r}", flush=True)
-    answer.summary = said or answer.summary        # use LLM output if generated, fallback to rule-built line
+    answer.summary = said or answer.summary
+
+    # Normally already done. The cap is for the turn where phrasing failed instantly; past it
+    # the rule's answer, already in place, stands.
+    try:
+        answer.presentation = await asyncio.wait_for(view, VIEW_TIMEOUT)
+    except asyncio.TimeoutError:
+        pass
 
     CHATS[chat_id] = state                         # only a turn that answered updates state
     uncertain = understanding.confidence < CONFIDENT
@@ -330,8 +341,8 @@ def _sse(events):
 async def _guarded(events, text: str):
     """Never let one bad turn end as a dead stream: every path yields a terminal event.
 
-    `str(exc)` is a stack trace's last line - it once put "name 're' is not defined" in a chat
-    bubble. It goes to the log for whoever is on call; the reader gets something human.
+    `str(exc)` once put "name 're' is not defined" in a chat bubble, so it goes to the log and
+    the reader gets something human.
     """
     try:
         async for event in events:

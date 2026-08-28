@@ -1,16 +1,17 @@
 """
-Model 3 - the same NLU contract, answered by a hosted LLM instead of a trained head.
+The prompted classifiers - the same NLU contract, read by an LLM instead of a trained head.
 
     python -m backend.nlu.llm "should i spray fertilizer on my cotton field in Guntur tomorrow"
 
-The point is comparison, not replacement. Models 1 and 2 are 20MB of TF-IDF and linear heads
-that answer in single-digit milliseconds offline; this is a network round trip to a model with
-no training on this label set at all, working purely from the schema in its prompt. Putting
-the three side by side on the same sentence is the only honest way to know what the trained
-models are worth - and where a general model is simply better, which is worth knowing too.
+Two of them, local and hosted, differing only in where the request goes. The trained
+classifier is 46MB of TF-IDF and linear heads that answers in single-digit milliseconds
+offline; these are a round trip to a model with no training on this label set at all, working
+purely from the schema in its prompt. Putting them side by side on the same sentence is the
+only honest way to know what the trained one is worth - and where a general model is simply
+better, which is worth knowing too.
 
-It returns the same `Understanding` the other two do, so everything downstream - the query
-planner, the advice engine, the response builder - cannot tell which one answered.
+They return the same `Understanding` the trained classifier does, so everything downstream -
+the query planner, the advice engine, the response builder - cannot tell which one answered.
 
 The contract is enforced here, not hoped for: whatever the LLM emits is coerced onto the enums
 and anything it invents is dropped. A model that returns `intent: "WEATHER_QUERY"` gets the
@@ -23,10 +24,20 @@ import asyncio
 import json
 import re
 import time
+from typing import NamedTuple
 
 import httpx
 
-from backend.config import AI_API_KEY, AI_BASE_URL, AI_MODEL, AI_TIMEOUT
+from backend.config import (
+    AI_API_KEY,
+    AI_BASE_URL,
+    AI_MODEL,
+    AI_TIMEOUT,
+    OLLAMA_MODEL,
+    OLLAMA_TIMEOUT,
+    OLLAMA_URL,
+)
+from backend.nlu.registry import Understanding
 from src.tagger import normalize_time
 from src.v4.entities import extract as extract_entities
 from src.v4.schema import (
@@ -42,8 +53,43 @@ from src.v4.schema import (
     weather_intent_for,
 )
 
-NAME = "Model 3"
+NAME = "Prompted classifier (hosted)"
 VERSION = "llm"
+
+
+class Spec(NamedTuple):
+    """One OpenAI-shaped chat endpoint. The prompt and the coercion below are the same for
+    every one of them - only where the request goes differs."""
+
+    version: str
+    name: str
+    base_url: str
+    model: str
+    api_key: str
+    timeout: float
+    description: str
+    extra: dict = {}                 # request fields only this endpoint understands
+
+
+HOSTED = Spec("llm", NAME, AI_BASE_URL, AI_MODEL, AI_API_KEY, AI_TIMEOUT,
+              f"{AI_MODEL} - hosted general model, no training on this label set, prompted "
+              f"with the schema")
+# Ollama speaks the OpenAI shape at /v1 and ignores the key, so the local model reaches the
+# same client with nothing but a different address. It already words every reply; this is the
+# same model asked to read the sentence instead, on demand, when the switch selects it.
+#
+# reasoning_effort=none is not a preference. A thinking model spends the whole max_tokens
+# budget reasoning and gets cut off mid-JSON, so every turn fell back to the empty reading -
+# and it is 8x slower doing it (2.8s vs 0.36s on gemma4:e2b). Ollama's OpenAI shim takes this
+# field; the hosted endpoint is left alone because it does not.
+LOCAL = Spec("ollama", "Prompted classifier (local)", f"{OLLAMA_URL}/v1", OLLAMA_MODEL,
+             "ollama", OLLAMA_TIMEOUT,
+             # the model id belongs here, not in the name: the name says what it does and is
+             # stable, the id says which weights are behind it today and changes with .env
+             f"{OLLAMA_MODEL} - the local model that words replies, doing the intent read too "
+             f"- slower than the trained head, and it never saw this label set",
+             {"reasoning_effort": "none", "response_format": {"type": "json_object"}})
+SPECS = {spec.version: spec for spec in (HOSTED, LOCAL)}
 
 # The whole schema, because the model has never seen this label set. Kept terse: every token
 # here is paid for on every turn.
@@ -125,72 +171,112 @@ def _json_from(reply: str) -> dict:
             return {}
 
 
-async def understand(text: str, client: httpx.AsyncClient | None = None) -> dict:
-    """One turn, in the shape registry.Understanding is built from.
+async def chat_json(system: str, text: str, spec: Spec = HOSTED,
+                    client: httpx.AsyncClient | None = None, max_tokens: int = 300) -> dict:
+    """One JSON answer from an OpenAI-shaped endpoint. The transport, and nothing else.
 
-    Never raises: a failed call returns `ok=False` with the reason, because this sits beside
-    two models that always answer and a comparison with an empty column is still a comparison.
+    Never raises: a failed call comes back `ok=False` with the reason. Every caller here sits
+    beside a deterministic path that always answers, so an exception would only ever be caught
+    and turned back into this.
     """
-    if not AI_API_KEY:
-        return {"ok": False, "error": "API_KEY is not set", "latency_ms": 0}
+    if not spec.api_key:
+        return {"ok": False, "version": spec.version, "error": "API_KEY is not set",
+                "latency_ms": 0}
 
     started = time.perf_counter()
+    ms = lambda: int((time.perf_counter() - started) * 1000)
     owns = client is None
-    client = client or httpx.AsyncClient(timeout=AI_TIMEOUT)
+    client = client or httpx.AsyncClient(timeout=spec.timeout)
     try:
-        # the hosted endpoint rate-limits, and a 429 beside two models that always answer
-        # would read as "the LLM got it wrong" rather than "the LLM was not asked"
+        # the hosted endpoint rate-limits, and a 429 beside a model that always answers would
+        # read as "the LLM got it wrong" rather than "the LLM was not asked"
         for attempt in range(3):
             response = await client.post(
-                f"{AI_BASE_URL}/chat/completions",
-                headers={"Authorization": f"Bearer {AI_API_KEY}", "Content-Type": "application/json"},
-                json={"model": AI_MODEL, "temperature": 0, "max_tokens": 300,
-                      "messages": [{"role": "system", "content": SYSTEM},
-                                   {"role": "user", "content": text}]},
+                f"{spec.base_url}/chat/completions",
+                timeout=spec.timeout,
+                headers={"Authorization": f"Bearer {spec.api_key}",
+                         "Content-Type": "application/json"},
+                json={"model": spec.model, "temperature": 0, "max_tokens": max_tokens,
+                      "messages": [{"role": "system", "content": system},
+                                   {"role": "user", "content": text}],
+                      **spec.extra},
             )
             if response.status_code != 429:
                 break
             await asyncio.sleep(1.5 * (attempt + 1))
         if response.status_code == 429:
-            return {"ok": False, "error": "rate limited by the provider - try again in a moment",
-                    "latency_ms": int((time.perf_counter() - started) * 1000)}
+            return {"ok": False, "version": spec.version, "latency_ms": ms(),
+                    "error": "rate limited by the provider - try again in a moment"}
         response.raise_for_status()
         body = response.json()
         reply = body["choices"][0]["message"]["content"]
-        parsed = _coerce(_json_from(reply), text)
-        latency = int((time.perf_counter() - started) * 1000)
-
-        times_normalized = [n for n in (normalize_time(s) for s in parsed["times"]) if n]
-        entities = extract_entities(text)
-        return {
-            "ok": True, "latency_ms": latency, "usage": body.get("usage", {}),
-            "raw": reply[:400],
-            "intent": parsed["intent"].value,
-            # a turn that needs no weather has no window - weather_intent_for(None) would say
-            # FORECAST, which is the right default for a question and wrong for "hey there"
-            "weather_intent": ("NONE" if parsed["intent"] in NO_DATA_NEEDED else
-                               weather_intent_for(times_normalized[0] if times_normalized
-                                                  else None).value),
-            "activity": parsed["activity"].value,
-            "sub_activity": sub_activity_for(parsed["activity"], entities, text),
-            "variables": [v.value for v in parsed["variables"]],
-            "aggregation": parsed["aggregation"].value,
-            "locations": parsed["locations"],
-            "times": parsed["times"],
-            "times_normalized": times_normalized,
-            "entities": entities,
-            "family": ("control" if parsed["intent"] in CONTROL else
-                       "declined" if parsed["intent"] in DECLINED else
-                       "conversational" if parsed["intent"] in NO_DATA_NEEDED else "data"),
-            "reply": (REPLIES.get(parsed["intent"]) or [""])[0]
-                     if parsed["intent"] in NO_DATA_NEEDED else "",
-        }
+        return {"ok": True, "version": spec.version, "latency_ms": ms(),
+                "usage": body.get("usage", {}), "raw": reply[:400], "json": _json_from(reply)}
     except (httpx.HTTPError, KeyError, ValueError) as exc:
-        return {"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:160]}",
-                "latency_ms": int((time.perf_counter() - started) * 1000)}
+        return {"ok": False, "version": spec.version, "latency_ms": ms(),
+                "error": f"{type(exc).__name__}: {str(exc)[:160]}"}
     finally:
         if owns:
             await client.aclose()
+
+
+async def understand(text: str, client: httpx.AsyncClient | None = None,
+                     spec: Spec = HOSTED) -> dict:
+    """One turn, in the shape registry.Understanding is built from."""
+    got = await chat_json(SYSTEM, text, spec, client)
+    if not got.get("ok"):
+        return got
+    parsed = _coerce(got["json"], text)
+    times_normalized = [n for n in (normalize_time(s) for s in parsed["times"]) if n]
+    entities = extract_entities(text)
+    return {
+        **got,
+        "intent": parsed["intent"].value,
+        # a turn that needs no weather has no window - weather_intent_for(None) would say
+        # FORECAST, which is the right default for a question and wrong for "hey there"
+        "weather_intent": ("NONE" if parsed["intent"] in NO_DATA_NEEDED else
+                           weather_intent_for(times_normalized[0] if times_normalized
+                                              else None).value),
+        "activity": parsed["activity"].value,
+        "sub_activity": sub_activity_for(parsed["activity"], entities, text),
+        "variables": [v.value for v in parsed["variables"]],
+        "aggregation": parsed["aggregation"].value,
+        "locations": parsed["locations"],
+        "times": parsed["times"],
+        "times_normalized": times_normalized,
+        "entities": entities,
+        "family": ("control" if parsed["intent"] in CONTROL else
+                   "declined" if parsed["intent"] in DECLINED else
+                   "conversational" if parsed["intent"] in NO_DATA_NEEDED else "data"),
+        "reply": (REPLIES.get(parsed["intent"]) or [""])[0]
+                 if parsed["intent"] in NO_DATA_NEEDED else "",
+    }
+
+
+def to_understanding(column: dict, text: str) -> Understanding | None:
+    """A column from `understand` as the Understanding the pipeline consumes.
+
+    Here rather than in a caller because both callers - the chat turn and the comparison -
+    need exactly this, and downstream genuinely cannot tell which model it is running for.
+    """
+    if not column.get("ok"):
+        return None
+    return Understanding(
+        text=text, version=column.get("version", VERSION), intent=column["intent"],
+        action="COMPARE" if column["intent"] == "COMPARISON" else "GET",
+        aggregation=column["aggregation"], variables=column["variables"],
+        locations=column["locations"], times=column["times"],
+        times_normalized=column["times_normalized"], confidence=1.0,
+        activity=column["activity"], sub_activity=column.get("sub_activity", ""),
+        entities=column.get("entities", {}), family=column["family"],
+        reply=column.get("reply", ""), detail="NORMAL")
+
+
+def entry(spec: Spec, present: bool) -> dict:
+    """The catalogue row for an LLM, in the same shape `Registry.available()` emits so a
+    client cannot tell a trained bundle from a prompted one."""
+    return {"version": spec.version, "name": spec.name, "loaded": True, "present": present,
+            "size_mb": None, "description": spec.description, "default": False}
 
 
 def available() -> bool:

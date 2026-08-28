@@ -24,7 +24,8 @@ const nextId = () => `m${++counter}`;
 const live = (m: ChatMessage) => m.role !== "status" && m.role !== "streaming";
 
 /** Everything that ends a turn. Exactly one of these arrives per request. */
-const TERMINAL = new Set(["result", "chat", "clarify", "need_location", "error", "compare_done"]);
+const TERMINAL = new Set(["result", "chat", "clarify", "need_location", "confirm_location",
+                          "error", "compare_done"]);
 
 function storedChatId(): string {
   if (typeof window === "undefined") return "";
@@ -60,7 +61,9 @@ async function* readEvents(response: Response): AsyncGenerator<ServerEvent> {
 export function useChat() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [busy, setBusy] = useState(false);
-  const [chatId, setChatId] = useState<string>("");
+  // Read at first render, not in an effect: `openChat` used to set it synchronously from the
+  // mount effect, which is a cascading render and the one the lint rule is about.
+  const [chatId, setChatId] = useState<string>(() => storedChatId() ?? "");
   const inflight = useRef<AbortController | null>(null);
 
   const push = useCallback((message: ChatMessage) => {
@@ -72,9 +75,9 @@ export function useChat() {
    *
    *  The id is adopted before the history is fetched, so a backend that is briefly down
    *  costs an empty transcript rather than a new conversation the server does not know. */
-  const openChat = useCallback(async (id: string) => {
-    window.localStorage.setItem(CHAT_KEY, id);
-    setChatId(id);
+  /** Pull one stored conversation back into the transcript. No state is set before the await,
+   *  so this is safe to call from an effect. */
+  const restoreChat = useCallback(async (id: string) => {
     const response = await fetch(`${apiUrl()}/api/chats/${id}`).catch(() => null);
     if (!response?.ok) return;
     const history = await response.json();
@@ -93,10 +96,24 @@ export function useChat() {
     setMessages(restored);
   }, []);
 
+  const openChat = useCallback(
+    (id: string) => {
+      window.localStorage.setItem(CHAT_KEY, id);
+      setChatId(id);
+      return restoreChat(id);
+    },
+    [restoreChat],
+  );
+
+  // Replaying a stored conversation is a fetch, so it belongs in an effect - but only the
+  // fetch does. The id itself is already in state above.
   useEffect(() => {
     const existing = storedChatId();
-    if (existing) openChat(existing);
-  }, [openChat]);
+    // The compiler cannot see that every setState in restoreChat happens after an await, so
+    // it reads a fetch-on-mount as a cascading render. It is not one.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (existing) void restoreChat(existing);
+  }, [restoreChat]);
 
   /** Fold one server event into the transcript. Shared by chat and compare. */
   const consume = useCallback((data: ServerEvent) => {
@@ -124,6 +141,13 @@ export function useChat() {
             ? [...shown.slice(0, -1), { ...last, text: last.text + data.text }]
             : [...shown, { id: nextId(), role, text: data.text }];
         });
+        break;
+      case "confirm_location":
+        setMessages((current) => [
+          ...current.filter(live),
+          { id: nextId(), role: "pick-location", text: data.text, raw: data.raw,
+            message: data.message, options: data.options, answered: false },
+        ]);
         break;
       case "need_location":
         setMessages((current) => [
@@ -283,6 +307,27 @@ export function useChat() {
     [stream, ensureChatId],
   );
 
+  /**
+   * Answer a confirm_location prompt. The chosen place is qualified into the original
+   * sentence - "rain in Angara" becomes "rain in Angara, Jharkhand" - because the resolver
+   * already splits a name from its qualifier, so this needs no second endpoint and no place
+   * id threaded through the turn.
+   */
+  const pickLocation = useCallback(
+    (text: string, raw: string, option: { name: string; state: string }, model?: string) => {
+      setMessages((current) =>
+        current.map((m) =>
+          m.role === "pick-location" && m.text === text ? { ...m, answered: true } : m,
+        ),
+      );
+      const qualified = `${option.name}, ${option.state}`;
+      const rewritten = text.replace(raw, qualified);
+      push({ id: nextId(), role: "user", text: qualified });
+      stream("/api/chat", { text: rewritten, model, chat_id: ensureChatId() });
+    },
+    [push, stream, ensureChatId],
+  );
+
   /** Drop the server-side slots and start a fresh conversation. */
   const newChat = useCallback(async () => {
     inflight.current?.abort();
@@ -299,5 +344,6 @@ export function useChat() {
     setChatId(created);
   }, []);
 
-  return { busy, messages, chatId, ask, compare, sendLocation, newChat, openChat };
+  return { busy, messages, chatId, ask, compare, sendLocation, pickLocation, newChat,
+    openChat };
 }

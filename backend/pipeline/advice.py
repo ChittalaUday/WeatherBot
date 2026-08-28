@@ -10,19 +10,16 @@ sentence a rule emits names a measured quantity, because "do not spray" is only 
 
 Two kinds of question, and they are not the same shape:
 
-  **When can I do this?** - spraying, drying washing, travelling, harvesting, going out. Rain
-  does not fall for a whole day; it falls between two and four. These are answered by
-  `backend.pipeline.windows`, which finds the stretches during which the conditions actually
-  hold, and the verdict is about the best of those stretches - so the answer can be "not at
-  two, but you have until noon" instead of a flat no built from a day's total.
+  **When can I do this?** - spraying, drying washing, harvesting, going out. Rain falls between
+  two and four, not all day, so `backend.pipeline.windows` finds the stretches where the
+  conditions hold and the verdict is about the best of those - "not at two, but you have until
+  noon" instead of a flat no built from a day's total.
 
-  **Is the ground ready?** - irrigating, sowing, fertilising, what to wear. These are about
-  state and about how much water is coming, where an accumulated total is the right quantity
-  and always was. They stay accumulated, and each one says over what period.
+  **Is the ground ready?** - irrigating, sowing, fertilising, what to wear. State and how much
+  water is coming, where an accumulated total is the right quantity. Each says over what period.
 
-The rules are two-sided on purpose. FERTILIZE says no to a downpour *and* no to bone-dry soil;
-SOW wants the rain that HARVEST is trying to avoid. That opposition is the whole reason these
-are separate activities rather than one FARMING label with a sub-activity.
+The rules are two-sided on purpose: FERTILIZE refuses a downpour *and* bone-dry soil, and SOW
+wants the rain HARVEST is avoiding. That is why these are separate activities.
 
 Thresholds are the tunable part and several of them are literature defaults rather than
 measurements - they carry a `ponytail:` note where that is true.
@@ -49,24 +46,15 @@ from backend.pipeline.windows import (
 from backend.pipeline.windows import _stamp as _when
 
 YES, NO, CAUTION, UNKNOWN = "YES", "NO", "CAUTION", "UNKNOWN"
-
-# ponytail: soil-moisture bands are loam defaults from the literature, not measurements from
-# these fields. Calibrate against real plots before anyone acts on IRRIGATE or SOW.
 SOIL_DRY, SOIL_WET = 0.15, 0.30
 SPRAY_WIND_MIN, SPRAY_WIND_MAX = 1.0, 4.5      # below: inversion drift. above: spray drift.
 HEAVY_RAIN_48H = 25.0                          # leaches fertiliser
 USEFUL_RAIN_48H = 2.0                          # enough to carry it in
 
-# mm in ONE reading that counts as "it is raining". Under this is not much rain: a coat is for
-# rain you would shelter from, and 0.6mm in an hour is not that.
 WET = 1.0
-# mm in one reading that is enough to interfere with something delicate - wet spray leaf,
-# washing on a line. Lower than WET, because "not enough to shelter from" and "not enough to
-# ruin what you are doing" are different questions.
 DAMP = 0.2
 
-# Conditions, named once and reused. A rule composes these; nothing writes a lambda that reads
-# a column directly, so "a missing reading is not a suitable reading" holds everywhere.
+# Named once and composed, so "a missing reading is not a suitable reading" holds everywhere.
 DRY = below("Rainfall", WET)
 NOT_DAMP = below("Rainfall", DAMP)
 SPRAY_WIND = between("Wind_Speed", SPRAY_WIND_MIN, SPRAY_WIND_MAX)
@@ -91,10 +79,9 @@ class Advice:
 class Timed:
     """An activity you do *during* a stretch of good conditions.
 
-    `during` is what one reading has to look like. `hours` is how long a usable stretch has to
-    be - twenty minutes of calm between showers is not a spraying window. `settle_hours` is how
-    long it then has to stay rain-free afterwards, which is what separates spraying (four
-    hours, or it washes off) from walking to the shop (none).
+    `during` is what one reading has to look like, `hours` how long a usable stretch has to be,
+    and `settle_hours` how long it must stay rain-free afterwards - which separates spraying
+    (four hours, or it washes off) from walking to the shop (none).
     """
 
     needs: tuple
@@ -106,8 +93,6 @@ class Timed:
 
 
 # The activities that are a question about *when*. Minimum durations are the tunable part.
-# ponytail: `hours` are working-practice estimates, not measurements. A grower who says two
-# hours is not enough to spray their plot is right and this is where to change it.
 TIMED = {
     "SPRAY": Timed(("Wind_Speed", "Rainfall"), every(NOT_DAMP, SPRAY_WIND), hours=2,
                    verb="spray", blocker="rain or the wrong wind", settle_hours=4),
@@ -131,9 +116,6 @@ STATE_NEEDS = {
     "SOW": ["Soilm10", "Rainfall"],
 }
 
-# The window each activity means when the user names none. "Can I go out?" is about the next
-# few hours, not the next week. Fertiliser and spray look further because their rules read
-# rain that has not fallen yet.
 DEFAULT_WINDOW = {
     "RAIN_PROTECTION": "today", "SUN_PROTECTION": "today", "CLOTHING": "today",
     "OUTDOOR_ACTIVITY": "today", "TRAVEL": "today", "DRYING": "today",
@@ -183,16 +165,11 @@ def _settles(window: Window, shelter: list[Window], doing_hours: float, settle_h
              horizon) -> tuple:
     """Can the job start inside this window and still get its dry hours afterwards?
 
-    Spraying is what this exists for: two calm hours are no use if it rains an hour later,
-    because the spray washes off the leaf before it has done anything.
+    What is measured is the *job*, not the window - requiring the whole spell plus the settle
+    time refused a perfectly good day for being too long.
 
-    What is measured is the *job*, not the window. A ten-hour clear spell against a two-hour
-    job needs six clear hours from whenever you start - not fourteen - and requiring the whole
-    spell plus the settle time refused a perfectly good day for being too long.
-
-    Returns `(ok, only_because_the_data_ends)`. The forecast running out is not rain: a clear
-    spell that reaches the end of what we know is accepted, and says so, because "it will wash
-    off" about hours nobody has a reading for is an invented forecast.
+    Returns `(ok, only_because_the_data_ends)`. The forecast running out is not rain: "it will
+    wash off" about hours nobody has a reading for is an invented forecast.
     """
     if settle_hours <= 0:
         return True, False
@@ -245,9 +222,8 @@ def _timed(spec: Timed, rows: list[dict], hourly: bool, sub: str) -> Advice:
                       caveats=thin)
 
     if long_by_time and spec.settle_hours and (early := longest(long_by_time)) is not None:
-        # long enough to do the job in, but the rain arrives before it has settled. Checked
-        # before the length branches below, or a three-hour window against a two-hour job
-        # comes back "tight", which is the wrong complaint entirely.
+        # Long enough for the job, but the rain arrives before it settles. Checked before the
+        # length branches, or a three-hour window against a two-hour job comes back "tight".
         return Advice(NO,
                       f"No - {early.label()} would work, but rain follows too soon after and "
                       f"it will wash off.",
@@ -279,11 +255,9 @@ def _timed(spec: Timed, rows: list[dict], hourly: bool, sub: str) -> Advice:
 def _rain_protection(rows, sub, hourly):
     """Decided reading by reading, and told with the timing attached.
 
-    A sum answers "how much water fell across the period", which is the wrong question for a
-    coat. Seven hours of 0.4mm drizzle add up to 2.8mm and used to come back "take it - 2.8mm
-    expected", which nobody standing outside would recognise; and because the sum only grows,
-    the same weather scored worse the longer a period you asked about. What decides a coat is
-    whether any single stretch is wet enough to want one - and if it is, when.
+    Seven hours of 0.4mm drizzle sum to 2.8mm and came back "take it - 2.8mm expected", which
+    nobody standing outside would recognise. What decides a coat is whether any single stretch
+    is wet enough to want one - and if it is, when.
     """
     rain = values(rows, "Rainfall")
     peak = round(max(rain), 1) if rain else 0.0
@@ -309,9 +283,8 @@ def _rain_protection(rows, sub, hourly):
 
 def _sun_protection(rows, sub, hourly):
     sun, daylength = _total(rows, "SunSD"), _total(rows, "DayLength")
-    # The hourly feed carries no DayLength, but each of its rows is exactly one hour - so the
-    # row count is the denominator. Without this, sun advice on any short window divided by
-    # zero and always came back "not really".
+    # The hourly feed carries no DayLength but each row is one hour, so the row count is the
+    # denominator. Without it, sun advice on a short window divided by zero.
     span = daylength or len(values(rows, "SunSD"))
     frac = round(sun / span, 2) if span else 0
     ev = {"sunshine_hrs": sun, "day_length_hrs": daylength or None,
@@ -343,10 +316,9 @@ def _clothing(rows, sub, hourly):
 def _fertilize(rows, sub, hourly):
     """Wants rain soon, but not a downpour - the two-sided rule.
 
-    An accumulated total is the right quantity here and always was: what matters is how much
-    water arrives to carry the fertiliser in, or to wash it off. It is summed over the whole
-    period the question asked about, which is why FERTILIZE defaults to three days rather than
-    to whatever range happened to be on screen.
+    A total is the right quantity: what matters is how much water arrives to carry the
+    fertiliser in, or to wash it off. Hence the three-day default rather than whatever range
+    happened to be on screen.
     """
     total, soil = _total(rows, "Rainfall"), _mean(rows, "Soilm10")
     ev = {"total_mm": total, "soil_moisture": soil, "summed_over": "the whole period"}
@@ -405,12 +377,9 @@ def evaluate(activity: str, rows: list[dict], *, sub_activity: str = "",
              hourly: bool | None = None) -> Advice | None:
     """A verdict, or None when this is not an advice turn.
 
-    Returns UNKNOWN rather than a verdict when the data cannot support one - a confident
-    answer computed from two readings out of thirty is indistinguishable from a real one,
-    which is exactly what makes it dangerous.
-
-    `hourly` says what one row covers. It is inferred from the timestamps when not given, so a
-    caller that does not know still gets the right answer for any period with two readings in.
+    UNKNOWN rather than a verdict when the data cannot support one: an answer computed from two
+    readings out of thirty is indistinguishable from a real one. `hourly` says what one row
+    covers, inferred from the timestamps when not given.
     """
     if activity not in NEEDS:
         return None
@@ -467,8 +436,7 @@ def demo():
         return res
 
     # ---- the whole point: the same total, two different answers -------------------
-    # 12mm either way. In the afternoon it leaves a clear morning; spread through the day it
-    # leaves nothing. The old engine summed and said no to both.
+    # 12mm either way; only the afternoon case leaves a clear morning. A sum says no to both.
     afternoon = hourly_rows([0.0] * 6 + [4.0, 5.0, 3.0], RH=60.0)
     scattered = hourly_rows([2.0, 0.0, 2.0, 0.0, 2.0, 0.0, 2.0, 0.0, 4.0], RH=60.0)
     assert round(sum(values(afternoon, "Rainfall"))) == round(sum(values(scattered, "Rainfall")))
@@ -511,8 +479,7 @@ def demo():
               hourly=False).verdict == CAUTION
 
     # ---- the length of the period must not change the answer ---------------------
-    # A sum only grows, so the old engine answered "can I go out today" and "...this week"
-    # differently for identical weather. The window is the same window either way.
+    # A sum only grows, so "today" and "this week" used to differ for identical weather.
     drizzle = [0.3, 0.0, 0.4, 0.0, 0.3, 0.0, 0.4]
     short = ev("RAIN_PROTECTION", days(3, Rainfall=drizzle[:3]), hourly=False)
     long = ev("RAIN_PROTECTION", days(7, Rainfall=drizzle), hourly=False)

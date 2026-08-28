@@ -92,7 +92,7 @@ def check_context():
     print("state demo OK:", state.model_dump(include={"location", "time_normalized", "turns"}))
 
 def check_registry():
-    """Self-check: both models answer, and v4 routes a greeting away from the weather API."""
+    """Self-check: the trained classifier answers, and routes a greeting away from the API."""
     from backend.nlu.registry import MODELS, Registry, normalize_text
     cleaned = normalize_text("Whats da wthr in KKD tmrw??")
     assert cleaned.normalized == "what is the weather in KKD tomorrow??", cleaned.normalized
@@ -124,7 +124,7 @@ def check_registry():
 def check_hosted_parser_coercion():
     """The parsing and coercion, without the network - the quota is not always there.
 
-    This is where the bugs actually are: a hosted model returns prose, fences, invented labels
+    This is where the bugs actually are: a prompted model returns prose, fences, invented labels
     and spans that are not in the sentence, and every one of those has to become either a valid
     contract or nothing.
     """
@@ -202,22 +202,29 @@ def check_derived():
     # FORECAST, which is right for a question and wrong for a greeting
     assert registry.understand("hey there").weather_intent == "NONE"
     assert registry.understand("can i play badminton this evening").venue == "indoor"
-    # --- the time gate: a model may propose any string, and only forms the deterministic
-    # resolver recognises are believed. Asked to place "the last 7 days" a 1.7b answered
-    # "last 7 weeks" - a valid form and the wrong window - which is why the rules go first
-    # and the model is only asked what they could not place.
+    # --- the time gate: every proposer - the tables, Duckling, the model - hands over
+    # wording, and only what can actually be placed on a calendar is believed. Asked to place
+    # "the last 7 days" a 1.7b answered "last 7 weeks", a readable form and the wrong window.
     import asyncio
 
     from backend.nlu import times
 
+    # `known` is the resolver's own gate: absolute forms and the gap list Duckling leaves.
+    assert times.known("2026-08-27") and times.known("17:30") and times.known("early morning")
+    assert not times.known("sometime recently") and not times.known("")
+    assert not times.known("tomorrow"), "relative wording is Duckling's, not the resolver's"
+
     times._SEEN.clear()
     replies = {"prior days": "last 7 days", "coming through tonight": "tonight",
                "at half five": "17:30",
-               "the other day": "sometime recently",   # not a canonical form: must be refused
+               "the other day": "sometime recently",   # places on nothing: must be refused
                "rainfall": ""}                          # names no time: must be refused
-    kept = {span: form for span, form in replies.items() if times.known(form)}
-    assert kept == {"prior days": "last 7 days", "coming through tonight": "tonight",
-                    "at half five": "17:30"}, kept
+    placed = {span: asyncio.run(times.placeable(form)) for span, form in replies.items()}
+    assert placed["the other day"] == "" and placed["rainfall"] == "", placed
+    assert placed["at half five"] == "17:30", placed
+    # the three that do place come back absolute, whatever wording proposed them
+    for span in ("prior days", "coming through tonight"):
+        assert placed[span] and placed[span] != replies[span], (span, placed[span])
 
     # a refusal is remembered, so a phrase nobody can place is asked about once, not per turn
     times._SEEN["the other day"] = ""
@@ -227,13 +234,48 @@ def check_derived():
 
     print("derived slots OK - weather_intent from the time slot, venue from the words")
 
+def check_routing():
+    """Self-check: the model switch, offline. Which id reaches which model, and that both
+    kinds of model land in the catalogue in the one shape a client reads."""
+    import asyncio
+
+    from backend.nlu import catalogue, llm, understand
+    from backend.nlu.registry import MODELS, Registry
+
+    registry = Registry()
+    rows = catalogue(registry, local_ok=True)
+    assert [r["version"] for r in rows] == [*MODELS, llm.LOCAL.version], rows
+    assert all(rows[0].keys() == r.keys() for r in rows), "one shape, trained or prompted"
+    assert sum(r["default"] for r in rows) == 1, "exactly one default"
+    assert not catalogue(registry, local_ok=False)[-1]["present"], "a dead local model is not offered"
+    print(f"  catalogue -> {[r['version'] for r in rows]}")
+
+    # A thinking model spends its whole token budget reasoning and gets cut off mid-JSON,
+    # which read as an empty understanding rather than as a failure. The switch was useless
+    # until this field went on the request.
+    assert llm.LOCAL.extra.get("reasoning_effort") == "none", llm.LOCAL.extra
+    assert not llm.HOSTED.extra, "the hosted endpoint does not take Ollama's fields"
+
+    if MODELS["v4"]["path"].exists():
+        trained = asyncio.run(understand(registry, "rain in Guntur tomorrow", "v4"))
+        assert trained.version == "v4", trained.version
+        # an id nothing serves falls back to the trained head rather than erroring
+        unknown = asyncio.run(understand(registry, "rain in Guntur tomorrow", "gpt-9"))
+        assert unknown.version == "v4", unknown.version
+        print(f"  v4 -> {trained.version}, unknown id -> {unknown.version}")
+
+    dead = llm.to_understanding({"ok": False, "error": "boom"}, "rain in Guntur")
+    assert dead is None, "a failed column is not an understanding"
+    print("routing OK - one catalogue, ids route where they say they do")
+
+
 def main():
     """Every check in this file, in order. Any assertion failure stops it."""
     for check in (check_context, check_registry, check_hosted_parser_coercion,
-                  check_derived):
+                  check_derived, check_routing):
         print(f"{check.__name__}:")
         check()
-    print("\n4 check(s) passed")
+    print("\n5 check(s) passed")
 
 
 if __name__ == "__main__":

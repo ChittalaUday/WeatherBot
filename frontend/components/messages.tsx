@@ -439,9 +439,11 @@ function SourceNote({ plan, quality }: { plan?: PlanInfo; quality?: Quality }) {
 export function Messages({
   messages,
   onShareLocation,
+  onPickLocation,
 }: {
   messages: ChatMessage[];
   onShareLocation: (text: string, lat: number, lon: number) => void;
+  onPickLocation: (text: string, raw: string, option: { name: string; state: string }) => void;
 }) {
   return (
     <div className="flex flex-col gap-3">
@@ -504,8 +506,36 @@ export function Messages({
               />
             );
 
-          // The only clarify left: the query planner cannot serve that question. Both models
-          // commit to a reading rather than asking which one you meant (Rule 1.1), so there
+          // One name, several real places. Asked rather than assumed: a forecast for the
+          // wrong district gets acted on long before anyone reads a footnote about it.
+          case "pick-location":
+            return (
+              <Card key={message.id} className="max-w-full gap-0 border-dashed p-4">
+                <p className="text-sm font-medium">{message.message}</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {message.options.map((option) => (
+                    <Button
+                      key={`${option.name}-${option.district}-${option.state}`}
+                      size="sm"
+                      variant="outline"
+                      disabled={message.answered}
+                      onClick={() => onPickLocation(message.text, message.raw, option)}
+                    >
+                      <MapPinIcon size={12} />
+                      {option.name}
+                      <span className="text-muted-foreground">
+                        {option.district && option.district !== option.name
+                          ? `${option.district}, ${option.state}`
+                          : option.state}
+                      </span>
+                    </Button>
+                  ))}
+                </div>
+              </Card>
+            );
+
+          // The only clarify left: the query planner cannot serve that question. The model
+          // commits to a reading rather than asking which one you meant (Rule 1.1), so there
           // is no intent to pick here and nothing to label.
           case "clarify":
             return (
@@ -607,8 +637,13 @@ export function Messages({
                         Assumed: {result.assumed.join(" · ")}
                       </p>
                     )}
-                    {result.chart && <ResultChart chart={result.chart} />}
-                    <ResultTable data={result.table} />
+                    {/* The backend decided which of these this answer needs - a chart when
+                        the shape is the point, a table when the values are, neither when the
+                        sentence already said it. Rendered, not re-decided. */}
+                    {result.chart && result.presentation?.chart === "open" && (
+                      <ResultChart chart={result.chart} />
+                    )}
+                    {result.presentation?.table === "open" && <ResultTable data={result.table} />}
                     {result.insights.length > 0 && (
                       <ul className="mt-2 space-y-1">
                         {result.insights.map((insight) => (

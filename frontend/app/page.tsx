@@ -23,15 +23,16 @@ const EXAMPLES = [
 ];
 
 export default function Page() {
-  const { busy, messages, chatId, ask, compare, sendLocation, newChat, openChat } = useChat();
+  const { busy, messages, chatId, ask, compare, sendLocation, pickLocation, newChat, openChat } =
+    useChat();
   // Compare mode sends the same sentence to every model and shows them side by side. It needs
   // the whole screen - three columns of slots do not fit a reading-width column.
   const [compareMode, setCompareMode] = useState(false);
   const send = (text: string) => (compareMode ? compare(text) : ask(text, model));
   const width = compareMode ? "max-w-none" : "max-w-3xl";
-  // Model 2 (v4) is the default: it can route a greeting away from the weather API,
-  // decide an activity, and say which source answered. Model 1 stays selectable so the
-  // two can be compared on the same question.
+  // The trained classifier (v4) is the default: milliseconds, offline, and trained on this
+  // label set. The prompted ones are selectable from the same switch so the readings can be
+  // compared on the same question.
   const [model, setModel] = useState("v4");
   const bottom = useRef<HTMLDivElement>(null);
   const started = messages.length > 0;
@@ -55,7 +56,7 @@ export default function Page() {
                 </span>
                 <span className="block truncate text-[11px] text-muted-foreground">
                   {compareMode
-                    ? "comparing Model 1 · Model 2 · Model 3"
+                    ? "comparing the trained and prompted classifiers"
                     : chatId
                       ? `chat ${chatId.slice(5, 13)} · ${model}`
                       : "NLU weather assistant"}
@@ -102,6 +103,7 @@ export default function Page() {
                 <Messages
                   messages={messages}
                   onShareLocation={(text, lat, lon) => sendLocation(text, lat, lon, model)}
+                  onPickLocation={(text, raw, option) => pickLocation(text, raw, option, model)}
                 />
                 <div ref={bottom} className="h-2" />
               </div>

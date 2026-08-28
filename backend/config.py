@@ -85,7 +85,7 @@ DUCKLING_TZ = os.getenv("DUCKLING_TZ", "Asia/Kolkata")
 DUCKLING_TIMEOUT = float(os.getenv("DUCKLING_TIMEOUT", "3"))
 DUCKLING_ENABLED = os.getenv("DUCKLING_ENABLED", "1").strip().lower() not in ("0", "false", "no", "")
 
-# --- hosted NLU (Model 3, the comparison column) -----------------------------
+# --- hosted prompted classifier (the comparison column) ----------------------
 AI_BASE_URL = os.getenv("AI_BASE_URL", "https://integrate.api.nvidia.com/v1")
 AI_API_KEY = os.getenv("API_KEY", "")
 AI_MODEL = os.getenv("AI_MODEL", "z-ai/glm-5.2")

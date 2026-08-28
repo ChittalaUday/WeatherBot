@@ -26,7 +26,7 @@ from src.schema import ConversationState
 from src.v2 import dataset as v2_dataset  # chats() - grouping helper, version-neutral
 
 FIXTURE = ROOT / "data" / "v3_dataset.csv"
-# Measured, not aspirational: Model 2 scores operation 99.8%, locations 89.5%, times 99.8% on
+# Measured, not aspirational: the trained classifier scores operation 99.8%, locations 89.5%,
 # this fixture. Each floor sits a few points under that, so a regression trips it and normal
 # drift does not.
 FLOORS = {"operation": 0.95, "locations": 0.85, "times": 0.95}
