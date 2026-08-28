@@ -223,7 +223,8 @@ async def run(http, understanding, *, places: list[dict] | None = None,
     # showing today data". Every one of them was an expression nobody could place, answered
     # with next week under the user's own words.
     said = understanding.times_normalized[0] if understanding.times_normalized else ""
-    spoken, how = await times.place(said, understanding.text)
+    spoken, how = await times.place(said, understanding.text, now=now,
+                                    hint=getattr(understanding, "time_hint", ""))
     if how != "rules":
         answer.stages["time"] = {"span": said or None, "canonical": spoken or None, "by": how}
     if how == "unplaceable":

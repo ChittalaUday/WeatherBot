@@ -72,6 +72,10 @@ class Understanding:
     entities: dict = field(default_factory=dict)
     family: str = "data"             # data | conversational | control | declined
     reply: str = ""                  # canned answer for a turn that needs no weather
+    # Duckling's reading of the period, fetched CONCURRENTLY with this model rather than after
+    # it - see `backend.api.chat`. Empty when it found nothing or is not running, which the
+    # pipeline treats as "fall through to the tables".
+    time_hint: str = ""
 
     @property
     def needs_weather(self) -> bool:

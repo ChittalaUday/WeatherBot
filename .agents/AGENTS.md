@@ -5,7 +5,7 @@
 ```
 backend/config.py     every setting. Nothing else calls os.getenv.
 backend/api/          HTTP only: routes, SSE framing, the turn log
-backend/nlu/          text -> Understanding; what the conversation remembers
+backend/nlu/          text -> Understanding; time expressions; what the conversation remembers
 backend/pipeline/     Understanding -> Answer. No transport, no chat id.
 backend/generation/   the Answer, said in words. Generates nothing it was not handed.
 src/v4/               Model 2 — the served model

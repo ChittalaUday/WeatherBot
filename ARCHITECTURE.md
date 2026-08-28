@@ -98,6 +98,35 @@ reported rather than left spinning.
 
 ---
 
+## 2b. Time expressions
+
+Four tiers, first hit wins, and every one of them is checked by `timewindow.resolve` before it
+is believed — `understood=False` means the window was a guess, and a guessed window is refused.
+
+| tier | placed by | cost | example |
+| :--- | :--- | :--- | :--- |
+| rules | `src/tagger.py` tables | ~0 | `tomorrow`, `next 3 days`, `last week` |
+| **duckling** | `rasa/duckling` container | ~6 ms | `last summer`, `last few days`, `so far today`, `between 6pm and 9pm`, `tonight at 6`, `at 6` |
+| model | ollama, cached per phrase | ~150 ms | `prior days`, `the other day`, `couple of days back` |
+| unplaceable | nothing could | — | the turn stops and says so, rather than answering next week |
+
+```bash
+docker run -d --name duckling-service -p 8008:8000 rasa/duckling:latest
+```
+
+`DUCKLING_LOCALE` must stay `en_IN` (or `en_GB`). `en_US` reads `11/06/2026` as 6 November and
+nothing downstream can tell; the startup probe fails loudly on exactly that. `DUCKLING_TZ` must
+be pinned too — the container defaults to US Pacific, which puts every window 12.5 hours out.
+
+The container is optional. Stopped, `duckling.canonical` returns `""` and the other three tiers
+carry the turn — verified by running the suites with it down.
+
+Duckling is asked **concurrently with the intent model** (`backend/api/chat.py`): it needs only
+the raw sentence, so its round trip overlaps the sklearn predict instead of following it.
+Measured 15.0 ms serial → 9.3 ms together.
+
+---
+
 ## 3. The models
 
 Two, answering the same contract, so they can be compared on one sentence.

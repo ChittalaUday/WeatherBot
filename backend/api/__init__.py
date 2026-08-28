@@ -32,17 +32,20 @@ from backend import generation, store
 from backend.api import chat, feedback, history, meta
 from backend.api.deps import registry
 from backend.config import CORS_ORIGINS
+from backend.nlu import duckling
 
 GENERATION: dict = {}                  # what probe() found at startup; served by /api/health
+DUCKLING: dict = {}                    # ditto, for the time service
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Warm the default bundle, and say once what is and is not working.
 
-    Both checks are startup-only and both are about failures that are invisible from inside a
-    turn: a store that will be quarantined on first write, and a generation model that is not
-    there - which silently costs every answer its wording and nothing complains.
+    All three checks are startup-only and all three are about failures that are invisible from
+    inside a turn: a store that will be quarantined on first write, a generation model that is
+    not there - which silently costs every answer its wording - and a time service that is
+    stopped or answering in the wrong locale, which costs dates and says nothing either.
     """
     if not store.healthy():
         print("store: conversations.db fails its integrity check - it will be moved aside on "
@@ -50,6 +53,9 @@ async def lifespan(app: FastAPI):
     GENERATION.update(await generation.probe())
     if not GENERATION.get("ok"):
         print(f"generation: {GENERATION['note']}")
+    DUCKLING.update(await duckling.probe())
+    if not DUCKLING.get("ok"):
+        print(f"duckling: {DUCKLING['note']}")
     registry.get()                     # so the first real turn is not the one that pays
     yield
 

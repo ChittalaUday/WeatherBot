@@ -47,7 +47,7 @@ older than a week are refused up front rather than after a timeout.
 backend/
   config.py      every setting, .env loaded once
   api/           HTTP: chat (SSE), compare, health, models, chats, feedback
-  nlu/           text -> Understanding; what the conversation remembers
+  nlu/           text -> Understanding; time expressions; what the conversation remembers
   pipeline/      places -> plan -> fetch -> quality -> analysis -> advice -> table
   generation/    retrieval, prompts, the local model that words it
   store.py       SQLite turn log, feedback, the retraining export

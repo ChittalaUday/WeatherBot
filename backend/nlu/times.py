@@ -36,7 +36,8 @@ import re
 
 import httpx
 
-from backend.config import OLLAMA_MODEL, OLLAMA_URL
+from backend.config import OLLAMA_MODEL, OLLAMA_THINK, OLLAMA_URL
+from backend.nlu import duckling
 from backend.pipeline.timewindow import resolve
 
 # Every phrase ever asked about, and what it came back as. Novel wording costs one call for the
@@ -52,12 +53,14 @@ _SEEN: dict = {}
 #
 # So the batch is bounded instead of the budget being guessed. Small chunks keep the thinking
 # short enough to be predictable, and a real turn carries one unplaceable span, not ten.
-# `backend.generation.llm` gets away with a flat 700 because it phrases one answer; this one
-# is handed a list.
+#
+# The bound stays even with OLLAMA_THINK off: it is what keeps the reply short enough to be
+# reliable, and it is the safety net for anyone who switches reasoning back on.
 CHUNK, NUM_PREDICT = 3, 1200
-# The local model thinks before it answers and the budget above lets it. Twenty seconds is the
-# wording layer's timeout, where a slow reply only costs a blunter sentence; here it costs the
-# dates, so this waits longer.
+# Twenty seconds is the wording layer's timeout, where a slow reply only costs a blunter
+# sentence; here it costs the dates, so this waits longer. Generous rather than tight: with
+# reasoning off a call lands in ~0.15s, and the only thing this bound protects against is a
+# machine under load.
 TIMEOUT = 45.0
 
 FORMS = """Allowed canonical forms, and nothing else:
@@ -101,7 +104,23 @@ _TIMEY = re.compile(
     r"hour|hours|day|days|week|weeks|month|months|year|years|weekend|"
     r"morning|afternoon|evening|night|noon|midnight|summer|winter|monsoon|"
     r"mon|tue|wed|thu|fri|sat|sun|am|pm|"
-    r"jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)\b", re.I)
+    r"jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)\b"
+    # A clock time is time-shaped and matches none of the words above: "6pm" is one token, so
+    # `\bpm\b` never fires inside it, and "between 6pm and 9pm" was gated out before anything
+    # could read it - answered with the default horizon, silently.
+    r"|\d{1,2}\s*(?:am|pm)\b|\d{1,2}:\d{2}"
+    # "at 6" - a bare hour, which only reads as a time after "at". Anchored to the preposition
+    # on purpose: a loose `\d{1,2}` would send "rain over 5 acres" and "guntur 500" to be read
+    # as clock times.
+    #
+    # The lookahead is not optional. "soil moisture at 5 cm" is a depth, and Duckling reads
+    # "at 5" out of it as five in the afternoon with no latent flag - it cannot tell a unit
+    # from an hour, so this has to. Measured, not guessed: that question came back with a
+    # 17:00 window.
+    # `%` is outside the `\b` group on purpose: it is not a word character, so a trailing
+    # `\b` after it never matches and "humidity at 80 %" slipped straight through.
+    r"|\bat\s+\d{1,2}\b(?!\s*(?:%|(?:cm|mm|km/?h|kmph|kph|m/s|mps|knots?|kg|ha|deg|"
+    r"degrees?|acres?|ft|feet|inch|inches|litres?|hectares?|m)\b))", re.I)
 
 QUESTION_SYSTEM = """You find the time period a weather question is asking about, and give it
 in one canonical form. Reply with ONLY {"time": "<form>"}.
@@ -161,7 +180,8 @@ async def for_question(text: str, client: httpx.AsyncClient | None = None) -> st
     return _SEEN[text]
 
 
-async def place(span: str, text: str, client: httpx.AsyncClient | None = None) -> tuple:
+async def place(span: str, text: str, client: httpx.AsyncClient | None = None,
+                now=None, hint: str = "") -> tuple:
     """The period this turn is about: `(canonical, how)`. The one entry point.
 
     Rules first, always. They place "tomorrow", "next 3 days" and "last week" in microseconds
@@ -171,7 +191,8 @@ async def place(span: str, text: str, client: httpx.AsyncClient | None = None) -
     small model is not asking it questions that are already answered.
 
         rules       the tables placed the span                      no call
-        model       they could not, so the sentence was read        one call, cached
+        duckling    a grammar read the sentence                     one call, ~5ms
+        model       neither could, so a model read it               one call, cached
         none        no period is named, and none is needed          no call
         unplaceable something was named and nothing could place it  the turn stops
 
@@ -183,6 +204,21 @@ async def place(span: str, text: str, client: httpx.AsyncClient | None = None) -
         return span, "rules"
     if not span and not mentions_time(text):
         return "", "none"
+
+    # Duckling before the model. It reads the whole sentence, answers in single-digit
+    # milliseconds against ~150ms for the local model, and is right about the expressions the
+    # tables were losing - "last summer", "last few days", "so far today", "between 6pm and
+    # 9pm", "tonight at 6". Whatever it says still has to survive `known()`, so it is a
+    # proposer like the model is, not a second authority.
+    #
+    # `hint` is that same answer already fetched, alongside the intent model instead of after
+    # it - the endpoint runs the two together because Duckling needs only the raw text, so its
+    # round trip costs nothing on the wall clock. Falling back to calling it here keeps every
+    # other caller (the compare endpoint, the tests) working unchanged.
+    placed = hint or await duckling.canonical(text, now, client=None)
+    if placed and known(placed):
+        return placed, "duckling"
+
     # a span that exists but cannot be placed is still the best clue there is - try it alone
     # before the sentence, because it is smaller and the model is likelier to get it right
     if span:
@@ -238,8 +274,10 @@ async def canonicalize(spans: list, client: httpx.AsyncClient | None = None) -> 
     return {k: v for k, v in out.items() if v}
 
 
-async def _ask(client: httpx.AsyncClient, payload, system: str = "") -> dict:
+async def _ask(client: httpx.AsyncClient, payload, system: str = "",
+               think: bool | None = None) -> dict:
     """One call. {} when it failed - never raises, so a turn is never blocked on this."""
+    think = OLLAMA_THINK if think is None else think
     try:
         # The local model, the one already running for the wording layer. No quota to run out
         # of and no per-turn cost, which matters because this is on the path of every question
@@ -248,15 +286,29 @@ async def _ask(client: httpx.AsyncClient, payload, system: str = "") -> dict:
         # `format: "json"` is Ollama constraining the decode to valid JSON, so the reply is
         # parsed rather than fished out of prose. `_json_from` stays anyway: a reasoning model
         # can still wrap it in a <think> block.
+        # `think` is sent explicitly and never omitted. Omitted, a reasoning model reasons
+        # anyway: measured on qwen3:1.7b this call spent 1.0-1.5k characters thinking and took
+        # 1.95s for one span, against 0.15s with it off - and returned the same answer on every
+        # case tried. Thirteen times the latency for no change in what came back. The flag is
+        # `backend.generation.llm`'s, so one switch covers both callers of the local model.
         response = await client.post(
             f"{OLLAMA_URL}/api/chat", timeout=TIMEOUT,
             json={"model": OLLAMA_MODEL, "stream": False, "format": "json",
+                  "think": think,
                   "options": {"temperature": 0, "num_predict": NUM_PREDICT},
                   "messages": [{"role": "system", "content": system or SYSTEM},
                                {"role": "user", "content": payload if isinstance(payload, str)
                                 else json.dumps(payload)}]})
         response.raise_for_status()
         return _json_from(response.json()["message"]["content"])
+    except httpx.HTTPStatusError as exc:
+        # A model with no reasoning mode answers `think: true` with a 400 ("gemma3:1b does not
+        # support thinking"). Swallowed, that turns every time expression unplaceable for as
+        # long as nobody connects the two - so it downgrades once instead. `think: false` is
+        # accepted by every model, reasoning or not, so the retry cannot loop.
+        if think and exc.response.status_code == 400:
+            return await _ask(client, payload, system, think=False)
+        return {}
     except (httpx.HTTPError, KeyError, ValueError, IndexError):
         # not running, too slow, or nonsense back. No repair, and the caller says it could not
         # work the dates out - which is the honest answer, not a guessed forecast.

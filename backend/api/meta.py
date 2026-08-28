@@ -35,10 +35,12 @@ def health():
     - the deterministic sentence is correct - but they are not phrased, and that is worth
     seeing on a dashboard rather than discovering by reading replies.
     """
-    from backend.api import GENERATION
+    from backend.api import DUCKLING, GENERATION
 
-    return {"status": "ok", "models": registry.available(), "generation": dict(GENERATION),
-            **config.summary()}
+    # `config.summary()` first: it carries a plain `duckling` URL and the probe below carries
+    # whether that URL actually answered, which is the more useful of the two.
+    return {"status": "ok", **config.summary(), "models": registry.available(),
+            "generation": dict(GENERATION), "duckling": dict(DUCKLING)}
 
 
 @router.get("/api/models", response_model=ModelListResponse)

@@ -28,8 +28,10 @@ streams it and the self-check just collects it into a list.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
+from datetime import datetime
 
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
@@ -43,7 +45,7 @@ from backend.api.schemas import (
     ResetChatResponse,
 )
 from backend.config import CONFIDENT, MIN_CONFIDENCE
-from backend.nlu import context, normalize_text
+from backend.nlu import context, duckling, normalize_text
 from backend.pipeline import places as place_index
 from backend.pipeline import resolve_places, run, sources
 from src.schema import Operation
@@ -66,13 +68,28 @@ async def turn(text: str, *, chat_id: str, model: str | None = None,
     which this calls exactly once.
     """
     started = time.perf_counter()
+    # One wall-clock reading for the whole turn, so the time Duckling resolves against and the
+    # time the pipeline resolves against cannot straddle a midnight.
+    started_at = datetime.now()
     ms = lambda since: int((time.perf_counter() - since) * 1000)
     timing = {"nlu_ms": 0, "solr_ms": 0, "api_ms": 0, "llm_ms": 0, "db_ms": 0}
 
     yield {"type": "status", "stage": "understanding"}
     cleaned = normalize_text(text)              # shorthand and typos folded, audit kept
     began = time.perf_counter()
-    understanding = registry.understand(cleaned.normalized, model)
+    # The intent model and the time reading go out together. They need nothing from each other
+    # - Duckling reads the raw sentence and the model reads the same sentence - so run serially
+    # the HTTP round trip was pure added latency on every turn that named a period. The model
+    # is CPU-bound sklearn, so it goes to a thread to let the socket actually make progress;
+    # left on the event loop it would block the request it was supposed to be overlapping with.
+    #
+    # `time_hint` is consumed by `backend.nlu.times.place`, which still puts it through
+    # `known()` before believing it.
+    understanding, hint = await asyncio.gather(
+        asyncio.to_thread(registry.understand, cleaned.normalized, model),
+        duckling.canonical(cleaned.normalized, started_at),
+    )
+    understanding.time_hint = hint
     timing["nlu_ms"] = ms(began)
 
     began = time.perf_counter()
@@ -204,7 +221,8 @@ async def turn(text: str, *, chat_id: str, model: str | None = None,
         if state.time_normalized:
             understanding.times_normalized = [state.time_normalized]
             understanding.times = [state.time_raw] if state.time_raw else understanding.times
-        answer = await run(http, understanding, places=places)
+        # the same `now` Duckling resolved against, so the hint and the window agree
+        answer = await run(http, understanding, places=places, now=started_at)
 
     timing["api_ms"] = (answer.stages.get("fetch") or {}).get("ms", 0)
     unresolved = unresolved or answer.unresolved

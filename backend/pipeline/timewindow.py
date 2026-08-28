@@ -24,6 +24,10 @@ import re
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 
+from dateutil.relativedelta import relativedelta
+
+from src.dates import MONTHS, YEAR as _YEAR, dates_in, month_days, one_date_in
+
 # --- the calendar, once ------------------------------------------------------
 WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
 
@@ -48,25 +52,10 @@ NAMED_RANGE = {
     "this weekend": (0, 2), "next weekend": (7, 2),
 }
 
-_MONTH_NAMES = ("january", "february", "march", "april", "may", "june", "july", "august",
-                "september", "october", "november", "december")
-# Full names AND the abbreviations people type. Without the short forms "11 jun 2026" matched
-# no date branch and fell through to the bare-year rule - every abbreviated date became the
-# whole of that year, which is why "11 jun" and "11 aug" both reported 225 days back.
-MONTHS = {name: i for i, name in enumerate(_MONTH_NAMES, start=1)}
-MONTHS.update({name[:3]: i for i, name in enumerate(_MONTH_NAMES, start=1)})
-MONTHS["sept"] = 9
-
 DEFAULT_HORIZON_DAYS = 7          # what "no time mentioned" means
 
-_YEAR = r"(?:19|20)\d{2}"
-# every shape a calendar date arrives in, with the meaning of each capture group
-_DATE_PATTERNS = (
-    (rf"\b({_YEAR})-(\d{{1,2}})-(\d{{1,2}})\b", ("y", "m", "d")),
-    (rf"\b(\d{{1,2}})[/-](\d{{1,2}})[/-]({_YEAR})\b", ("d", "m", "y")),
-    (rf"\b(\d{{1,2}})\s+([a-z]+)\.?\s+({_YEAR})\b", ("d", "M", "y")),
-    (rf"\b([a-z]+)\.?\s+(\d{{1,2}}),?\s+({_YEAR})\b", ("M", "d", "y")),
-)
+# `MONTHS`, `YEAR`, and reading a written date are all `src.dates` now - one parser for this
+# module and for `src/v4/schema.py`, which carried a second copy of the same four regexes.
 
 
 @dataclass(frozen=True)
@@ -77,6 +66,13 @@ class Window:
     end: datetime
     label: str
     granularity: str = "daily"        # daily | hourly - what the wording implies, not the feed
+    # False when the wording was not recognised and these dates are a guess. The dates are
+    # still filled in - the default horizon - because every caller expects a window, but a
+    # caller that answers from an unrecognised one is answering a question nobody asked. Every
+    # `time_resolution` correction in the feedback table is this: "when i asked last 7 days it
+    # showed next 7days", "when i asked for history it showed next", "when i asked yesterday
+    # it is showing today data". One flag, checked once, and the class of bug closes.
+    understood: bool = True
 
     @property
     def span_days(self) -> int:
@@ -85,28 +81,12 @@ class Window:
 
 def parse_dates(text: str) -> list[date]:
     """Every calendar date in the wording, in the order written, de-duplicated."""
-    found, seen, out = [], set(), []
-    for pattern, order in _DATE_PATTERNS:
-        for match in re.finditer(pattern, text):
-            parts = dict(zip(order, match.groups()))
-            month = parts.get("m") or MONTHS.get(str(parts.get("M", "")).rstrip("."))
-            if month is None:
-                continue
-            try:
-                found.append((match.start(), date(int(parts["y"]), int(month), int(parts["d"]))))
-            except (ValueError, TypeError):
-                continue
-    for _, when in sorted(found):
-        if when not in seen:
-            seen.add(when)
-            out.append(when)
-    return out
+    return dates_in(text)
 
 
 def parse_date(text: str) -> date | None:
     """The single calendar date in the wording, or None. Used to pick rows by date."""
-    found = parse_dates((text or "").strip().lower())
-    return found[0] if len(found) == 1 else None
+    return one_date_in((text or "").strip().lower())
 
 
 def _span(start: datetime, end: datetime, label: str, granularity: str = "daily") -> Window:
@@ -171,9 +151,12 @@ def _relative(canonical: str, now: datetime) -> Window:
         return Window(datetime.combine(start_day, time.min),
                       datetime.combine(start_day + timedelta(days=span - 1), time.max), canonical)
 
-    # unrecognised wording: keep it visible in the label rather than silently defaulting
+    # Unrecognised wording. The label used to be the only thing kept - which read as "keep it
+    # visible rather than silently defaulting" and was in fact silently defaulting, with the
+    # user's own words printed over next week's forecast.
     end = today + timedelta(days=DEFAULT_HORIZON_DAYS - 1)
-    return Window(datetime.combine(today, time.min), datetime.combine(end, time.max), canonical)
+    return Window(datetime.combine(today, time.min), datetime.combine(end, time.max), canonical,
+                  understood=False)
 
 
 def resolve(canonical: str | None, now: datetime | None = None) -> Window:
@@ -192,10 +175,13 @@ def resolve(canonical: str | None, now: datetime | None = None) -> Window:
         return _span(_day(a, 1, 1), _day(b, 12, 31), f"{a}-{b}")
 
     # "over the last 5 years" / "past 6 months" / "the last 90 days"
+    #
+    # relativedelta, not a fixed number of days per unit. A month is not 30 days and a year is
+    # not 365: "last 12 months" used to start on 2 September for a question asked on 28 August,
+    # and "last 24 months" was nine days out. Nobody would notice, which is the problem.
     if (m := re.search(r"(?:last|past)\s+(\d+)\s+(day|week|month|year)s?", text)):
         count, unit = int(m.group(1)), m.group(2)
-        days = {"day": 1, "week": 7, "month": 30, "year": 365}[unit] * count
-        return _span(now - timedelta(days=days), now, f"last {count} {unit}s")
+        return _span(now - relativedelta(**{f"{unit}s": count}), now, f"last {count} {unit}s")
 
     # "each year since 2018"
     if (m := re.search(rf"since\s+({_YEAR})", text)):
@@ -216,8 +202,8 @@ def resolve(canonical: str | None, now: datetime | None = None) -> Window:
     # "march 2022" - a whole month
     if (m := re.search(rf"([a-z]+)\s+({_YEAR})", text)) and m.group(1) in MONTHS:
         year, month = int(m.group(2)), MONTHS[m.group(1)]
-        last = (_day(year + month // 12, month % 12 + 1, 1) - timedelta(days=1)).day
-        return _span(_day(year, month, 1), _day(year, month, last), m.group(0))
+        return _span(_day(year, month, 1), _day(year, month, month_days(year, month)),
+                     m.group(0))
 
     # "for all of 2023" / "in 2017" - a bare year
     if (m := re.search(rf"\b({_YEAR})\b", text)):
@@ -227,7 +213,44 @@ def resolve(canonical: str | None, now: datetime | None = None) -> Window:
     if "decade" in text:
         return _span(now - timedelta(days=3653), now, "the last decade")
 
+    # "last june" / "in june" - a bare month with no year, meaning the most recent one.
+    #
+    # Without this the expression fell through to `_relative`, which knows about days and
+    # weeks and nothing about months, and came back with the default forward horizon: asked
+    # for rainfall last June the answer covered next week, labelled "last june". Silently, and
+    # for every bare month there is.
+    #
+    # The most recent one is the only reading worth having. A June that has not happened is
+    # past the ten-day forecast, so it is not answerable in the other direction anyway.
+    if (window := _bare_month(text, now)):
+        return window
+
     return _relative(text, now)
+
+
+# "may" is a month and it is also the commonest modal verb in a weather question. Requiring a
+# preposition in front of it costs nothing on the real month ("in may", "last may") and keeps
+# "how much rain may we get" from being answered with a month of archive.
+_NEEDS_A_PREPOSITION = {"may", "march"}
+
+
+def _bare_month(text: str, now: datetime) -> Window | None:
+    """A month named with no year -> its most recent occurrence. None when none is named."""
+    for word in re.findall(r"[a-z]+", text):
+        if word not in MONTHS:
+            continue
+        if word in _NEEDS_A_PREPOSITION and not re.search(
+                rf"\b(?:last|in|of|during|for)\s+{word}\b", text):
+            continue
+        month = MONTHS[word]
+        # already been this year, or we mean the one before
+        year = now.year if month <= now.month else now.year - 1
+        start, end = _day(year, month, 1), _day(year, month, month_days(year, month))
+        # asked during the month itself, "june" is June so far - the rest has not happened
+        if end > now:
+            end = datetime.combine(now.date(), time.max)
+        return _span(start, end, f"{word} {year}")
+    return None
 
 
 # --- picking the rows an expression asked for --------------------------------
@@ -250,7 +273,17 @@ def select_rows(rows: list[dict], canonical: str,
     # mean tomorrow rather than "the day after whatever the API happened to send first".
     now = now or datetime.now()
     hourly = any(_stamp(r).hour for r in rows[:24])
-    if canonical not in {"yesterday", "last week"}:
+    # Drop rows already in the past - the forecast feed starts a couple of days back, and
+    # "tomorrow" must mean tomorrow. Unless the question looks back, in which case those rows
+    # ARE the answer.
+    #
+    # That used to be a two-name exemption list, {"yesterday", "last week"}, and every other
+    # way of naming the past fell through it: "last 7 days" arrived with twenty-one rows from
+    # the archive and left with one, the single row dated today. The list was approximating a
+    # property the resolver can simply be asked for, so it is asked.
+    asked_window = resolve(canonical, now) if canonical else None
+    looks_back = asked_window is not None and asked_window.start.date() < now.date()
+    if not looks_back:
         rows = [r for r in rows if _stamp(r).date() >= now.date()] or rows
 
     if not canonical:                                     # no time mentioned -> the near term
@@ -305,4 +338,15 @@ def select_rows(rows: list[dict], canonical: str,
         # in range but absent is not the same as unasked: quality reports NO_DATA for it
         return picked, canonical
 
-    return rows[:7], canonical                            # unknown expression: show the horizon
+    # Unknown to the ladder above - but never unknown to `resolve`, which computes an absolute
+    # window for every expression there is, including all the ones with no branch here.
+    # Filtering by it is what a month needs: thirty rows of June came back from the archive and
+    # this line used to hand back the first seven, so a question about a month was answered
+    # from a week, labelled with the month and counted as "across 7 readings".
+    #
+    # `rows[:7]` stays as the floor. When nothing at all falls inside the window the feed and
+    # the question disagree about which dates exist, and that is quality's to report - not a
+    # reason to return nothing.
+    window = asked_window or resolve(canonical, now)
+    inside = [r for r in rows if window.start <= _stamp(r) <= window.end]
+    return (inside or rows[:7]), canonical

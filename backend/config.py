@@ -70,6 +70,21 @@ OLLAMA_TIMEOUT = float(os.getenv("OLLAMA_TIMEOUT", "20"))
 # On is a product choice - the reasoning is streamed, so a slow answer has something in it.
 OLLAMA_THINK = os.getenv("OLLAMA_THINK", "0").strip().lower() not in ("0", "false", "no", "")
 
+# --- duckling (time expressions, resolved by a service rather than a table) --
+#   docker run -d --name duckling-service -p 8008:8000 rasa/duckling:latest
+#
+# LOCALE is en_IN and that is not cosmetic: en_US reads "11/06/2026" as 6 November. en_IN and
+# en_GB read it day-first and still read ISO correctly, which is the only combination that is
+# right for both forms.
+#
+# TZ has to be pinned too - the container defaults to US Pacific, so an unpinned deployment
+# puts every window 12.5 hours out and nothing says so.
+DUCKLING_URL = os.getenv("DUCKLING_URL", "http://localhost:8008")
+DUCKLING_LOCALE = os.getenv("DUCKLING_LOCALE", "en_IN")
+DUCKLING_TZ = os.getenv("DUCKLING_TZ", "Asia/Kolkata")
+DUCKLING_TIMEOUT = float(os.getenv("DUCKLING_TIMEOUT", "3"))
+DUCKLING_ENABLED = os.getenv("DUCKLING_ENABLED", "1").strip().lower() not in ("0", "false", "no", "")
+
 # --- hosted NLU (Model 3, the comparison column) -----------------------------
 AI_BASE_URL = os.getenv("AI_BASE_URL", "https://integrate.api.nvidia.com/v1")
 AI_API_KEY = os.getenv("API_KEY", "")
@@ -100,6 +115,7 @@ def summary() -> dict:
         "archive": ARCHIVE_REACHABLE,
         "hosted_nlu": bool(AI_API_KEY),
         "generation_model": OLLAMA_MODEL,
+        "duckling": DUCKLING_URL if DUCKLING_ENABLED else False,
     }
 
 
