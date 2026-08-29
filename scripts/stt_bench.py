@@ -215,7 +215,9 @@ def limits(container: str) -> str:
         return "?"
 
 
-async def main() -> int:
+async def main() -> "int | str":
+    """0 when the benchmark ran, or the reason it could not. `sys.exit` prints a string and
+    exits 1, which is what a bench that never started should do."""
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("-s", "--service", default="all", choices=[*SERVICES, "all"],
                     help="default: all reachable services")

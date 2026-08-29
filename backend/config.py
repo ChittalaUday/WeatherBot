@@ -103,6 +103,10 @@ CORS_ORIGINS = [o.strip() for o in os.getenv("CORS_ORIGINS", "*").split(",") if 
 MIN_CONFIDENCE = float(os.getenv("MIN_CONFIDENCE", "0.45"))
 CONFIDENT = float(os.getenv("CONFIDENT", "0.95"))
 
+MAX_SPAN_DAYS = int(os.getenv("MAX_SPAN_DAYS", "30"))
+
+MAX_PLACES = int(os.getenv("MAX_PLACES", "3"))
+
 # How many rows one answer may carry back. Not a database limit - a limit on what the
 # aggregator, the chart and the reply can do something useful with.
 MAX_ROWS = int(os.getenv("MAX_ROWS", "400"))

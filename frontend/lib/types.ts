@@ -15,14 +15,39 @@ export type Place = {
 export type TableColumn = { key: string; label: string };
 export type TableData = { columns: TableColumn[]; rows: Record<string, string>[] };
 
-export type Chart = {
-  type: "line" | "bar";
+export type Point = { t: string; v: number };
+export type Series = { name: string; points: Point[] };
+
+/**
+ * The picture, in whichever shape the answer needs. Every shape carries the same envelope -
+ * type, label, unit, granularity - and one extra key of its own, so a renderer switches on
+ * `type` and reads that key rather than sniffing the payload.
+ *
+ *   line / bar / area   a series over time, per place
+ *   band                the day's low and high, filled between
+ *   combo               rain as bars, temperature as a line over them
+ *   rose                wind direction as compass petals
+ *   heatmap             hour of day across days
+ */
+export type ChartBase = {
   field: string;
   label: string;
   unit: string;
   granularity: "hourly" | "daily";
-  series: { name: string; points: { t: string; v: number }[] }[];
 };
+
+export type Chart = ChartBase &
+  (
+    | { type: "line" | "bar" | "area"; series: Series[] }
+    | { type: "band"; points: { t: string; lo: number; hi: number; v: number }[] }
+    | {
+      type: "combo";
+      bars: { field: string; label: string; unit: string; points: Point[] };
+      line: { field: string; label: string; unit: string; points: Point[] };
+    }
+    | { type: "rose"; buckets: { bucket: string; share: number }[] }
+    | { type: "heatmap"; cells: { d: string; h: number; v: number }[]; days: string[] }
+  );
 
 /** One observation, with the kind of observation it is - so the UI can group or filter them
  *  the same way the generation layer does. */
@@ -209,15 +234,23 @@ export type ServerEvent =
     places: Place[];
     granularity: "hourly" | "daily";
     summary: string;
+    /** "markdown" only when the wording layer laid the answer out. The fallback sentence is
+     *  always plain text, so a client must not parse it as markdown. */
+    summary_format?: "markdown" | "text";
     uncertain: boolean;
     confidence: number;
     aggregation: string;
     reduced: Reduced | null;
     chart: Chart | null;
+    /** One ready chart per field worth plotting, when the turn measured several things. The
+     *  shape is decided per field by the backend, so switching is swapping an object. */
+    charts?: { field: string; label: string; unit: string; chart: Chart }[];
     insights: Insight[];
     // v3 only: what the model chose, and what it committed to instead of asking
     assumed?: string[];
     unresolved: string[];
+    /** Named, but past the places-per-answer cap and never looked up. */
+    over_the_cap: string[];
     table: TableData;
     presentation: Presentation;
     series: { place: string; points: { t: string; v: number | null }[] }[];

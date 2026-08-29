@@ -67,6 +67,13 @@ def resolve(understanding, profile, places: list, *, now: datetime | None = None
         params.window = profile.window
         said("window", f"{profile.window!r} - assumed for {profile.route}: {profile.note}")
         params.assumed.append(f"looked at {profile.window}")
+    elif (getattr(understanding, "detail", "") or "") == "FULL":
+        # "summarise the weather in Hyderabad" names no period and means today. The seven-day
+        # horizon is the right default for a question about the future; a summary with no
+        # period is a question about now.
+        params.window = "today"
+        said("window", "'today' - a summary with no period named is about today")
+        params.assumed.append("summarised today")
     else:
         said("window", "no time named - the planner's default horizon")
 

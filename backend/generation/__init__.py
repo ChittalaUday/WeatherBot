@@ -19,6 +19,7 @@ from backend.generation.llm import (
     TROUBLE_LINES,
     explain,
     grounded,
+    is_markdown,
     probe,
     say,
     say_conversational,
@@ -27,6 +28,6 @@ from backend.generation.llm import (
     usable,
 )
 
-__all__ = ["Context", "build", "explain", "grounded", "probe", "say", "say_conversational",
+__all__ = ["Context", "build", "explain", "grounded", "is_markdown", "probe", "say", "say_conversational",
            "stream", "trouble_line", "usable", "TROUBLE_LINES"]
 

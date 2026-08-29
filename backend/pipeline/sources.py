@@ -68,6 +68,10 @@ class Fetched(BaseModel):
     """What one plan actually returned, and what it had to settle for."""
 
     per_place: List[Any]  # one list of canonical rows per place, same order as `places`
+    # The day's own row per place, when an hourly answer also needed the daily feed. The two
+    # are different shapes - one row per hour against one per day - so this rides alongside
+    # rather than being merged into `per_place`, where it would corrupt the series.
+    per_place_daily: List[Any] = []
     source: str
     ok: bool = True
     error: str = ""
@@ -271,8 +275,12 @@ async def zarr_bulk(client: httpx.AsyncClient, places: list[dict],
 
 
 
-async def fetch_for(client: httpx.AsyncClient, plan, places: list[dict]) -> Fetched:
+async def fetch_for(client: httpx.AsyncClient, plan, places: list[dict],
+                    also_daily: bool = False) -> Fetched:
     """Execute a QueryPlan against whichever source it chose, degrading rather than failing.
+
+    `also_daily` adds the daily feed to an hourly answer, for a question that asked for
+    every measurement - the hourly feed does not carry the day's high, low or sunshine.
 
     The archive lives on an internal address, so "unreachable" is a normal Tuesday for anyone
     running this outside the office. When that happens the recent past is still servable from
@@ -295,7 +303,14 @@ async def fetch_for(client: httpx.AsyncClient, plan, places: list[dict]) -> Fetc
     try:
         if source is Source.GFS_HOURLY:
             rows = await asyncio.gather(*(hourly_forecast(client, p["lat"], p["lon"]) for p in places))
-            return Fetched(per_place=list(rows), source=source.value)
+            # The hourly feed has no daily max/min, no sunshine hours and no day length. A
+            # question that asked for everything is answered with everything, so the daily
+            # feed is fetched alongside it - concurrently, so it costs no wall clock.
+            daily: list = []
+            if also_daily:
+                daily = list(await asyncio.gather(
+                    *(daily_forecast(client, p["lat"], p["lon"]) for p in places)))
+            return Fetched(per_place=list(rows), per_place_daily=daily, source=source.value)
         if source is Source.GFS_DAILY:
             rows = await asyncio.gather(*(daily_forecast(client, p["lat"], p["lon"]) for p in places))
             return Fetched(per_place=list(rows), source=source.value)

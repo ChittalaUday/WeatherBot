@@ -86,15 +86,42 @@ class Context:
         return self.render().lower()
 
 
-def _table_lines(table: dict, max_rows: int, max_cells: int) -> list[str]:
+def _table_lines(table: dict, max_rows: int, max_cells: int,
+                 hourly: bool = False) -> list[str]:
     columns, body = table.get("columns") or [], table.get("rows") or []
     if not body or not columns:
         return []
     if len(body) <= max_rows and len(body) * len(columns) <= max_cells:
         return [" | ".join(c["label"] for c in columns)] + \
                [" | ".join(str(row.get(c["key"], "")) for c in columns) for row in body]
-    return [f"({len(body)} rows of {', '.join(c['label'] for c in columns[1:])} - too many to "
-            f"list; the figures above cover the whole period)"]
+    return _digest_lines(columns, body, hourly)
+
+
+def _digest_lines(columns: list[dict], body: list[dict], hourly: bool = False) -> list[str]:
+    """Low, high and mean for every column - one line each, in the table's own order.
+
+    A digest rather than a sample: fifteen of nineteen rows dropped is a summary that quietly
+    describes four hours of a day, and the reader cannot tell which four.
+    """
+    lines = [f"{len(body)} readings, summarised per measurement:"]
+    keys = {c["key"] for c in columns}
+    skip = {"Tmin", "Tmax"} if {"Tmin", "Tmax", "Tavg"} <= keys and hourly else set()
+    for column in columns[1:]:
+        if column["key"] in skip:
+            continue
+        numbers = []
+        for row in body:
+            try:
+                numbers.append(float(str(row.get(column["key"], "")).replace(",", "")))
+            except (TypeError, ValueError):
+                continue
+        if not numbers:
+            continue
+        low, high = min(numbers), max(numbers)
+        mean = sum(numbers) / len(numbers)
+        lines.append(f"  {column['label']}: {low:g} to {high:g}, averaging {mean:.1f}"
+                     if low != high else f"  {column['label']}: {low:g} throughout")
+    return lines
 
 
 def build(result: dict, *, max_rows: int = MAX_FACT_ROWS,
@@ -106,6 +133,26 @@ def build(result: dict, *, max_rows: int = MAX_FACT_ROWS,
         """A heading with nothing under it is noise the model has to read past."""
         if (kept := [line for line in lines if line]):
             context.sections.append((heading, kept))
+
+    def day_lines() -> list[str]:
+        """The day's own figures, from the daily feed an hourly answer also pulled.
+
+        The hourly rows carry the shape of the day; these carry the things only a daily row
+        has - the real high and low, sunshine hours, how long the day is.
+        """
+        rows = result.get("day_rows") or []
+        out = []
+        for place, day in zip(result.get("places") or [], rows):
+            first = (day or [None])[0]
+            if not isinstance(first, dict):
+                continue
+            said = [f"{label}: {first[key]:g}" for key, label in
+                    (("Tmax", "high"), ("Tmin", "low"), ("SunSD", "sunshine hrs"),
+                     ("DayLength", "day length hrs"), ("Rainfall", "rain mm"))
+                    if isinstance(first.get(key), (int, float))]
+            if said:
+                out.append(f"{place['name']} - " + ", ".join(said))
+        return out
 
     if (places := result.get("places")):
         add("Places", [", ".join(p["name"] + (f" ({p['state']})" if p.get("state") else "")
@@ -129,5 +176,6 @@ def build(result: dict, *, max_rows: int = MAX_FACT_ROWS,
         add("Caution", advice.caveats or [])
 
     if (table := result.get("table")):
-        add("Figures", _table_lines(table, max_rows, max_cells))
+        add("Figures", _table_lines(table, max_rows, max_cells, bool(result.get("hourly"))))
+    add("Today", day_lines())
     return context

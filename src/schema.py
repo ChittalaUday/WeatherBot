@@ -35,19 +35,12 @@ class Action(str, Enum):
     ALERT = "ALERT"
 
 
-class Aggregation(str, Enum):
-    """How to reduce the selected rows before answering (Rule 2.3).
-
-    Orthogonal to weather_intent: TEMPERATURE_MAX picks the Tmax *field*, while MAX picks the
-    largest value across the chosen time range. "total rain this week" is RAIN + SUM.
-    """
-
-    RAW = "RAW"        # show the values as they come
-    SUM = "SUM"        # total over the range - rainfall, sunshine hours
-    AVG = "AVG"        # mean over the range
-    MAX = "MAX"        # peak, hottest, strongest
-    MIN = "MIN"        # lowest, coldest, weakest
-    TREND = "TREND"    # when does it rise/fall/start/stop
+# One definition, re-exported. This file used to carry its own six-value copy while
+# `src/v4/schema.py` grew to twenty-two, and `backend.nlu.context` validated the model's
+# prediction against this one - so the first turn the model answered LOW_DATE died with
+# "'LOW_DATE' is not a valid Aggregation". Two enums with one name is the same bug the
+# timewindow and dates modules were written to close.
+from src.v4.schema import Aggregation  # noqa: E402,F401  (re-export, kept for old callers)
 
 
 class Entities(BaseModel):

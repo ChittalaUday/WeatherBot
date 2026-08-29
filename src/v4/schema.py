@@ -346,14 +346,144 @@ def group_for(activity) -> Action:
 
 
 class Aggregation(str, Enum):
-    """Reduction requested over the range."""
+    """What to compute over the selected rows.
 
-    RAW = "RAW"
-    SUM = "SUM"
+    Four axes make up a request and only this one is a label: the *statistic*. Which column it
+    runs on is `Variable`, which rows it sees is the time window, and what it is measured
+    against is `CompareTo`. "Historical maximum rainfall" is MAX + RAIN + a past window, not a
+    class of its own - which is what keeps this list at twenty-two instead of two hundred.
+
+    The five at the bottom answer with a date or a stretch rather than a number.
+    """
+
+    RAW = "RAW"                  # the rows themselves, no reduction
+
+    # --- one number out of the column ---------------------------------------
+    SUM = "SUM"                  # total rainfall, total sunshine hours
     AVG = "AVG"
+    MEDIAN = "MEDIAN"            # the middle reading, which a mean hides when one day is wild
     MAX = "MAX"
     MIN = "MIN"
-    TREND = "TREND"
+    RANGE = "RANGE"              # max - min, the spread over the period
+    STDDEV = "STDDEV"            # how variable it was
+    TREND = "TREND"              # where the series turns, in words
+    CHANGE = "CHANGE"            # last reading minus first
+    COUNT = "COUNT"              # readings that met the variable's own condition: rainy hours
+    RUN_COUNT = "RUN_COUNT"      # how many separate stretches met it: number of rainy spells
+    FREQUENCY = "FREQUENCY"      # COUNT as a share of all readings
+    CUMULATIVE = "CUMULATIVE"    # the running total, as a series
+    INTENSITY = "INTENSITY"      # the total spread over only the readings that had any
+    MODE = "MODE"                # the commonest bucket - the dominant wind direction
+    DISTRIBUTION = "DISTRIBUTION"  # every bucket and its share - a wind rose
+
+    # --- a date or a stretch, not a number -----------------------------------
+    PEAK_DATE = "PEAK_DATE"      # hottest / wettest / windiest / most humid date
+    LOW_DATE = "LOW_DATE"        # coldest / driest / calmest date
+    PEAK_PERIOD = "PEAK_PERIOD"  # the wettest run of days inside the window
+    LOW_PERIOD = "LOW_PERIOD"    # the driest run
+    LONGEST_RUN = "LONGEST_RUN"  # the longest unbroken stretch that met the condition
+
+
+class CompareTo(str, Enum):
+    """What the answer is measured against. The window says *when*; this says *against what*."""
+
+    NONE = "NONE"
+    PREVIOUS_PERIOD = "PREVIOUS_PERIOD"   # the same length of time immediately before
+    LAST_YEAR = "LAST_YEAR"               # the same dates a year ago
+    NORMAL = "NORMAL"                     # the climatic normal, where the archive serves one
+
+
+# Answers with a date or a stretch rather than a figure, so the renderer shows a when.
+SELECTORS = frozenset({Aggregation.PEAK_DATE, Aggregation.LOW_DATE, Aggregation.PEAK_PERIOD,
+                       Aggregation.LOW_PERIOD, Aggregation.LONGEST_RUN})
+
+# Adding up only means something for a quantity that accumulates. A total of Tuesday's and
+# Wednesday's temperature is not a reading of anything, and `render.summary_stat` has always
+# refused it - this is that rule as data, so the model's label can be corrected rather than
+# silently producing nonsense.
+ACCUMULATES = frozenset({Variable.RAIN, Variable.SUNSHINE})
+
+# A condition worth counting, per variable, and what one occurrence is called. COUNT,
+# RUN_COUNT, FREQUENCY, INTENSITY, LONGEST_RUN and the two PERIOD selectors all need one -
+# a variable with no entry here cannot answer them, and says so instead of guessing.
+COUNTABLE = {
+    Variable.RAIN: ("Rainfall", 0.2, "rainy"),
+    Variable.SUNSHINE: ("SunSD", 0.1, "sunny"),
+    Variable.CLOUD: ("Lowcloud", 0.5, "cloudy"),
+}
+
+# Only a direction has buckets to be commonest or distributed over.
+BUCKETED = frozenset({Variable.WIND})
+
+
+# Which column a statistic wants when its variable serves several. "The hottest day" is Tmax
+# and "the coldest" is Tmin; asked for either, the fetch order alone answered with whichever
+# column came first, which made "hottest day" a reading of the overnight low.
+PEAK_COLUMN = {Variable.TEMPERATURE: "Tmax", Variable.HUMIDITY: "RH_max",
+               Variable.WIND: "Wind_max"}
+LOW_COLUMN = {Variable.TEMPERATURE: "Tmin", Variable.HUMIDITY: "RH_min"}
+MID_COLUMN = {Variable.TEMPERATURE: "Tavg", Variable.HUMIDITY: "RH",
+              Variable.WIND: "Wind_Speed"}
+
+_WANTS_THE_HIGH = frozenset({Aggregation.MAX, Aggregation.PEAK_DATE, Aggregation.PEAK_PERIOD})
+_WANTS_THE_LOW = frozenset({Aggregation.MIN, Aggregation.LOW_DATE, Aggregation.LOW_PERIOD})
+
+
+def column_for(variable, aggregation, available: List[str]) -> str:
+    """The column this statistic should read, out of the ones actually fetched."""
+    variable = variable if isinstance(variable, Variable) else Variable(variable)
+    aggregation = (aggregation if isinstance(aggregation, Aggregation)
+                   else Aggregation(aggregation))
+    if aggregation in (Aggregation.MODE, Aggregation.DISTRIBUTION):
+        wanted = "Wind_Direction"
+    elif aggregation in _WANTS_THE_HIGH:
+        wanted = PEAK_COLUMN.get(variable, "")
+    elif aggregation in _WANTS_THE_LOW:
+        wanted = LOW_COLUMN.get(variable, "")
+    else:
+        wanted = MID_COLUMN.get(variable, "")
+    if wanted and wanted in available:
+        return wanted
+    # Not fetched, or the variable has only one column - fall back to its own first choice.
+    own = fields_for([variable], "NORMAL")
+    return next((f for f in own if f in available), (available or own or ["Tavg"])[0])
+
+
+# Columns that never accumulate, whatever their variable does. SUNSHINE is an accumulating
+# variable - hours of sun add up over a week - but the length of a day does not: thirty days
+# of daylight totalling 158 hours is not a reading of anything.
+NEVER_TOTALS = frozenset({"DayLength", "Wind_Direction", "RH", "RH_max", "RH_min", "DPT",
+                          "Soilm10", "Soilm40", "Soilt10", "Tmin", "Tmax", "Tavg"})
+
+
+def column_supports(column: str, aggregation) -> bool:
+    """Can this statistic honestly be computed for this column, given its variable already
+    allows it? A narrower gate than `supports`, for the columns that are the exception."""
+    aggregation = (aggregation if isinstance(aggregation, Aggregation)
+                   else Aggregation(aggregation))
+    if aggregation in (Aggregation.SUM, Aggregation.CUMULATIVE):
+        return column not in NEVER_TOTALS
+    return True
+
+
+def supports(variable, aggregation) -> bool:
+    """Can this statistic honestly be computed for this variable?
+
+    Asked for a total of humidity, the honest answer is the average and a note saying so - not
+    a number that is the sum of nine percentages.
+    """
+    variable = variable if isinstance(variable, Variable) else Variable(variable)
+    aggregation = (aggregation if isinstance(aggregation, Aggregation)
+                   else Aggregation(aggregation))
+    if aggregation in (Aggregation.SUM, Aggregation.CUMULATIVE):
+        return variable in ACCUMULATES
+    if aggregation in (Aggregation.MODE, Aggregation.DISTRIBUTION):
+        return variable in BUCKETED
+    if aggregation in (Aggregation.COUNT, Aggregation.RUN_COUNT, Aggregation.FREQUENCY,
+                       Aggregation.INTENSITY, Aggregation.LONGEST_RUN,
+                       Aggregation.PEAK_PERIOD, Aggregation.LOW_PERIOD):
+        return variable in COUNTABLE
+    return variable is not Variable.GENERAL or aggregation is Aggregation.RAW
 
 
 class Operation(str, Enum):
@@ -511,7 +641,12 @@ DETAIL_FIELDS = {
     Variable.GENERAL: {
         "MINIMAL": ["Tavg"],
         "NORMAL": ["Tavg", "Rainfall", "RH"],
-        "FULL": ["Tmin", "Tmax", "Tavg", "Rainfall", "RH", "Wind_Speed", "Lowcloud"],
+        # Every measurement the feeds serve. "Summarise today's weather" is a request for
+        # all of them, and a seven-column answer to it silently drops soil, sun and wind
+        # direction - the reader has no way to tell they were left out rather than absent.
+        "FULL": ["Tmin", "Tmax", "Tavg", "Rainfall", "RH", "RH_min", "RH_max", "DPT",
+                 "Wind_Speed", "Wind_max", "Wind_Direction", "SunSD", "DayLength",
+                 "Lowcloud", "Soilm10", "Soilm40", "Soilt10"],
     },
     Variable.TEMPERATURE: {
         "MINIMAL": ["Tavg"],
@@ -568,7 +703,12 @@ UV_IS_A_PROXY = "no UV index in the feed - judged from sunshine hours and cloud 
 FULL_CUES = (
     "in detail", "detailed", "full", "everything", "all the", "complete",
     "in depth", "expand", "elaborate", "more detail", "breakdown", "comprehensive",
-    "every reading", "all readings", "whole picture"
+    "every reading", "all readings", "whole picture",
+    # "summarise the weather" is a request for the whole picture, not for three columns.
+    # MINIMAL_CUES still wins on "summary only" and "just the summary", because those are
+    # checked first and they mean the opposite.
+    "summarise", "summarize", "summary of", "sum up", "rundown", "overview", "brief me",
+    "run through", "walk me through", "tell me about the",
 )
 MINIMAL_CUES = (
     "just the", "only the", "one number", "quick", "briefly", "in short",
@@ -587,7 +727,14 @@ def detail_from_text(text: str) -> str:
 
 
 def fields_for(variables, detail: str = "NORMAL", limit: int = 8) -> List[str]:
-    """Columns to fetch for named variables at requested detail level."""
+    """Columns to fetch for named variables at the requested detail level.
+
+    FULL raises its own cap: eight columns is a sensible answer to a normal question and a
+    silent truncation of "summarise everything", where the columns dropped are the ones the
+    reader cannot tell were dropped rather than missing.
+    """
+    if detail == "FULL":
+        limit = max(limit, 20)
     chosen: List[str] = []
     for variable in variables:
         key = variable if isinstance(variable, Variable) else Variable(variable)

@@ -56,8 +56,19 @@ HOURLY_GRAINS = {"second", "minute", "hour"}
 # Duckling reads the length and leaves the anchor to the caller. Asked for `time` alone they
 # were dropped on the floor and the turn answered with the default horizon.
 DIMS = ("time", "duration")
-_DURATION_UNITS = {"second": "seconds", "minute": "minutes", "hour": "hours", "day": "days",
-                   "week": "weeks", "month": "months", "year": "years"}
+# Duckling's unit -> how long one of them is. Spelled out rather than passed through as
+# `relativedelta(**{unit: count})`: the dynamic form reads as filling relativedelta's two
+# positional date arguments, and a typo in a unit name would only show up at runtime.
+_DURATION_SPAN = {
+    "second": lambda n: relativedelta(seconds=n),
+    "minute": lambda n: relativedelta(minutes=n),
+    "hour": lambda n: relativedelta(hours=n),
+    "day": lambda n: relativedelta(days=n),
+    "week": lambda n: relativedelta(weeks=n),
+    "month": lambda n: relativedelta(months=n),
+    "year": lambda n: relativedelta(years=n),
+}
+_SUB_DAY = ("second", "minute", "hour")
 
 _POINT_SPAN = {"second": timedelta(seconds=1), "minute": timedelta(minutes=1),
                "hour": timedelta(hours=1), "day": timedelta(days=1),
@@ -148,18 +159,16 @@ def _from_duration(entity: dict, now: datetime, text: str = "") -> str:
     long and leaves from-when to the caller. From now unless the sentence looks back.
     """
     value = entity.get("value") or {}
-    unit = _DURATION_UNITS.get(str(value.get("unit") or ""), "")
+    unit = str(value.get("unit") or "")
     try:
-        count = int(value.get("value"))
+        count = int(value.get("value") or 0)
     except (TypeError, ValueError):
         return ""
-    if not unit or count <= 0:
+    if unit not in _DURATION_SPAN or count <= 0:
         return ""
-    if _LOOKS_BACK.search(text or ""):
-        start, end = now - relativedelta(**{unit: count}), now
-    else:
-        start, end = now, now + relativedelta(**{unit: count})
-    if unit in ("seconds", "minutes", "hours") and start.date() == end.date():
+    span = _DURATION_SPAN[unit](count)
+    start, end = (now - span, now) if _LOOKS_BACK.search(text or "") else (now, now + span)
+    if unit in _SUB_DAY and start.date() == end.date():
         return f"{start:%H:%M}-{end:%H:%M}"
     return _range(start, end)
 

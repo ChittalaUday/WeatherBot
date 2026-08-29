@@ -27,6 +27,7 @@ import json
 import re
 
 from backend.config import DATA_DIR
+from src.tagger import GENERIC_PLACE_WORDS
 
 ALIAS_FILE = DATA_DIR / "location_aliases.json"
 
@@ -261,6 +262,46 @@ async def resolve(solr, raw: str) -> dict | None:
             best["ambiguous"] = _is_ambiguous(candidates, safe)
             return best
     return None
+
+
+# Words that are never a place, whatever they look like: the weather vocabulary itself, the
+# question words around it, and the span quantifiers. Anything else in a sentence with no
+# tagged location is worth one lookup before the turn gives up.
+NOT_A_PLACE = GENERIC_PLACE_WORDS | {
+    "weather", "rain", "rainfall", "temperature", "temp", "humidity", "wind", "cloud",
+    "clouds", "sunshine", "sun", "soil", "moisture", "forecast", "conditions", "climate",
+    "report", "summary", "summarize", "summarise", "update", "outlook", "rundown", "snapshot",
+    "showers", "precipitation", "dew", "uv", "gusts", "breeze", "overview", "data",
+    "what", "whats", "how", "hows", "when", "where", "which", "will", "is", "are", "was",
+    "were", "the", "a", "an", "for", "in", "at", "on", "of", "to", "it", "be", "do", "does",
+    "give", "tell", "show", "check", "get", "know", "like", "much", "many", "there", "today",
+    "tomorrow", "tonight", "yesterday", "now", "morning", "afternoon", "evening", "next",
+    "last", "past", "this", "days", "hours", "weeks", "please", "pls", "hi", "hello",
+}
+
+
+async def find_in(solr, text: str, limit: int = 2) -> list[dict]:
+    """Places named in a sentence the tagger tagged nothing in.
+
+    The tagger is a model over a 623,000-name vocabulary, so it will always have gaps -
+    "Guntur weather" is two tokens and almost no context, and it came back with no location
+    at all. The index is the authority on what is a place, so the words that could be one get
+    one lookup each before the turn gives up and asks.
+
+    Only reached when the tagger found nothing and the turn needs somewhere, which today ends
+    in "which place should I check?" - so the worst case is the dead end we already had.
+    """
+    seen, found = set(), []
+    for word in re.findall(r"[A-Za-z][A-Za-z'\-]{2,}", text or ""):
+        low = word.lower()
+        if low in NOT_A_PLACE or low in seen:
+            continue
+        seen.add(low)
+        if (place := await resolve(solr, word)):
+            found.append(place)
+            if len(found) >= limit:
+                break
+    return found
 
 
 async def suggest(solr, raw: str, limit: int = 3) -> list[str]:

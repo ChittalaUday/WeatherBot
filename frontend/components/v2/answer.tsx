@@ -2,6 +2,7 @@
 
 import { BarChart3, Clock, Database, MapPin, ShieldAlert, Sparkles, Table2, Timer, TriangleAlert } from "lucide-react";
 import { useState } from "react";
+import { AnswerText } from "@/components/answer-text";
 import { ResultChart } from "@/components/result-chart";
 import { ResultTable } from "@/components/result-table";
 import { Badge } from "@/components/ui/badge";
@@ -60,7 +61,7 @@ export function Answer({ result }: { result: Result }) {
         <VerdictCard advice={result.advice} policyId={result.policy_id} />
       ) : (
         <div className="rounded-2xl border bg-card p-4">
-          <p className="text-sm leading-relaxed">{result.summary}</p>
+          <AnswerText text={result.summary} format={result.summary_format} />
         </div>
       )}
 

@@ -1,12 +1,28 @@
 "use client";
 
-import { useId } from "react";
-import type { Chart } from "@/lib/types";
+import { useMemo } from "react";
+import { EvilAreaChart } from "@/components/evilcharts/charts/recharts-area-chart";
+import { EvilBarChart } from "@/components/evilcharts/charts/recharts-bar-chart";
+import { EvilComposedChart } from "@/components/evilcharts/charts/recharts-composed-chart";
+import { EvilLineChart } from "@/components/evilcharts/charts/recharts-line-chart";
+import { EvilRadarChart } from "@/components/evilcharts/charts/recharts-radar-chart";
+import type { Chart, Point, Series } from "@/lib/types";
 
-const COLORS = ["var(--chart-1, #2563eb)", "var(--chart-2, #16a34a)", "var(--chart-3, #ea580c)"];
-const WIDTH = 560;
-const HEIGHT = 170;
-const PAD = { top: 12, right: 12, bottom: 26, left: 38 };
+/**
+ * The picture, drawn with EvilCharts (Recharts under it).
+ *
+ * The backend decides the *shape* - see `backend/pipeline/analysis.pick_chart` - and this
+ * only renders it. Every shape here is interactive for free: hover reads the value, the
+ * legend selects a series, and a long run of readings gets a brush to zoom with.
+ *
+ * Recharts wants rows and the pipeline emits series, so `toRows` pivots once at the top of
+ * each renderer rather than each of them reshaping in its own way.
+ */
+
+const COLORS = ["var(--chart-1)", "var(--chart-2)", "var(--chart-3)"];
+const BOX = "h-[210px] w-full";
+// Past this many readings a series is unreadable without being able to zoom into it.
+const BRUSH_AFTER = 24;
 
 const stamp = (iso: string, hourly: boolean) => {
   const date = new Date(iso);
@@ -15,121 +31,250 @@ const stamp = (iso: string, hourly: boolean) => {
     : date.toLocaleDateString(undefined, { day: "numeric", month: "short" });
 };
 
-/**
- * Hand-rolled SVG rather than a charting dependency: two shapes are needed (a line over
- * time, grouped bars for a comparison) and both are a dozen lines of maths.
- */
-export function ResultChart({ chart }: { chart: Chart }) {
-  const gradientId = useId();
-  const hourly = chart.granularity === "hourly";
-  const values = chart.series.flatMap((s) => s.points.map((p) => p.v));
-  if (values.length === 0) return null;
+/** Series of points -> one row per timestamp, which is the shape Recharts reads. */
+function toRows(series: Series[], hourly: boolean) {
+  const byTime = new Map<string, Record<string, unknown>>();
+  for (const one of series) {
+    for (const point of one.points) {
+      const row = byTime.get(point.t) ?? { t: point.t, when: stamp(point.t, hourly) };
+      row[one.name] = point.v;
+      byTime.set(point.t, row);
+    }
+  }
+  return [...byTime.values()];
+}
 
-  const max = Math.max(...values);
-  const min = Math.min(...values);
-  const span = max - min || 1;
-  const top = max + span * 0.15;
-  const bottom = chart.field === "Rainfall" ? 0 : min - span * 0.15;
-  const plotW = WIDTH - PAD.left - PAD.right;
-  const plotH = HEIGHT - PAD.top - PAD.bottom;
+/** A colour per series, per theme. Not annotated as `ChartConfig`: the chart components
+ *  check every config key against the data row type, and an index signature erases that. */
+const paint = (color: string) => ({ light: [color], dark: [color] });
 
-  const x = (index: number, count: number) =>
-    PAD.left + (count <= 1 ? plotW / 2 : (index / (count - 1)) * plotW);
-  const y = (value: number) => PAD.top + plotH - ((value - bottom) / (top - bottom || 1)) * plotH;
+const configFor = (names: string[], unit: string) =>
+  Object.fromEntries(
+    names.map((name, index) => [
+      name,
+      { label: unit ? `${name} (${unit})` : name, colors: paint(COLORS[index % COLORS.length]) },
+    ]),
+  );
 
-  const labels = chart.series[0].points;
-  const tickEvery = Math.max(1, Math.ceil(labels.length / 7));
-
+function Frame({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <figure className="mt-3 rounded-lg border bg-background/60 p-2">
-      <figcaption className="flex items-center justify-between px-1 pb-1 text-[11px] text-muted-foreground">
-        <span>
-          {chart.label} ({chart.unit})
-        </span>
-        {chart.series.length > 1 && (
-          <span className="flex gap-3">
-            {chart.series.map((series, index) => (
-              <span key={series.name} className="inline-flex items-center gap-1">
-                <span
-                  className="inline-block h-2 w-2 rounded-full"
-                  style={{ background: COLORS[index % COLORS.length] }}
-                />
-                {series.name}
-              </span>
-            ))}
-          </span>
-        )}
-      </figcaption>
-
-      <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} className="w-full" role="img"
-           aria-label={`${chart.label} over time`}>
-        <defs>
-          <linearGradient id={gradientId} x1="0" x2="0" y1="0" y2="1">
-            <stop offset="0%" stopColor={COLORS[0]} stopOpacity="0.25" />
-            <stop offset="100%" stopColor={COLORS[0]} stopOpacity="0" />
-          </linearGradient>
-        </defs>
-
-        {[0, 0.5, 1].map((fraction) => {
-          const value = bottom + (top - bottom) * (1 - fraction);
-          return (
-            <g key={fraction}>
-              <line x1={PAD.left} x2={WIDTH - PAD.right} y1={y(value)} y2={y(value)}
-                    stroke="currentColor" strokeOpacity="0.12" strokeWidth="1" />
-              <text x={PAD.left - 6} y={y(value) + 3} textAnchor="end"
-                    className="fill-muted-foreground text-[9px]">
-                {value.toFixed(value >= 10 ? 0 : 1)}
-              </text>
-            </g>
-          );
-        })}
-
-        {chart.type === "bar"
-          ? chart.series.map((series, seriesIndex) =>
-              series.points.map((point, index) => {
-                const groupWidth = plotW / series.points.length;
-                const barWidth = Math.max(3, (groupWidth * 0.6) / chart.series.length);
-                const left =
-                  PAD.left + index * groupWidth + groupWidth * 0.2 + seriesIndex * barWidth;
-                return (
-                  <rect key={`${series.name}-${point.t}`} x={left} y={y(point.v)}
-                        width={barWidth} height={Math.max(1, y(bottom) - y(point.v))}
-                        rx="2" fill={COLORS[seriesIndex % COLORS.length]} fillOpacity="0.85" />
-                );
-              }),
-            )
-          : chart.series.map((series, seriesIndex) => {
-              const path = series.points
-                .map((point, index) =>
-                  `${index === 0 ? "M" : "L"} ${x(index, series.points.length)} ${y(point.v)}`)
-                .join(" ");
-              const area =
-                `${path} L ${x(series.points.length - 1, series.points.length)} ${y(bottom)} ` +
-                `L ${x(0, series.points.length)} ${y(bottom)} Z`;
-              return (
-                <g key={series.name}>
-                  {chart.series.length === 1 && <path d={area} fill={`url(#${gradientId})`} />}
-                  <path d={path} fill="none" strokeWidth="2" strokeLinejoin="round"
-                        strokeLinecap="round" stroke={COLORS[seriesIndex % COLORS.length]} />
-                  {series.points.map((point, index) => (
-                    <circle key={point.t} cx={x(index, series.points.length)} cy={y(point.v)}
-                            r="2.5" fill={COLORS[seriesIndex % COLORS.length]}>
-                      <title>{`${stamp(point.t, hourly)} · ${point.v}${chart.unit}`}</title>
-                    </circle>
-                  ))}
-                </g>
-              );
-            })}
-
-        {labels.map((point, index) =>
-          index % tickEvery === 0 ? (
-            <text key={point.t} x={x(index, labels.length)} y={HEIGHT - 8} textAnchor="middle"
-                  className="fill-muted-foreground text-[9px]">
-              {stamp(point.t, hourly)}
-            </text>
-          ) : null,
-        )}
-      </svg>
+      <figcaption className="px-1 pb-1 text-[11px] text-muted-foreground">{title}</figcaption>
+      {children}
     </figure>
   );
+}
+
+const caption = (chart: Chart) => `${chart.label}${chart.unit ? ` (${chart.unit})` : ""}`;
+
+// --- a series over time: line, filled line, or grouped bars ------------------
+
+function SeriesChart({ chart, series }: { chart: Chart; series: Series[] }) {
+  const hourly = chart.granularity === "hourly";
+  const rows = useMemo(() => toRows(series, hourly), [series, hourly]);
+  const names = useMemo(() => series.map((s) => s.name), [series]);
+  const config = useMemo(() => configFor(names, chart.unit), [names, chart.unit]);
+  const zoomable = rows.length > BRUSH_AFTER;
+
+  if (chart.type === "bar") {
+    return (
+      <Frame title={caption(chart)}>
+        <EvilBarChart config={config} data={rows} className={BOX} xDataKey="when">
+          <EvilBarChart.Grid />
+          <EvilBarChart.XAxis dataKey="when" />
+          <EvilBarChart.YAxis />
+          <EvilBarChart.Tooltip />
+          {names.length > 1 && <EvilBarChart.Legend />}
+          {names.map((name) => (
+            <EvilBarChart.Bar key={name} dataKey={name} isClickable enableHoverHighlight />
+          ))}
+          {zoomable && <EvilBarChart.Brush />}
+        </EvilBarChart>
+      </Frame>
+    );
+  }
+
+  if (chart.type === "area") {
+    return (
+      <Frame title={`${caption(chart)} · running total`}>
+        <EvilAreaChart config={config} data={rows} className={BOX} xDataKey="when">
+          <EvilAreaChart.Grid />
+          <EvilAreaChart.XAxis dataKey="when" />
+          <EvilAreaChart.YAxis />
+          <EvilAreaChart.Tooltip />
+          {names.length > 1 && <EvilAreaChart.Legend />}
+          {names.map((name) => (
+            <EvilAreaChart.Area key={name} dataKey={name} variant="gradient" isClickable />
+          ))}
+          {zoomable && <EvilAreaChart.Brush />}
+        </EvilAreaChart>
+      </Frame>
+    );
+  }
+
+  return (
+    <Frame title={caption(chart)}>
+      <EvilLineChart config={config} data={rows} className={BOX} xDataKey="when">
+        <EvilLineChart.Grid />
+        <EvilLineChart.XAxis dataKey="when" />
+        <EvilLineChart.YAxis />
+        <EvilLineChart.Tooltip />
+        {names.length > 1 && <EvilLineChart.Legend />}
+        {names.map((name) => (
+          <EvilLineChart.Line key={name} dataKey={name} isClickable>
+            <EvilLineChart.ActiveDot />
+          </EvilLineChart.Line>
+        ))}
+        {zoomable && <EvilLineChart.Brush />}
+      </EvilLineChart>
+    </Frame>
+  );
+}
+
+// --- the day's low and high, as a floating column ---------------------------
+
+function BandChart({ chart, points }: {
+  chart: Chart;
+  points: { t: string; lo: number; hi: number; v: number }[];
+}) {
+  const hourly = chart.granularity === "hourly";
+  const rows = points.map((p) => ({
+    when: stamp(p.t, hourly), range: [p.lo, p.hi] as [number, number], lo: p.lo, hi: p.hi,
+  }));
+  // A floating bar from the low to the high: the swing is the answer, and a single line
+  // through the average hides the thing the question was usually about.
+  const config = { range: { label: `Low to high (${chart.unit})`, colors: paint(COLORS[2]) } };
+
+  return (
+    <Frame title={`${caption(chart)} · daily low to high`}>
+      <EvilBarChart config={config} data={rows} className={BOX} xDataKey="when" barRadius={4}>
+        <EvilBarChart.Grid />
+        <EvilBarChart.XAxis dataKey="when" />
+        <EvilBarChart.YAxis domain={["dataMin - 2", "dataMax + 2"]}
+                            tickFormatter={(value: number) => `${Math.round(value)}`} />
+        <EvilBarChart.Tooltip />
+        <EvilBarChart.Bar dataKey="range" variant="gradient" enableHoverHighlight />
+      </EvilBarChart>
+    </Frame>
+  );
+}
+
+// --- rain as bars, temperature as a line over them --------------------------
+
+function ComboChart({ chart, bars, line }: {
+  chart: Chart;
+  bars: { label: string; unit: string; points: Point[] };
+  line: { label: string; unit: string; points: Point[] };
+}) {
+  const hourly = chart.granularity === "hourly";
+  const warm = new Map(line.points.map((p) => [p.t, p.v]));
+  const rows = bars.points.map((p) => ({
+    when: stamp(p.t, hourly), rain: p.v, temp: warm.get(p.t) ?? null,
+  }));
+  const config = {
+    rain: { label: `${bars.label} (${bars.unit})`, colors: paint(COLORS[0]) },
+    temp: { label: `${line.label} (${line.unit})`, colors: paint(COLORS[2]) },
+  };
+
+  return (
+    <Frame title={`${bars.label} and ${line.label.toLowerCase()}`}>
+      <EvilComposedChart config={config} data={rows} className={BOX} xDataKey="when">
+        <EvilComposedChart.Grid />
+        <EvilComposedChart.XAxis dataKey="when" />
+        {/* Two axes because two units: millimetres and degrees cannot share a scale. */}
+        <EvilComposedChart.YAxis yAxisId="rain" />
+        <EvilComposedChart.YAxis yAxisId="temp" orientation="right" />
+        <EvilComposedChart.Tooltip />
+        <EvilComposedChart.Legend />
+        <EvilComposedChart.Bar dataKey="rain" barProps={{ yAxisId: "rain" }} />
+        <EvilComposedChart.Line dataKey="temp" lineProps={{ yAxisId: "temp" }} connectNulls>
+          <EvilComposedChart.ActiveDot />
+        </EvilComposedChart.Line>
+      </EvilComposedChart>
+    </Frame>
+  );
+}
+
+// --- wind direction as a rose -----------------------------------------------
+
+function RoseChart({ buckets }: { buckets: { bucket: string; share: number }[] }) {
+  const config = { share: { label: "Share of readings (%)", colors: paint(COLORS[0]) } };
+  return (
+    <Frame title="Wind direction · share of readings">
+      <EvilRadarChart config={config} data={buckets} className={BOX}>
+        <EvilRadarChart.PolarGrid />
+        <EvilRadarChart.PolarAngleAxis dataKey="bucket" />
+        <EvilRadarChart.Tooltip />
+        <EvilRadarChart.Radar dataKey="share" variant="filled" isGlowing>
+          <EvilRadarChart.ActiveDot />
+        </EvilRadarChart.Radar>
+      </EvilRadarChart>
+    </Frame>
+  );
+}
+
+// --- hour of day across days ------------------------------------------------
+
+/**
+ * Hand-drawn, because a grid of hours is not one of EvilCharts' shapes and a week of hourly
+ * readings is 168 points - a smear as a line, and "it rains every afternoon" only shows up
+ * as a grid. Hovering a cell reads it.
+ */
+function HeatmapChart({ chart, cells, days }: {
+  chart: Chart;
+  cells: { d: string; h: number; v: number }[];
+  days: string[];
+}) {
+  const biggest = Math.max(...cells.map((c) => c.v)) || 1;
+  return (
+    <Frame title={`${caption(chart)} · by hour`}>
+      <div className="grid gap-[2px] px-1 pb-1"
+           style={{ gridTemplateColumns: `2.4rem repeat(${days.length}, minmax(0, 1fr))` }}>
+        {Array.from({ length: 24 }, (_, hour) => (
+          <div key={hour} className="contents">
+            <span className="pr-1 text-right text-[9px] leading-[11px] text-muted-foreground">
+              {hour % 6 === 0 ? `${hour}:00` : ""}
+            </span>
+            {days.map((day) => {
+              const cell = cells.find((c) => c.d === day && c.h === hour);
+              return (
+                <div key={`${day}-${hour}`}
+                     className="h-[11px] rounded-[2px] transition-opacity hover:opacity-100 hover:ring-1 hover:ring-primary"
+                     style={{
+                       background: COLORS[0],
+                       opacity: cell ? 0.06 + (cell.v / biggest) * 0.84 : 0.03,
+                     }}
+                     title={cell
+                       ? `${stamp(day, false)} ${hour}:00 · ${cell.v}${chart.unit}`
+                       : `${stamp(day, false)} ${hour}:00 · no reading`} />
+              );
+            })}
+          </div>
+        ))}
+        <span />
+        {days.map((day) => (
+          <span key={day} className="pt-1 text-center text-[9px] text-muted-foreground">
+            {stamp(day, false)}
+          </span>
+        ))}
+      </div>
+    </Frame>
+  );
+}
+
+export function ResultChart({ chart }: { chart: Chart }) {
+  switch (chart.type) {
+    case "band":
+      return chart.points.length ? <BandChart chart={chart} points={chart.points} /> : null;
+    case "combo":
+      return <ComboChart chart={chart} bars={chart.bars} line={chart.line} />;
+    case "rose":
+      return chart.buckets.length ? <RoseChart buckets={chart.buckets} /> : null;
+    case "heatmap":
+      return chart.cells.length ? (
+        <HeatmapChart chart={chart} cells={chart.cells} days={chart.days} />
+      ) : null;
+    default:
+      return chart.series.length ? <SeriesChart chart={chart} series={chart.series} /> : null;
+  }
 }

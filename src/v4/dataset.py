@@ -75,8 +75,15 @@ FIELDS = ["chat_id", "turn", "text", "intent", "weather_intent", "variables", "a
 MAX_PER_SKELETON = 6      # rows one template may contribute, per split. v3's worst was 307.
 # Rows per (source, weather_intent) cell, as a multiple of --per-cell. Reductions and
 # comparisons are real but not half of what anyone asks.
-QUOTA = {"information": 1.0, "aggregation": 0.45, "comparison": 0.6, "advice": 1.0,
-         "implicit": 1.0, "confusion": 0.45, "comparative": 0.5, "history": 0.8,
+# The aggregation cell is shared by twenty-one statistics rather than five, so its quota
+# carries twenty-one classes now - at 0.45 each new one got about eighty rows. Those rows are
+# all INFORMATION, so the plain information cell comes down to keep that intent off 50%.
+# ADVICE reached 37.3% of the file, the largest class by a distance, and a model whose
+# commonest label is a decision reads a plain question as a decision. Its share comes down;
+# comparison's goes up, because that is where the three-place rows now live.
+QUOTA = {"information": 0.62, "aggregation": 2.4, "comparison": 0.95, "advice": 0.75,
+         "predicate": 0.5, "place_first": 0.8,
+         "implicit": 0.8, "confusion": 0.45, "comparative": 0.6, "history": 0.8,
          "longrange": 0.5}
 # Share of emissions realised as a paraphrase group: same slots and labels, different wording.
 # Under ~8% the model has no evidence that wording is not meaning.
@@ -85,10 +92,14 @@ REDUNDANCY = 0.065
 # the model learns "spray" -> SPRAY and never reads the sentence.
 MIN_IMPLICIT_SHARE = 0.20  # per activity: share of its ADVICE rows naming no cue for itself
 MAX_ENTITY_LEAK = 0.25     # entity terms that only ever appear with one activity
-TYPO_RATE = 0.22          # share of prompts with a misspelling outside every span
+TYPO_RATE = 0.34          # share of prompts with a misspelling outside every span
 GRAMMAR_RATE = 0.18       # dropped articles, chat filler, missing question marks
 QUALIFIED_RATE = 0.20     # "Guntur, Andhra Pradesh" instead of "Guntur"
-MISSPELT_LOC_RATE = 0.16  # the place name itself misspelt, span updated to match
+MISSPELT_LOC_RATE = 0.24  # the place name itself misspelt, span updated to match
+# ...and the same for a time span, which was never misspelt at all. `_typo` protects every
+# span, and only places had a corruption path of their own, so the tagger met "tomorrow"
+# spelled correctly 27,000 times and "tommorow" never.
+MISSPELT_TIME_RATE = 0.20
 CODE_RATE = 0.08          # "HYD" instead of "Hyderabad"
 # Every name in locations.csv is Title case. Without this the tagger learns Title case IS the
 # location feature, and "rain in guntur" finds no place at all.
@@ -114,7 +125,12 @@ VARIABLE_WORDS = {
     Variable.WIND: ["wind", "wind speed", "breeze", "gusts", "how windy it is"],
     Variable.CLOUD: ["cloud cover", "clouds", "how cloudy it is", "overcast", "cloudiness"],
     Variable.SUNSHINE: ["sunshine", "sunlight", "sunshine hours", "how sunny it is",
-                        "hours of sun"],
+                        "hours of sun",
+                        # Day length is a SUNSHINE column (DayLength) and had no wording at
+                        # all, so "the longest day in june" was read as a humidity question.
+                        "day length", "daylight", "daylight hours", "length of the day",
+                        "how long the day is", "hours of daylight", "the longest day",
+                        "day duration"],
     Variable.UV: ["uv", "uv index", "sun strength", "how strong the sun is", "uv levels"],
     Variable.SOIL_MOISTURE: ["soil moisture", "ground moisture", "how wet the soil is",
                              "soil water", "field moisture"],
@@ -180,7 +196,75 @@ LONG_TIMES = {
 
 # --- frames -----------------------------------------------------------------
 # {v} variable noun   {loc} place phrase   {t} time phrase
-INFORMATION_FRAMES = [
+# The yes/no shape. "will it rain tomorrow" is the single most asked weather question and
+# INFORMATION had no frame for it, so its nearest neighbour in the whole file was
+# RAIN_PROTECTION's "will it rain on me" - and a plain forecast question came back as an
+# umbrella verdict reading "Leave it". The fix is a frame, not a rule: the wording is
+# genuinely a question about a reading, and it needs to be in the file as one.
+YES_NO_FRAMES = [
+    "will there be {v} {loc} {t}",
+    "will we get {v} {loc} {t}",
+    "are we getting {v} {loc} {t}",
+    "is there {v} coming {loc} {t}",
+    "is {v} expected {loc} {t}",
+    "any {v} {loc} {t}",
+    "is it going to have {v} {loc} {t}",
+    "do we get {v} {loc} {t}",
+    "will it have {v} {loc} {t}",
+    "is there any {v} {loc} {t}",
+    "should i expect {v} {loc} {t}",
+    "am i getting {v} {loc} {t}",
+]
+
+# The same question with the variable as a VERB or an ADJECTIVE rather than a noun. `{v}` is
+# a noun slot, so "will there be rain" was reachable and "will it rain" was not - and "will it
+# rain tomorrow" is the single most asked weather question there is. Its nearest neighbour was
+# RAIN_PROTECTION's "will it rain on me", which answered a forecast question with an umbrella
+# verdict. One frame set per wording, because a noun slot cannot conjugate.
+PREDICATE_FRAMES = {
+    Variable.RAIN: [
+        "will it rain {loc} {t}", "is it going to rain {loc} {t}", "is it gonna rain {loc} {t}",
+        "does it rain {loc} {t}", "will it be raining {loc} {t}", "is it raining {loc} {t}",
+        "will it rain or not {loc} {t}", "rains {loc} {t}",
+    ],
+    Variable.TEMPERATURE: [
+        "will it be hot {loc} {t}", "will it be cold {loc} {t}", "is it hot {loc} {t}",
+        "is it cold {loc} {t}", "will it get hot {loc} {t}", "how hot will it be {loc} {t}",
+        "is it going to be hot {loc} {t}", "will it be warm {loc} {t}",
+    ],
+    Variable.WIND: [
+        "will it be windy {loc} {t}", "is it windy {loc} {t}",
+        "is it going to be windy {loc} {t}", "how windy will it be {loc} {t}",
+    ],
+    Variable.HUMIDITY: [
+        "will it be humid {loc} {t}", "is it humid {loc} {t}",
+        "is it going to be humid {loc} {t}", "will it be muggy {loc} {t}",
+    ],
+    Variable.SUNSHINE: [
+        "will it be sunny {loc} {t}", "is it sunny {loc} {t}",
+        "is it going to be sunny {loc} {t}",
+    ],
+    Variable.CLOUD: [
+        "will it be cloudy {loc} {t}", "is it cloudy {loc} {t}",
+        "is it going to be overcast {loc} {t}",
+    ],
+}
+
+# The place first, with no preposition in front of it. "Guntur weather", "Hyderabad rain
+# tomorrow" - the shortest way anyone writes a weather question, and the shape the file had
+# almost none of. Emitted with `bare_place`, or PLACE_FORMS puts an "in" back on the front.
+PLACE_FIRST_FRAMES = [
+    "{loc} {v}",
+    "{loc} {v} {t}",
+    "{loc} {t} {v}",
+    "{loc} {v} for {t}",
+    "{loc} - {v} {t}",
+    "{loc} {v} report {t}",
+    "{loc} {v} update {t}",
+    "{loc}? {v} {t}",
+]
+
+INFORMATION_FRAMES = YES_NO_FRAMES + [
     "what is the {v} {loc} {t}",
     "what's the {v} {loc} {t}",
     "how is the {v} {loc} {t}",
@@ -248,6 +332,21 @@ COMPARISON_FRAMES = [
     "which of {a} and {b} has more {v} {t}",
     "compare {a} with {b} on {v} {t}",
     "between {a} and {b}, where is the {v} better {t}",
+]
+
+# Three places, because the tagger had never once seen a third. Every comparison row in the
+# file named exactly two, so a question about three came back with two spans and the third
+# silently dropped - which is the answer being wrong about what was asked, not about weather.
+COMPARISON_FRAMES_3 = [
+    "compare the {v} in {a}, {b} and {c} {t}",
+    "{a} vs {b} vs {c} {v} {t}",
+    "{v} in {a}, {b} and {c} {t}",
+    "which of {a}, {b} or {c} has the most {v} {t}",
+    "how does the {v} compare across {a}, {b} and {c} {t}",
+    "difference in {v} between {a}, {b} and {c} {t}",
+    "check the {v} for {a}, {b} and {c} {t}",
+    "{a}, {b}, {c} - {v} {t}",
+    "is the {v} higher in {a}, {b} or {c} {t}",
 ]
 
 # One entry per activity, phrased as a decision rather than a measurement. {loc} and {t} are
@@ -515,13 +614,92 @@ AGG_FRAMES = {
     Aggregation.TREND: ["when does the {v} start dropping {loc} {t}",
                         "is the {v} rising {loc} {t}", "how is the {v} changing {loc} {t}",
                         "when will the {v} pick up {loc} {t}"],
+    Aggregation.MEDIAN: ["median {v} {loc} {t}", "what is the middle {v} {loc} {t}",
+                         "the typical middle {v} {loc} {t}"],
+    Aggregation.RANGE: ["what is the range of {v} {loc} {t}", "{v} spread {loc} {t}",
+                        "how much does the {v} vary {loc} {t}",
+                        "from lowest to highest {v} {loc} {t}"],
+    Aggregation.STDDEV: ["how steady is the {v} {loc} {t}",
+                         "how variable is the {v} {loc} {t}",
+                         "standard deviation of {v} {loc} {t}",
+                         "is the {v} consistent {loc} {t}"],
+    Aggregation.CHANGE: ["how much has the {v} changed {loc} {t}",
+                         "change in {v} {loc} {t}", "{v} difference start to end {loc} {t}",
+                         "how much did the {v} move {loc} {t}"],
+    Aggregation.CUMULATIVE: ["running total of {v} {loc} {t}",
+                             "{v} accumulated {loc} {t}",
+                             "cumulative {v} so far {loc} {t}",
+                             "how is the {v} building up {loc} {t}"],
+    Aggregation.COUNT: ["how many {v} days {loc} {t}", "count the {v} hours {loc} {t}",
+                        "number of days with {v} {loc} {t}",
+                        "how many times did we get {v} {loc} {t}"],
+    Aggregation.RUN_COUNT: ["how many separate {v} spells {loc} {t}",
+                            "number of {v} spells {loc} {t}",
+                            "how many bursts of {v} {loc} {t}",
+                            "how many {v} periods {loc} {t}"],
+    Aggregation.FREQUENCY: ["how often does it {v} {loc} {t}",
+                            "{v} frequency {loc} {t}",
+                            "what share of the time is there {v} {loc} {t}",
+                            "how frequently {v} {loc} {t}"],
+    Aggregation.INTENSITY: ["how heavy is the {v} when it comes {loc} {t}",
+                            "{v} intensity {loc} {t}",
+                            "how hard does it {v} {loc} {t}"],
+    Aggregation.MODE: ["which direction is the {v} mostly {loc} {t}",
+                       "dominant {v} direction {loc} {t}",
+                       "where does the {v} mostly come from {loc} {t}",
+                       "prevailing {v} {loc} {t}"],
+    Aggregation.DISTRIBUTION: ["{v} direction breakdown {loc} {t}",
+                               "how is the {v} spread across directions {loc} {t}",
+                               "{v} rose {loc} {t}",
+                               "distribution of {v} directions {loc} {t}"],
+    Aggregation.PEAK_DATE: ["which day has the highest {v} {loc} {t}",
+                            "when is the {v} at its peak {loc} {t}",
+                            "what day is the {v} worst {loc} {t}",
+                            "the {v} peak day {loc} {t}"],
+    Aggregation.LOW_DATE: ["which day has the lowest {v} {loc} {t}",
+                           "when is the {v} at its lowest {loc} {t}",
+                           "what day is the {v} least {loc} {t}",
+                           "the quietest day for {v} {loc} {t}"],
+    Aggregation.PEAK_PERIOD: ["which stretch has the most {v} {loc} {t}",
+                              "the heaviest {v} period {loc} {t}",
+                              "when is the {v} at its heaviest {loc} {t}"],
+    Aggregation.LOW_PERIOD: ["which stretch has the least {v} {loc} {t}",
+                             "the driest {v} period {loc} {t}",
+                             "when is the {v} lightest {loc} {t}"],
+    Aggregation.LONGEST_RUN: ["longest {v} stretch {loc} {t}",
+                              "how long is the longest {v} spell {loc} {t}",
+                              "longest unbroken {v} run {loc} {t}",
+                              "what is the longest {v} period {loc} {t}"],
 }
+# Which variables each statistic is asked about. Not every pairing is sayable - nobody asks
+# for the total humidity - and `schema.supports` refuses those at answer time, so generating
+# them would only teach the model a label the pipeline throws away.
+_SPREAD = [Variable.TEMPERATURE, Variable.HUMIDITY, Variable.WIND, Variable.RAIN,
+           Variable.SOIL_MOISTURE, Variable.SOIL_TEMPERATURE, Variable.CLOUD]
+_COUNTABLE = [Variable.RAIN, Variable.SUNSHINE, Variable.CLOUD]
+
 AGG_VARIABLES = {
     Aggregation.SUM: [Variable.RAIN, Variable.SUNSHINE],
     Aggregation.AVG: [Variable.TEMPERATURE, Variable.HUMIDITY, Variable.WIND],
     Aggregation.MAX: [Variable.TEMPERATURE, Variable.WIND, Variable.RAIN, Variable.UV],
     Aggregation.MIN: [Variable.TEMPERATURE, Variable.HUMIDITY, Variable.SOIL_MOISTURE],
     Aggregation.TREND: [Variable.TEMPERATURE, Variable.RAIN, Variable.WIND, Variable.CLOUD],
+    Aggregation.MEDIAN: _SPREAD,
+    Aggregation.RANGE: _SPREAD,
+    Aggregation.STDDEV: _SPREAD,
+    Aggregation.CHANGE: _SPREAD,
+    Aggregation.CUMULATIVE: [Variable.RAIN, Variable.SUNSHINE],
+    Aggregation.COUNT: _COUNTABLE,
+    Aggregation.RUN_COUNT: _COUNTABLE,
+    Aggregation.FREQUENCY: _COUNTABLE,
+    Aggregation.INTENSITY: [Variable.RAIN],
+    Aggregation.MODE: [Variable.WIND],
+    Aggregation.DISTRIBUTION: [Variable.WIND],
+    Aggregation.PEAK_DATE: _SPREAD,
+    Aggregation.LOW_DATE: _SPREAD,
+    Aggregation.PEAK_PERIOD: _COUNTABLE,
+    Aggregation.LOW_PERIOD: _COUNTABLE,
+    Aggregation.LONGEST_RUN: _COUNTABLE,
 }
 
 # Turns that never reach the weather API. Written out rather than generated: the whole point
@@ -626,17 +804,31 @@ def _clean(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip(" ,")
 
 
+# Which letters a thumb actually hits by mistake. Substituting a random vowel was the only
+# substitution the generator made, so "temperature" -> "tempersture" - the commonest slip
+# there is - was a shape the model had never met.
+NEIGHBOURS = {
+    "a": "qwsz", "b": "vghn", "c": "xdfv", "d": "serfcx", "e": "wsdr", "f": "drtgvc",
+    "g": "ftyhbv", "h": "gyujnb", "i": "ujko", "j": "huikmn", "k": "jiolm", "l": "kop",
+    "m": "njk", "n": "bhjm", "o": "iplk", "p": "ol", "q": "wa", "r": "edft", "s": "awedxz",
+    "t": "rfgy", "u": "yhji", "v": "cfgb", "w": "qase", "x": "zsdc", "y": "tghu", "z": "asx",
+}
+
+
 def _misspell(rng: random.Random, word: str) -> str:
     """One realistic keyboard slip in a single word."""
     i = rng.randrange(1, len(word) - 1)
     roll = rng.random()
-    if roll < 0.35:
+    if roll < 0.28:
         return word[:i] + word[i + 1:]                            # dropped letter
-    if roll < 0.65:
+    if roll < 0.50:
         return word[:i] + word[i + 1] + word[i] + word[i + 2:]    # swapped pair
-    if roll < 0.85:
+    if roll < 0.66:
         return word[:i] + word[i] + word[i:]                      # doubled letter
-    return word[:i] + rng.choice("aeiou") + word[i + 1:]          # wrong vowel
+    if roll < 0.78:
+        return word[:i] + rng.choice("aeiou") + word[i + 1:]      # wrong vowel
+    near = NEIGHBOURS.get(word[i].lower())                        # the key next to it
+    return word[:i] + rng.choice(near) + word[i + 1:] if near else word
 
 
 def _free_words(text: str, spans: list[str], pattern: str):
@@ -651,12 +843,21 @@ def _free_words(text: str, spans: list[str], pattern: str):
 
 
 def _typo(rng: random.Random, text: str, spans: list[str]) -> str:
-    """Misspell one word OUTSIDE every span, so each span stays verbatim in the prompt."""
+    """Misspell one or two words OUTSIDE every span, so each span stays verbatim.
+
+    Two sometimes, because one was the ceiling and a real message does not stop at one.
+    Measured against the eval set, a single typo cost the intent head 5 points and the span
+    tagger 8.5; at three it was 15 and 25. A prompt that only ever carries one slip is a
+    prompt that teaches the model typos are rare.
+    """
     words = _free_words(text, spans, r"[A-Za-z]{5,}")
     if not words:
         return text
-    word = rng.choice(words)
-    return text[:word.start()] + _misspell(rng, word.group()) + text[word.end():]
+    wanted = 2 if len(words) > 2 and rng.random() < 0.35 else 1
+    # right to left, so an earlier replacement cannot move a later word's offsets
+    for word in sorted(rng.sample(words, wanted), key=lambda m: m.start(), reverse=True):
+        text = text[:word.start()] + _misspell(rng, word.group()) + text[word.end():]
+    return text
 
 
 def _bad_grammar(rng: random.Random, text: str, spans: list[str]) -> str:
@@ -677,6 +878,25 @@ def _bad_grammar(rng: random.Random, text: str, spans: list[str]) -> str:
         text = re.sub(r"^(what is|whats|what's|how is|can you tell me|i want to know)\s+", "",
                       text, flags=re.I)
     return _clean(text)
+
+
+def _misspell_time(rng: random.Random, span: str) -> str:
+    """A time span as someone actually types it - "tommorow", "nxt week", "yesterdy".
+
+    Only a misspelling that still normalises to the same canonical form is kept. The row's
+    `weather_intent` and `times_normalized` are both derived from `normalize_time` of the
+    annotated span, so a corruption the normaliser cannot recover would relabel the row -
+    a "tomorrow" row quietly becoming a FORECAST one - rather than just roughening it.
+    """
+    parts = span.split()
+    # >= 4, not 5: at five, "next week" and "last week" have no eligible word at all and
+    # the two commonest spans in the file could never be misspelt.
+    long_enough = [i for i, word in enumerate(parts) if len(word) >= 4]
+    if not long_enough:
+        return span
+    parts[rng.choice(long_enough)] = _misspell(rng, parts[rng.choice(long_enough)])
+    candidate = " ".join(parts)
+    return candidate if normalize_time(candidate) == normalize_time(span) else span
 
 
 def skeleton(text: str, spans: list[str]) -> str:
@@ -807,11 +1027,17 @@ class Builder:
 
 
 def _phrase(rng: random.Random, place: str | None, time_span: str | None,
-            frame: str) -> tuple[str, list[str], list[str]]:
-    """Fill one frame, returning the text and the spans exactly as they appear in it."""
+            frame: str, bare_place: bool = False) -> tuple[str, list[str], list[str]]:
+    """Fill one frame, returning the text and the spans exactly as they appear in it.
+
+    `bare_place` forces the place in with no preposition, for the frames that open on it.
+    Left to `PLACE_FORMS` the place-first frame became "in Guntur weather" five times in six,
+    so "Guntur weather" - which is how people write it - was 4% of the file and the tagger
+    learned that a location is the word after "in".
+    """
     locations, times = [], []
     if place:
-        rendered = rng.choice(PLACE_FORMS).format(loc=place)
+        rendered = place if bare_place else rng.choice(PLACE_FORMS).format(loc=place)
         locations.append(place)
     else:
         rendered = ""
@@ -855,7 +1081,8 @@ def generate(rng: random.Random, places: list[dict], split: str, per_cell: int) 
 
     def emit(intent, want, frames, *, activity=Activity.NONE, variables=None,
              aggregation=Aggregation.RAW, operation=Operation.SET, source="gen",
-             bare_ok=False, second=None, pool=None, times_pool=None):
+             bare_ok=False, bare_place=False, second=None, third=None, pool=None,
+             times_pool=None):
         """`want` chooses which time wordings to draw from; the label is derived from the
         span actually drawn, so weather_intent and times cannot disagree.
 
@@ -869,6 +1096,8 @@ def generate(rng: random.Random, places: list[dict], split: str, per_cell: int) 
         time_span = rng.choice(wordings) if (place or not bare_ok
                                              or rng.random() < 0.7) else None
         weather_intent = weather_intent_for(normalize_time(time_span) if time_span else None)
+        if time_span and rng.random() < MISSPELT_TIME_RATE:
+            time_span = _misspell_time(rng, time_span)
         # the source is part of the cell key, or the plain information frames fill every
         # INFORMATION cell first and the reduction frames are all refused
         cell = (source, weather_intent)
@@ -888,13 +1117,15 @@ def generate(rng: random.Random, places: list[dict], split: str, per_cell: int) 
             text = frame.replace("{v}", word)
             text, entities = fill_entities(rng, text, activity, pool)
             entity_spans = [span for spans in entities.values() for span in spans]
-            if second is not None:                          # a comparison names two places
-                text = text.replace("{a}", place or "here").replace("{b}", second)
-                locations = [p for p in (place, second) if p]
+            if second is not None:                          # a comparison names two or three
+                text = (text.replace("{a}", place or "here").replace("{b}", second)
+                            .replace("{c}", third or ""))
+                locations = [p for p in (place, second, third) if p]
                 times = [time_span] if time_span else []
                 text = _clean(text.replace("{t}", time_span or ""))
             else:
-                text, locations, times = _phrase(rng, place, time_span, text)
+                text, locations, times = _phrase(rng, place, time_span, text,
+                                                 bare_place=bare_place)
             # entity spans are protected text too: a typo inside "cotton" would leave the
             # annotation pointing at a word that is no longer there
             all_spans = locations + times + entity_spans
@@ -924,25 +1155,47 @@ def generate(rng: random.Random, places: list[dict], split: str, per_cell: int) 
             emit(Intent.INFORMATION, weather_intent, INFORMATION_FRAMES,
                  variables=variables, source="information")
 
+    # INFORMATION with the place first - "Guntur weather tomorrow". Its own cell so the
+    # prepositional frames cannot crowd it out; they fill first and they are the majority.
+    for weather_intent in WINDOWS:
+        for _ in range(per_cell * 3):
+            variables = [Variable.GENERAL if rng.random() < 0.4 else rng.choice(list(Variable))]
+            emit(Intent.INFORMATION, weather_intent, PLACE_FIRST_FRAMES,
+                 variables=variables, bare_place=True, source="place_first")
+
+    # INFORMATION asked as a verb or an adjective - "will it rain", "will it be hot". Its own
+    # cell so it cannot be starved by the noun frames, which fill first.
+    for weather_intent in WINDOWS:
+        for _ in range(per_cell * 3):
+            variable = rng.choice(list(PREDICATE_FRAMES))
+            emit(Intent.INFORMATION, weather_intent, PREDICATE_FRAMES[variable],
+                 variables=[variable], source="predicate")
+
     # INFORMATION with a reduction - the 'determine' functions
     for weather_intent in WINDOWS:
-        for _ in range(per_cell * 2):
+        # x6, not x2: this cell used to pick between five statistics and now picks between
+        # twenty-one, so the same draw count would leave each new one with a handful of rows.
+        for _ in range(per_cell * 6):
             aggregation = rng.choice([a for a in Aggregation if a is not Aggregation.RAW])
             emit(Intent.INFORMATION, weather_intent, AGG_FRAMES[aggregation],
                  variables=[rng.choice(AGG_VARIABLES[aggregation])], aggregation=aggregation,
                  source="aggregation")
 
-    # COMPARISON - always two places
+    # COMPARISON - two places, and a third often enough for the tagger to expect one
     for weather_intent in WINDOWS:
-        for _ in range(per_cell * 4):
-            emit(Intent.COMPARISON, weather_intent, COMPARISON_FRAMES,
+        for _ in range(per_cell * 5):
+            three = rng.random() < 0.4
+            emit(Intent.COMPARISON, weather_intent,
+                 COMPARISON_FRAMES_3 if three else COMPARISON_FRAMES,
                  variables=[rng.choice(list(Variable))], operation=Operation.COMPARE,
-                 second=surface(rng, next(spin)), source="comparison")
+                 second=surface(rng, next(spin)),
+                 third=surface(rng, next(spin)) if three else None,
+                 source="comparison")
 
     # ADVICE - one decision per row, variables implied by the activity
     activities = [a for a in Activity if a is not Activity.NONE]
     for weather_intent in WINDOWS:
-        for _ in range(per_cell * 6):
+        for _ in range(per_cell * 4):
             activity = rng.choice(activities)
             emit(Intent.ADVICE, weather_intent, ADVICE_FRAMES[activity],
                  activity=activity, variables=ACTIVITY_VARIABLES[activity] or [Variable.GENERAL],
@@ -1044,6 +1297,8 @@ def generate_conversations(rng: random.Random, places: list[dict], split: str,
         place = surface(rng, rng.choice(places))
         time_span = rng.choice(TIMES[rng.choice(WINDOWS)])
         weather_intent = weather_intent_for(normalize_time(time_span))
+        if rng.random() < MISSPELT_TIME_RATE:
+            time_span = _misspell_time(rng, time_span)
         variables = [rng.choice(list(Variable))]
         chat_id = f"{split[:2]}-chat-{chat:05d}"
 

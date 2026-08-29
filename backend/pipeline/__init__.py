@@ -20,6 +20,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from backend.config import MAX_PLACES
 from backend.nlu import times
 from backend.pipeline import advice as advice_engine
 from backend.pipeline import analysis, params, profiles, quality, render, sources
@@ -54,8 +55,14 @@ class Answer:
 
     # the answer itself
     summary: str = ""
+    # "markdown" only when the wording layer laid the answer out; the rule-built sentence
+    # is always plain text.
+    summary_format: str = "text"
     places: list = field(default_factory=list)
     unresolved: list = field(default_factory=list)
+    # named, but past MAX_PLACES and never looked up. Structured rather than a sentence: put
+    # into the summary it went through the phrasing model, which dropped it.
+    over_the_cap: list = field(default_factory=list)
     fields: list = field(default_factory=list)
     when: str = ""
     aggregation: str = "RAW"
@@ -64,9 +71,19 @@ class Answer:
     quality: quality.Quality | None = None
     advice: advice_engine.Advice | None = None
     reduced: dict | None = None
+    # The day's own row per place, when an hourly answer also pulled the daily feed. Kept
+    # apart from `rows`, which are hourly - one row per day and one per hour do not stack.
+    day_rows: list = field(default_factory=list)
+    # Every statistic this turn asked for. `reduced` is the first of them, kept because the
+    # wording layer and the UI have always read one figure.
+    reductions: list = field(default_factory=list)
+    aggregations: list = field(default_factory=list)
     insights: list = field(default_factory=list)
     table: dict = field(default_factory=dict)
     chart: dict | None = None
+    # One chart per field worth plotting, so a summary that measured seventeen things can be
+    # looked at seventeen ways. `chart` stays the default the presentation layer opens.
+    charts: list = field(default_factory=list)
     # what to open on screen. The rule fills it here; the chat endpoint overwrites it with
     # the model's pick when there is one. Never empty, so a client always has an answer.
     presentation: dict = field(default_factory=dict)
@@ -83,7 +100,8 @@ class Answer:
         """The shape `backend.generation.context.build` reads. One place defines it."""
         return {"places": self.places, "when": self.when, "hourly": self.hourly,
                 "insights": self.insights, "table": self.table, "reduced": self.reduced,
-                "advice": self.advice}
+                "advice": self.advice, "reductions": self.reductions,
+                "day_rows": self.day_rows}
 
     def payload(self, understanding, *, variables=None) -> dict:
         """The wire body a client renders - identical for a chat turn and a compare column.
@@ -102,12 +120,16 @@ class Answer:
             "places": self.places,
             "granularity": "hourly" if self.hourly else "daily",
             "summary": self.summary,
+            "summary_format": self.summary_format,
             "confidence": round(understanding.confidence, 3),
             "aggregation": self.aggregation,
             "reduced": self.reduced,
+            "reductions": self.reductions,
             "chart": self.chart,
+            "charts": self.charts,
             "insights": [note.as_dict() for note in self.insights],
             "unresolved": self.unresolved,
+            "over_the_cap": self.over_the_cap,
             "assumed": understanding.assumed,
             "advice": ({"verdict": self.advice.verdict, "headline": self.advice.headline,
                         "reasons": self.advice.reasons, "evidence": self.advice.evidence,
@@ -131,8 +153,10 @@ class Answer:
         }
 
 
-async def resolve_places(http, names: list[str]) -> tuple[list[dict], list[str]]:
-    """Raw location spans -> resolved places, plus the ones the index did not know.
+async def resolve_places(http, names: list[str]
+                         ) -> tuple[list[dict], list[str], list[str]]:
+    """Raw location spans -> resolved places, the ones the index did not know, and the ones
+    past `MAX_PLACES` that were never looked up.
 
     The one implementation. The chat endpoint used to carry a verbatim copy of this, so a fix
     to either was a fix to one of them.
@@ -140,12 +164,16 @@ async def resolve_places(http, names: list[str]) -> tuple[list[dict], list[str]]
     usable = [n for n in names
               if not place_index.is_relative(n)]
     if not usable:
-        return [], []
+        return [], [], []
     solr = lambda query, rows=8: sources.solr_query(http, query, rows)
     # a comma span can be one address or two places - the resolver decides
     parts = [part for name in usable for part in place_index.split_span(name)]
-    resolved = await asyncio.gather(*(place_index.resolve(solr, part) for part in parts))
-    return [p for p in resolved if p], [n for n, p in zip(parts, resolved) if not p]
+    # Capped before the lookups, not after: the fourth name is dropped rather than resolved
+    # and then thrown away. It comes back on its own channel, because "I did not look this up"
+    # and "I looked and the index does not hold it" are different things to tell someone.
+    kept, dropped = parts[:MAX_PLACES], parts[MAX_PLACES:]
+    resolved = await asyncio.gather(*(place_index.resolve(solr, part) for part in kept))
+    return ([p for p in resolved if p], [n for n, p in zip(kept, resolved) if not p], dropped)
 
 
 def served_fields(fields: list[str], selected: list[list[dict]]) -> tuple[list[str], list[str]]:
@@ -188,7 +216,8 @@ async def run(http, understanding, *, places: list[dict] | None = None,
     unresolved: list[str] = []
     if places is None:
         try:
-            places, unresolved = await resolve_places(http, understanding.locations)
+            places, unresolved, over_the_cap = await resolve_places(
+                http, understanding.locations)
         except Exception as exc:                                   # noqa: BLE001
             return finish(ok=False, failed_at="locations",
                           error=f"{type(exc).__name__}: {exc}")
@@ -204,21 +233,12 @@ async def run(http, understanding, *, places: list[dict] | None = None,
         answer.stages["locations"]["note"] = "no place resolved - the caller must ask for one"
         return finish(needs_location=True)
 
-    # 3. parameters - which API, how many places, which reduction, over which window, with
-    # the reason for each decision beside it. The profile is chosen from the window, so the
-    # window is resolved first; a turn that named no time gets one from the profile.
-    #
-    # A span the rule tables could not canonicalise gets one chance from a model, and if that
-    # fails the turn stops rather than guessing. Every `time_resolution` correction in the
-    # feedback table was an unplaceable expression answered with next week.
     said = understanding.times_normalized[0] if understanding.times_normalized else ""
     spoken, how = await times.place(said, understanding.text, now=now,
                                     hint=getattr(understanding, "time_hint", ""))
     if how != "rules":
         answer.stages["time"] = {"span": said or None, "canonical": spoken or None, "by": how}
     if how == "unplaceable":
-        # Nothing can place it. Saying so is the answer - `generation.explain("time")` has
-        # carried the line for this since before anything could reach it.
         return finish(ok=False, failed_at="time",
                       error=f"could not place the time in {understanding.text!r}")
     understanding.times_normalized = [spoken] if spoken else []
@@ -236,10 +256,13 @@ async def run(http, understanding, *, places: list[dict] | None = None,
     if plan and plan.verdict in (planner.Verdict.REJECT, planner.Verdict.ASK):
         return finish(stopped_by=plan.verdict.value)
 
-    # 4. fetch
     began = time.perf_counter()
-    fetched = await sources.fetch_for(http, plan, places)
+    wants_everything = (understanding.detail or "NORMAL") == "FULL"
+    fetched = await sources.fetch_for(
+        http, plan, places,
+        also_daily=bool(wants_everything and plan and plan.hourly and plan.span_days <= 2))
     answer.served_by, answer.fell_back_from = fetched.source, fetched.fell_back_from
+    answer.day_rows = fetched.per_place_daily
     answer.stages["fetch"] = {
         "ms": int((time.perf_counter() - began) * 1000),
         "served_by": fetched.source, "ok": fetched.ok, "error": fetched.error,
@@ -253,14 +276,10 @@ async def run(http, understanding, *, places: list[dict] | None = None,
     answer.rows = [select_rows(feed, normalized or "", now)[0] for feed in fetched.per_place]
     answer.when = (plan.label if plan else "") or select_rows(fetched.per_place[0], normalized or "", now)[1]
 
-    # 5. columns - everything downstream reads `fields`, so the ones the feed never sent are
-    # dropped here, once.
     fields, absent = served_fields(fields, answer.rows)
     answer.fields = fields
     if absent:
         answer.stages["fields_dropped"] = {"absent": absent, "kept": fields}
-
-    # 6. quality - what actually came back, before anything is computed from it
     checked = quality.assess(answer.rows[0], fields,
                              expect_daily=0 if answer.hourly else len(answer.rows[0]))
     answer.quality = checked
@@ -270,8 +289,10 @@ async def run(http, understanding, *, places: list[dict] | None = None,
         "unusable": checked.unusable, "message": checked.message,
     }
 
-    # 7. analysis - the reduction, the observations
-    answer.reduced = analysis.apply_aggregation(answer.rows[0], fields[0], answer.aggregation)
+    answer.reductions = analysis.reduce_all(
+        answer.rows[0], understanding.variables, answer.aggregations or [answer.aggregation],
+        fields, understanding.text)
+    answer.reduced = answer.reductions[0] if answer.reductions else None
     answer.insights = analysis.build_insights(answer.rows, places, fields, answer.aggregation,
                                               answer.hourly)
     answer.stages["analysis"] = {
@@ -280,9 +301,6 @@ async def run(http, understanding, *, places: list[dict] | None = None,
         "sample": {f: quality.values(answer.rows[0], f)[:5] for f in fields[:3]},
     }
 
-    # 8. the decision, if this was an advice turn
-    # `hourly` matters: the same rule reads an hourly feed and a daily one, and only one of
-    # them can honestly say "from 14:00"
     verdict = advice_engine.evaluate(understanding.activity, answer.rows[0],
                                      sub_activity=understanding.sub_activity,
                                      hourly=answer.hourly)
@@ -292,8 +310,6 @@ async def run(http, understanding, *, places: list[dict] | None = None,
                                "window": verdict.window, "caveats": verdict.caveats}
                               if verdict else {"note": "not an advice turn"})
 
-    # 9. the conclusion. Order matters: the number that was asked for leads, then the
-    # decision, then anything the data could not support.
     compare_two = understanding.action == "COMPARE" and len(places) > 1
     shown = places if compare_two else places[:1]
     parts = [render.summarize(understanding.action,
@@ -304,17 +320,15 @@ async def run(http, understanding, *, places: list[dict] | None = None,
     if verdict and verdict.verdict != advice_engine.UNKNOWN:
         parts.insert(0, verdict.headline)                # ...unless a decision was asked for
     elif verdict:
-        # UNKNOWN: the rule could not run, so there are no figures to stand behind. Saying why
-        # is the whole answer - the readings below it would read as one.
         parts = [verdict.headline, *verdict.reasons]
     parts += _caveats(checked, fetched, plan, absent, unresolved)
     answer.summary = _sentences(parts)
 
     answer.table = render.build_table(answer.rows if compare_two else answer.rows[0], fields,
                                       shown, answer.hourly)
-    # Built whenever there is a series, and *shown* only when the presentation below says so.
-    # Suppressing it here on a keyword left two places deciding what appears on screen.
-    answer.chart = analysis.build_chart(answer.rows, places, fields[0], answer.hourly)
+    kinds = [r["kind"] for r in answer.reductions]
+    answer.chart = analysis.build_chart(answer.rows, places, fields, answer.hourly, kinds)
+    answer.charts = analysis.build_charts(answer.rows, places, fields, answer.hourly, kinds)
     # A reader who asked to *see* it has already decided; the model is not consulted about it.
     answer.presentation = render.presentation(
         answer, "chart" if answer.chart and analysis.wants_chart(understanding.text) else "",
@@ -335,7 +349,6 @@ def _sentences(parts: list[str]) -> str:
         part = (part or "").strip()
         if not part:
             continue
-        # a trailing bracket is already punctuation of its own kind
         out.append(part if part[-1] in ".!?)" else part + ".")
     return " ".join(out)
 

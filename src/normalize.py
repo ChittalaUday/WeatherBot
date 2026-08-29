@@ -25,6 +25,12 @@ from src.schema import Normalized
 
 # word -> canonical word. Only unambiguous, weather-domain rewrites belong here.
 LEXICON = {
+    # "summarise the weather" is a common ask and a commonly mistyped word. Folded here
+    # rather than listed in FULL_CUES, so the span tagger and the classifier see one
+    # spelling too - and the rewrite stays in the audit trail either way.
+    "summerize": "summarize", "sumarize": "summarize", "summarise": "summarize",
+    "summarize": "summarize", "summry": "summary", "sumary": "summary",
+    "summerise": "summarize", "sumup": "sum up",
     # chat shorthand
     "u": "you", "ur": "your", "r": "are", "pls": "please", "plz": "please", "thx": "thanks",
     "da": "the", "dis": "this", "n": "and", "abt": "about", "bcz": "because", "coz": "because",

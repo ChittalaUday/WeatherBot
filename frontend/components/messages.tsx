@@ -15,12 +15,15 @@ import { useQuery } from "@tanstack/react-query";
 import { Correction } from "@/components/correction";
 import { useFeedback } from "@/lib/use-feedback";
 
+import { AnswerText } from "@/components/answer-text";
 import { ResultChart } from "@/components/result-chart";
 import { ResultTable } from "@/components/result-table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import type { ChatMessage, Metrics as TurnMetrics, Nlu, PlanInfo, Quality } from "@/lib/types";
+import type {
+  ChatMessage, Metrics as TurnMetrics, Nlu, PlanInfo, Quality, ServerEvent,
+} from "@/lib/types";
 import { Compare } from "@/components/compare";
 import { apiUrl } from "@/lib/utils";
 
@@ -436,6 +439,69 @@ function SourceNote({ plan, quality }: { plan?: PlanInfo; quality?: Quality }) {
   );
 }
 
+/**
+ * The chart and the table, opened to whatever the backend decided this answer needs.
+ *
+ * `presentation` is a default, not a restriction: a view it left "available" gets a toggle
+ * rather than being hidden outright, so nothing the answer computed is unreachable.
+ */
+function Views({ result }: { result: Extract<ServerEvent, { type: "result" }> }) {
+  const view = result.presentation;
+  const [showChart, setShowChart] = useState(view?.chart === "open");
+  const [showTable, setShowTable] = useState(view?.table === "open");
+  const toggles = [
+    result.chart && view?.chart !== "none"
+      ? (["chart", showChart, setShowChart] as const) : null,
+    view?.table !== "none" && result.table?.rows?.length
+      ? (["table", showTable, setShowTable] as const) : null,
+  ].filter(Boolean);
+
+  const pickable = result.charts ?? [];
+  // Which field is on screen. Starts on whatever the backend opened with, so the picker
+  // agrees with the default rather than overriding it on first render.
+  const [field, setField] = useState(
+    () => pickable.find((c) => c.chart.type === result.chart?.type)?.field ?? pickable[0]?.field,
+  );
+  const chosen = pickable.find((c) => c.field === field)?.chart ?? result.chart;
+
+  return (
+    <>
+      {chosen && showChart && (
+        <>
+          {pickable.length > 1 && (
+            <div className="mt-2 flex flex-wrap gap-1">
+              {pickable.map((option) => (
+                <button key={option.field} type="button" onClick={() => setField(option.field)}
+                        className={`rounded-md border px-2 py-0.5 text-[11px] transition-colors ${
+                          option.field === field
+                            ? "border-primary/40 bg-primary/10 text-foreground"
+                            : "text-muted-foreground hover:bg-muted"}`}>
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          )}
+          <ResultChart chart={chosen} />
+        </>
+      )}
+      {showTable && <ResultTable data={result.table} />}
+      {toggles.length > 0 && (
+        <div className="mt-2 flex gap-1.5">
+          {toggles.map((toggle) => {
+            const [name, shown, set] = toggle!;
+            return (
+              <button key={name} type="button" onClick={() => set(!shown)}
+                      className="rounded-md border px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-muted">
+                {shown ? "Hide" : "Show"} {name}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </>
+  );
+}
+
 export function Messages({
   messages,
   onShareLocation,
@@ -605,7 +671,8 @@ export function Messages({
                   </span>
                   <div className="min-w-0">
                     <div className="flex items-start justify-between gap-2">
-                      <p className="font-medium">{result.summary}</p>
+                      <AnswerText text={result.summary} format={result.summary_format}
+                                  className="min-w-0 font-medium" />
                       <div className="shrink-0 pt-0.5">
                         <TtsButton text={result.summary} />
                       </div>
@@ -632,6 +699,12 @@ export function Messages({
                       <span>· {result.granularity}</span>
                       <span>· {result.when}</span>
                     </div>
+                    {result.over_the_cap?.length > 0 && (
+                      <p className="mt-1.5 text-[11px] text-amber-600 dark:text-amber-500">
+                        Compared the first {result.places.length} - {result.over_the_cap.join(", ")}{" "}
+                        {result.over_the_cap.length === 1 ? "was" : "were"} left out.
+                      </p>
+                    )}
                     {result.assumed && result.assumed.length > 0 && (
                       <p className="mt-1.5 text-[11px] text-muted-foreground">
                         Assumed: {result.assumed.join(" · ")}
@@ -639,11 +712,9 @@ export function Messages({
                     )}
                     {/* The backend decided which of these this answer needs - a chart when
                         the shape is the point, a table when the values are, neither when the
-                        sentence already said it. Rendered, not re-decided. */}
-                    {result.chart && result.presentation?.chart === "open" && (
-                      <ResultChart chart={result.chart} />
-                    )}
-                    {result.presentation?.table === "open" && <ResultTable data={result.table} />}
+                        sentence already said it. Rendered, not re-decided; "available" is
+                        one click away, because a decision about a default is not a lock. */}
+                    <Views result={result} />
                     {result.insights.length > 0 && (
                       <ul className="mt-2 space-y-1">
                         {result.insights.map((insight) => (

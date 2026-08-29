@@ -73,16 +73,24 @@ def trouble_line(kind: str) -> str:
                              TROUBLE_LINES["unknown"])
 
 
-def clean(said: str) -> str:
+def clean(said: str, structured: bool = False) -> str:
     """Strip the thinking block and fences, and reject a reply that is not a rewrite.
 
     qwen3 emits <think>...</think> even with think=false on some builds, and a reply longer
     than the original is a model answering *about* the sentence instead of rewriting it.
+
+    `structured` keeps the line breaks. Collapsing whitespace is right for a paragraph and
+    destroys a bullet list - it is what turns six findings back into one run-on sentence.
     """
     said = re.sub(r"<think>.*?</think>", "", said or "", flags=re.S)
     said = re.sub(r"^```\w*|```$", "", said.strip(), flags=re.M).strip().strip('"')
-    said = " ".join(said.split())
-    return "" if len(said) > MAX_REPLY_CHARS else said
+    if structured:
+        # blank lines collapse to one, trailing spaces go, the newlines stay
+        said = re.sub(r"\n{3,}", "\n\n", "\n".join(line.rstrip() for line in said.split("\n")))
+    else:
+        said = " ".join(said.split())
+    cap = MAX_REPLY_CHARS * 2 if structured else MAX_REPLY_CHARS
+    return "" if len(said) > cap else said
 
 
 def first_sentence(said: str) -> str:
@@ -182,7 +190,8 @@ _THINKS: bool | None = None if OLLAMA_THINK else False
 
 
 def _body(summary: str, question: str, context: str, answering: bool, think: bool,
-          deciding: bool = False, history: list | None = None, headings=()) -> dict:
+          deciding: bool = False, history: list | None = None, headings=(),
+          structured: bool = False) -> dict:
     """The request for one turn. `think` decides the reasoning block as well as the field:
     telling a model with no reasoning mode what to reason about is tokens it cannot spend."""
     body = {"model": OLLAMA_MODEL, "stream": True,
@@ -191,7 +200,7 @@ def _body(summary: str, question: str, context: str, answering: bool, think: boo
                 {"role": "system",
                  "content": prompts.system(answering=answering, grounded=bool(context),
                                            deciding=deciding, thinking=think,
-                                           headings=headings)},
+                                           structured=structured, headings=headings)},
                 {"role": "user",
                  "content": prompts.user(summary, question, context, answering=answering,
                                          history=history)}]}
@@ -203,7 +212,7 @@ def _body(summary: str, question: str, context: str, answering: bool, think: boo
 
 async def stream(summary: str, question: str = "", client: httpx.AsyncClient | None = None,
                  context: str = "", answering: bool = True, deciding: bool = False,
-                 history: list | None = None, headings=()):
+                 history: list | None = None, headings=(), structured: bool = False):
     """Yield `(kind, text)` pieces as the local model writes them.
 
     `kind` is "thinking" for the reasoning and "answer" for the reply - Ollama streams the two
@@ -223,7 +232,7 @@ async def stream(summary: str, question: str = "", client: httpx.AsyncClient | N
                 async with client.stream(
                     "POST", f"{OLLAMA_URL}/api/chat", timeout=OLLAMA_TIMEOUT,
                     json=_body(summary, question, context, answering, think, deciding,
-                               history, headings),
+                               history, headings, structured),
                 ) as response:
                     response.raise_for_status()
                     _THINKS = think
@@ -239,7 +248,7 @@ async def stream(summary: str, question: str = "", client: httpx.AsyncClient | N
                         if not (piece := message.get("content", "")):
                             continue
                         seen += piece
-                        cleaned = clean(seen)
+                        cleaned = clean(seen, structured)
                         if cleaned.startswith(sent) and len(cleaned) > len(sent):
                             yield "answer", cleaned[len(sent):]
                             sent = cleaned
@@ -257,11 +266,11 @@ async def stream(summary: str, question: str = "", client: httpx.AsyncClient | N
 
 async def say(summary: str, question: str = "", client: httpx.AsyncClient | None = None,
               context: str = "", answering: bool = True, deciding: bool = False,
-              history: list | None = None, headings=()) -> str:
+              history: list | None = None, headings=(), structured: bool = False) -> str:
     """`summary` in plain words, or `summary` itself if the local model cannot answer."""
     said = "".join([text async for kind, text in stream(summary, question, client, context,
                                                         answering, deciding, history,
-                                                        headings)
+                                                        headings, structured)
                     if kind == "answer"])
     return said if said else summary
 
@@ -341,6 +350,21 @@ def reverses(said: str, verdict: str) -> bool:
     if verdict == "CAUTION":
         return not any(hedge in low for hedge in HEDGES)
     return any(word in low for word in REVERSALS.get(verdict or "", ()))
+
+
+# A bullet at the start of a line, or a bold run. Enough to tell a laid-out reply from a
+# paragraph, and nothing more - the renderer only needs to know which of the two it has.
+_MARKDOWN = re.compile(r"^\s*[-*+]\s+\S|\*\*\S", re.M)
+
+
+def is_markdown(said: str) -> bool:
+    """Did the reply actually come back laid out?
+
+    Asked for a layout, a model that finds one sentence is the honest answer writes one
+    sentence - which is right, and which makes the layout flag a lie if it is set from the
+    request. So it is read off the reply instead.
+    """
+    return bool(_MARKDOWN.search(said or ""))
 
 
 def usable(said: str, summary: str, given: str, verdict: str = "") -> str:

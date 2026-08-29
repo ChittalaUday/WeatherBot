@@ -52,8 +52,11 @@ INDIA_BBOX = "st_makeenvelope(68.0, 6.0, 97.5, 37.6, 4326)"
 # level -> (rows inside India, rows outside India). Village-heavy on purpose. shapes.village,
 # .block and .district hold India only, so the non-India remainder comes from foreign states
 # and countries, topped up by the GeoNames world cities below.
+# Raised from (800, 130, 70): the tagger has to recognise a place it has never seen, and the
+# only thing that teaches that is meeting a lot of them. shapes.village alone holds 623,973
+# rows, so the sample was 0.1% of it and every name appeared often enough to be memorised.
 QUOTAS = {
-    "village": (800, 0), "block": (130, 0), "district": (70, 0),
+    "village": (3000, 0), "block": (400, 0), "district": (200, 0),
     "state": (32, 20), "country": (0, 45),
 }
 CENTROID_LEVELS = {"village", "country"}  # tables carrying a ready-made centroid column

@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
 
-from backend.config import ARCHIVE_REACHABLE, MAX_ROWS
+from backend.config import ARCHIVE_REACHABLE, MAX_ROWS, MAX_SPAN_DAYS
 from backend.pipeline.timewindow import resolve as resolve_window
 from src.v4.schema import FORECAST_HORIZON_DAYS, Resolution, resolutions_for, rows_for
 
@@ -176,6 +176,16 @@ def plan(*, times_normalized: list[str], places: list[dict], aggregation: str = 
     geography = AREA if level in ADMIN_LEVELS else POINT
     days_ahead = max((end.date() - now.date()).days, 0)
     days_back = max((now.date() - start.date()).days, 0)
+
+    # A window wider than this is refused before a source is chosen. Not a capability limit -
+    # ZARR will happily serve five years - a latency one: the aggregations run over every row
+    # that comes back, and a question answered in ten seconds is a question nobody asks twice.
+    # Say what will work rather than just what will not.
+    if span_days > MAX_SPAN_DAYS:
+        return QueryPlan(
+            Verdict.REJECT, None, None, span_days=span_days, label=label,
+            reason=f"that is {span_days} days; I work over {MAX_SPAN_DAYS} days at a time",
+            offer=[f"any {MAX_SPAN_DAYS}-day stretch inside it"])
 
     if tense == "future" and days_ahead > FORECAST_HORIZON_DAYS:
         return QueryPlan(

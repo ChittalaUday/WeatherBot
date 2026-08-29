@@ -268,16 +268,24 @@ def _rain_protection(rows, sub, hourly):
           "total_mm": _total(rows, "Rainfall"),
           "when": wet_spells[0].label() if wet_spells else None}
 
+    # Name the thing. "Leave it" and "Take it" say nothing on their own, and the headline is
+    # what a reader sees first - and sometimes all they see, when the wording layer keeps the
+    # verdict and drops the sentence after it.
+    it = sub or "an umbrella"
+    if not it.startswith(("a ", "an ", "the ")):
+        it = f"{'an' if it[0] in 'aeiou' else 'a'} {it}"
+
     if not wet_spells:
-        return Advice(NO, f"Leave it - {peak}mm at the wettest, which is not much rain.", [], ev)
+        return Advice(NO, f"Leave {it} at home - {peak}mm at the wettest, which is not much "
+                          f"rain.", [], ev)
     first = wet_spells[0]
     clear = longest(dry_spells)
     reason = [f"{len(wet_spells)} spell{'s' if len(wet_spells) != 1 else ''} of rain"]
     if clear and clear.hours >= 3 and len(wet_spells) == 1:
-        return Advice(YES, f"Take it - rain around {first.label()}, up to {peak}mm. "
+        return Advice(YES, f"Take {it} - rain around {first.label()}, up to {peak}mm. "
                            f"{clear.label()} stays clear if you can go then.",
                       reason, ev, window=first.describe())
-    return Advice(YES, f"Take it - rain {first.label()}, up to {peak}mm in one reading.",
+    return Advice(YES, f"Take {it} - rain {first.label()}, up to {peak}mm in one reading.",
                   reason, ev, window=first.describe())
 
 

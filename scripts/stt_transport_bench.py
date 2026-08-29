@@ -144,11 +144,13 @@ def main():
         audio_file.rewind()
         pcm = audio_file.readframes(audio_file.getnframes())
 
+    # `build_stubs()` generates riva.proto into the working directory a line above, so there
+    # is nothing here for a static checker to resolve - the package is real only after it runs.
     build_stubs()
     import grpc
-    from riva.proto import riva_asr_pb2 as asr
-    from riva.proto import riva_asr_pb2_grpc as asr_grpc
-    from riva.proto import riva_audio_pb2 as audio
+    from riva.proto import riva_asr_pb2 as asr  # pyright: ignore[reportMissingImports]
+    from riva.proto import riva_asr_pb2_grpc as asr_grpc  # pyright: ignore[reportMissingImports]
+    from riva.proto import riva_audio_pb2 as audio  # pyright: ignore[reportMissingImports]
 
     if not up("http://127.0.0.1:2701/health"):
         return "HTTP service down - docker compose up -d in stt-cpp/"
@@ -177,7 +179,7 @@ def main():
         sample = next((r["text"] for r in rows if r["transport"] == transport), "")
         print(f"  {transport}: {sample!r}")
     best = {t: max(r["rps"] for r in rows if r["transport"] == t) for t in ("http", "grpc")}
-    faster = max(best, key=best.get)
+    faster = max(best, key=lambda transport: best[transport])
     print(f"\n  peak throughput: http {best['http']:.1f} req/s, grpc {best['grpc']:.1f} req/s"
           f"  ->  {faster} by {best[faster] / min(best.values()):.2f}x")
     return 0

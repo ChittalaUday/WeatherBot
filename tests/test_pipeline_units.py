@@ -101,7 +101,15 @@ def check_places():
 
 def check_plan():
     """Self-check: routing, windows and the budget, on a fixed 'now'."""
-    from backend.pipeline.plan import MAX_ROWS, Resolution, Source, Verdict, datetime, plan
+    from backend.pipeline.plan import (
+        MAX_ROWS,
+        MAX_SPAN_DAYS,
+        Resolution,
+        Source,
+        Verdict,
+        datetime,
+        plan,
+    )
     now = datetime(2026, 8, 13, 15, 30)
     here = [{"name": "Guntur", "lat": 16.3, "lon": 80.4}]
     two = here + [{"name": "Vizag", "lat": 17.7, "lon": 83.2}]
@@ -132,33 +140,37 @@ def check_plan():
     assert up(times_normalized=["2026-08-03 to 2026-08-09"],
               places=two).source is Source.ZARR_BULK
 
-    p = up(times_normalized=["in august 2019"], places=here)
+    # An old window inside the cap still reaches the archive, and still says which dates.
+    p = up(times_normalized=["2019-08-01 to 2019-08-10"], places=here)
     assert p.source is Source.ZARR_POINT and p.start.startswith("2019-08-01"), p
-    assert p.end.startswith("2019-08-31"), p.end
+    assert p.end.startswith("2019-08-10"), p.end
     assert up(times_normalized=["on 15 august 2023"], places=here).span_days == 1
 
-    # 5,844 days, answered YEARLY - 16 rows out of a GROUP BY, not a million observations
-    p = up(times_normalized=["from 2010 to 2025"], places=here)
-    assert p.verdict is Verdict.EXECUTE and p.resolution is Resolution.YEARLY and p.rows == 16, p
-
-    # The ladder caps rows for one place, so the budget only bites when places multiply them.
-    assert up(times_normalized=["for all of 2023"], places=here).resolution is Resolution.DAILY
+    # --- the span cap: a latency budget, refused before a source is chosen ---------
+    # Every aggregation runs over every row that comes back, so the wide windows the archive
+    # would happily serve are declined - and the refusal says what would work instead.
+    for wide in ("in august 2019", "from 2010 to 2025", "for all of 2023",
+                 "2026-05-01 to 2026-06-30"):
+        p = up(times_normalized=[wide], places=here)
+        assert p.verdict is Verdict.REJECT, (wide, p)
+        assert str(MAX_SPAN_DAYS) in p.reason and p.offer, (wide, p)
+    # ...and the day either side of the cap decides it, not the source or the place count
+    inside = f"2026-08-{14 - MAX_SPAN_DAYS + 13:02d} to 2026-08-13"   # exactly the cap, in the past
+    assert up(times_normalized=[inside], places=here).verdict is Verdict.EXECUTE
     three = two + [{"name": "Nellore", "lat": 14.4, "lon": 80.0}]
-    p = up(times_normalized=["for all of 2023"], places=three)
-    assert p.verdict is Verdict.COARSEN and p.rows <= MAX_ROWS and p.offer, p
-
-    assert up(times_normalized=["2026-09-01 to 2026-09-30"],
-              places=here).verdict is Verdict.REJECT
+    assert up(times_normalized=[inside], places=three).verdict is not Verdict.REJECT
     p = up(times_normalized=["tomorrow"], places=[])
     assert p.verdict is Verdict.ASK and "place" in p.reason, p
 
     # the archive holds six measurements; asking it for soil moisture has to be visible
-    p = up(times_normalized=["in august 2019"], places=here, fields=["Rainfall", "Soilm10"])
+    p = up(times_normalized=["2019-08-01 to 2019-08-10"], places=here,
+           fields=["Rainfall", "Soilm10"])
     assert p.source is Source.ZARR_POINT and p.unservable == ["Soilm10"], p
-    assert not up(times_normalized=["tomorrow"], places=here, fields=["Soilm10"]).unservable
+    assert not up(times_normalized=["2026-08-14"], places=here, fields=["Soilm10"]).unservable
 
     # ...and with the archive down, an old date is refused up front rather than timing out
-    down = plan(times_normalized=["in august 2019"], places=here, now=now, archive=False)
+    down = plan(times_normalized=["2019-08-01 to 2019-08-10"], places=here, now=now,
+                archive=False)
     assert down.verdict is Verdict.REJECT and "internal network" in down.reason, down
 
     # a date within the 7-day lookback is served by the forecast API, archive or no archive
@@ -166,18 +178,25 @@ def check_plan():
                   now=datetime(2026, 8, 14, 13, 0))
     assert recent.verdict is Verdict.EXECUTE and recent.source is Source.GFS_HISTORICAL, recent
 
+    # Every wording is either served or refused for a reason that names the cap - never
+    # planned into a fetch nobody asked for. A wide window is a redirection, not a dead end,
+    # so a refusal has to carry an offer.
     for wording in ("in 2017", "for all of 2023", "every year since 2018", "in the last decade",
                     "over the past 6 months", "on 12/06/2021", "2023-08-15", "march 2022",
                     "11 jan 2026 and 17 jan 2026"):
         got = up(times_normalized=[wording], places=here)
+        if got.verdict is Verdict.REJECT:
+            assert got.span_days > MAX_SPAN_DAYS and got.offer, (wording, got)
+            continue
         assert got.verdict in (Verdict.EXECUTE, Verdict.COARSEN), (wording, got)
         assert got.rows <= MAX_ROWS, (wording, got.rows)
+        assert got.span_days <= MAX_SPAN_DAYS, (wording, got.span_days)
 
     print("plan demo OK")
-    for wording, where in (("tomorrow", here), ("yesterday", here), ("in august 2019", here),
-                           ("from 2010 to 2025", here), ("over the last 5 years", here),
-                           ("next month", here), ("for all of 2023", here),
-                           ("for all of 2023", three)):
+    for wording, where in (("2026-08-14", here), ("2026-08-12", here),
+                           ("2019-08-01 to 2019-08-10", here), ("from 2010 to 2025", here),
+                           ("over the last 5 years", here), ("2026-09-01 to 2026-09-30", here),
+                           ("for all of 2023", here), ("for all of 2023", three)):
         got = up(times_normalized=[wording], places=where)
         name = f"{wording} x{len(where)}" if len(where) > 1 else wording
         print(f"  {name:22s} {got.verdict.value:8s} {str(got.source and got.source.value):15s} "
@@ -334,9 +353,50 @@ def check_analysis():
     assert wants_chart("show me a graph of rain this week")
     assert not wants_chart("rain today")
 
-    chart = build_chart([rows], [{"name": "Guntur"}], "Rainfall", hourly=False)
-    assert chart is not None and chart["type"] == "line" and len(chart["series"][0]["points"]) == 5, chart
-    assert build_chart([rows[:1]], [{"name": "Guntur"}], "Rainfall", False) is None  # one point
+    here = [{"name": "Guntur"}]
+    chart = build_chart([rows], here, ["Rainfall"], hourly=False)
+    assert chart and chart["type"] == "line" and len(chart["series"][0]["points"]) == 5, chart
+    # one place, one reading - no series and no comparison, so there is nothing to draw
+    assert build_chart([rows[:1]], here, ["Rainfall"], False) is None
+
+    # --- the shape follows the data, not a default ---------------------------
+    from backend.pipeline.analysis import pick_chart
+
+    days = [{"Date_time": f"2026-08-{d:02d}T00:00:00", "Rainfall": r,
+             "Tmin": t - 8, "Tmax": t, "Tavg": t - 4}
+            for d, r, t in zip(range(1, 8), [0, 3.2, 5.1, 0, 12.4, 8.0, 2.2],
+                               [31, 30, 29, 34, 28, 27, 33])]
+    hours = [{"Date_time": f"2026-08-{d:02d}T{h:02d}:00:00", "Rainfall": (h % 7) * 0.4}
+             for d in range(1, 4) for h in range(24)]
+    winds = [{"Date_time": f"2026-08-{d:02d}T00:00:00", "Wind_Direction": v}
+             for d, v in zip(range(1, 9), [10, 20, 350, 95, 100, 15, 200, 5])]
+
+    # a bearing is circular, so it is a rose whatever statistic was asked - a line through
+    # 350 and 10 descends through south to join two readings 20 degrees apart
+    assert pick_chart(["Wind_Direction"], [], False, 1, 8, 8) == "rose"
+    assert pick_chart(["Rainfall"], ["CUMULATIVE"], False, 1, 10, 10) == "area"
+    assert pick_chart(["Tmin", "Tmax", "Tavg"], [], False, 1, 7, 7) == "band"
+    assert pick_chart(["Rainfall", "Tavg"], [], False, 1, 7, 7) == "combo"
+    assert pick_chart(["Rainfall"], [], True, 1, 72, 3) == "heatmap"
+    assert pick_chart(["Rainfall"], [], False, 3, 5, 5) == "bar"
+    assert pick_chart(["Rainfall"], [], False, 1, 20, 20) == "line"
+
+    # ...and every shape builds a payload its renderer can actually read
+    band = build_chart([days], here, ["Tmin", "Tmax", "Tavg"], False, [])
+    assert band and band["type"] == "band" and band["points"][0]["lo"] < band["points"][0]["hi"]
+    combo = build_chart([days], here, ["Rainfall", "Tavg"], False, [])
+    assert combo and combo["bars"]["points"] and combo["line"]["points"], combo
+    rose = build_chart([winds], here, ["Wind_Direction"], False, [])
+    assert rose and len(rose["buckets"]) == 16, rose
+    assert sum(b["share"] for b in rose["buckets"]) > 99, rose
+    heat = build_chart([hours], here, ["Rainfall"], True, [])
+    assert heat and len(heat["days"]) == 3 and len(heat["cells"]) == 72, heat
+    area = build_chart([days], here, ["Rainfall"], False, ["CUMULATIVE"])
+    assert area and area["series"][0]["points"][-1]["v"] == 30.9, area   # the running total
+    # three places for one day is three bars, which is exactly what a comparison wants
+    three = [{"name": n} for n in ("Guntur", "Vizag", "Nellore")]
+    bars = build_chart([days[:1], days[:1], days[:1]], three, ["Rainfall"], False, [])
+    assert bars and bars["type"] == "bar" and len(bars["series"]) == 3, bars
 
     print("analysis demo OK")
     for note in notes + two[:1]:
@@ -709,12 +769,128 @@ def check_presentation():
     print("presentation OK - one decision, and it is never allowed to be unrenderable")
 
 
+def check_aggregations():
+    """Self-check: every statistic computes, and none of them answers a question the data
+    cannot support. The refusals are the point - a number that means nothing is worse than
+    no number, because it is indistinguishable from one that does."""
+    from backend.pipeline.aggregate import COMPUTE, compute
+    from src.v4.schema import Aggregation, Variable, supports
+
+    rain = [{"Date_time": f"2026-08-{d:02d}T00:00:00", "Rainfall": v}
+            for d, v in zip(range(1, 11), [0, 3.2, 5.1, 0, 0, 12.4, 8.0, 0, 0.1, 2.2])]
+
+    # every statistic in the table answers for a variable that supports it
+    answered = {a.value: compute(rain, "Rainfall", "RAIN", a) for a in COMPUTE}
+    for name, got in answered.items():
+        if supports(Variable.RAIN, name):
+            assert got and got["text"], f"{name} computed nothing for RAIN"
+
+    def figure(name: str) -> dict:
+        """One answered statistic, or a failure that names which one went missing."""
+        got = answered[name]
+        assert got is not None, f"{name} computed nothing for RAIN"
+        return got
+
+    # the figures themselves, against a series small enough to check by hand
+    assert figure("SUM")["value"] == 31.0, figure("SUM")
+    assert figure("MAX")["value"] == 12.4 and figure("MAX")["at"].startswith("2026-08-06")
+    assert figure("MIN")["value"] == 0.0
+    assert figure("COUNT")["value"] == 5, figure("COUNT")              # readings >= 0.2mm
+    assert figure("RUN_COUNT")["value"] == 3, figure("RUN_COUNT")      # 2-3, 6-7, 9-10
+    assert figure("FREQUENCY")["value"] == 50.0
+    assert figure("LONGEST_RUN")["value"] == 2, figure("LONGEST_RUN")
+    assert len(figure("CUMULATIVE")["series"]) == 10
+    assert figure("CUMULATIVE")["series"][-1]["v"] == 31.0
+
+    # what the data cannot support is refused, not approximated
+    humid = [{"Date_time": f"2026-08-0{d}T00:00:00", "RH": v}
+             for d, v in zip(range(1, 6), [80, 85, 90, 70, 75])]
+    assert compute(humid, "RH", "HUMIDITY", "AVG"), "an average of humidity is fine"
+    for refused in ("SUM", "LONGEST_RUN", "MODE", "INTENSITY"):
+        assert compute(humid, "RH", "HUMIDITY", refused) is None, f"{refused} is not humidity's"
+
+    # a bearing is circular, so every linear statistic on it is wrong rather than approximate
+    wind = [{"Date_time": f"2026-08-0{d}T00:00:00", "Wind_Direction": v}
+            for d, v in zip(range(1, 9), [10, 20, 350, 95, 100, 15, 200, 5])]
+    dominant = compute(wind, "Wind_Direction", "WIND", "MODE")
+    spread = compute(wind, "Wind_Direction", "WIND", "DISTRIBUTION")
+    assert dominant and dominant["text"].endswith("of readings)"), dominant
+    # all sixteen points, empty ones included - the empty petals are what make it a rose
+    assert spread and len(spread["buckets"]) == 16, spread
+    assert len([b for b in spread["buckets"] if b["share"]]) == 4, spread
+    for wrong in ("AVG", "MAX", "STDDEV", "MEDIAN"):
+        assert compute(wind, "Wind_Direction", "WIND", wrong) is None, wrong
+
+    # a sentinel is not a reading: -999 must never win a MIN or drag down a mean
+    dirty = rain + [{"Date_time": "2026-08-11T00:00:00", "Rainfall": -999}]
+    assert (compute(dirty, "Rainfall", "RAIN", "MIN") or {}).get("value") == 0.0
+    assert (compute(dirty, "Rainfall", "RAIN", "SUM") or {}).get("value") == 31.0
+    assert compute([], "Rainfall", "RAIN", "SUM") is None
+
+    # --- several statistics in one turn ------------------------------------
+    from backend.pipeline.analysis import pair_up, reduce_all
+
+    # one statistic over several variables, and several over one - the two shapes people say
+    assert pair_up(["TEMPERATURE", "RAIN"], ["PEAK_DATE"]) == [
+        ("TEMPERATURE", "PEAK_DATE"), ("RAIN", "PEAK_DATE")]
+    assert pair_up(["RAIN"], ["SUM", "AVG"]) == [("RAIN", "SUM"), ("RAIN", "AVG")]
+    # a combination the variable cannot support is dropped from the pairing, not computed
+    assert ("TEMPERATURE", "SUM") not in pair_up(["RAIN", "TEMPERATURE"], ["SUM", "AVG"])
+    assert pair_up(["HUMIDITY"], ["SUM"]) == [] and pair_up(["RAIN"], ["RAW"]) == []
+
+    mixed = [{"Date_time": f"2026-08-{d:02d}T00:00:00", "Rainfall": r,
+              "Tmax": t, "Tmin": t - 8, "Tavg": t - 4}
+             for d, r, t in zip(range(1, 11), [0, 3.2, 5.1, 0, 0, 12.4, 8.0, 0, 0.1, 2.2],
+                                [31, 30, 29, 34, 36, 28, 27, 33, 35, 32])]
+    have = ["Tmin", "Tmax", "Tavg", "Rainfall"]
+
+    # "the hottest and the rainiest day" - one statistic, two variables, two answers
+    both = reduce_all(mixed, ["TEMPERATURE", "RAIN"], ["PEAK_DATE"], have)
+    assert len(both) == 2, both
+    # and each reads the column its statistic actually wants: the high, not whichever
+    # temperature column the fetch happened to put first
+    assert both[0]["value"] == 36.0, both[0]
+    assert both[1]["value"] == 12.4, both[1]
+    assert reduce_all(mixed, ["TEMPERATURE"], ["LOW_DATE"], have)[0].get("value") == 19.0
+    assert reduce_all(mixed, ["TEMPERATURE"], ["AVG"], have)[0].get("value") == 27.5   # Tavg
+
+    # --- the column gate: a variable can accumulate and one of its columns still cannot ---
+    from backend.pipeline.analysis import column_named, confirm_aggregation
+
+    june = [{"Date_time": f"2025-06-{d:02d}T00:00:00", "DayLength": 12.0 + d * 0.01,
+             "SunSD": 6.0} for d in range(1, 31)]
+    # SUNSHINE accumulates - hours of sun add up over a month - but day length does not.
+    # Thirty days of daylight totalling 158 hours is not a reading of anything.
+    assert compute(june, "SunSD", "SUNSHINE", "SUM"), "hours of sun do add up"
+    assert compute(june, "DayLength", "SUNSHINE", "SUM") is None, "day length does not"
+    peak = compute(june, "DayLength", "SUNSHINE", "PEAK_DATE")
+    assert peak and peak["at"].startswith("2025-06-30"), peak
+
+    # the wording names a column its variable would not otherwise pick
+    assert column_named("the largest day in june", ["SunSD", "DayLength"]) == "DayLength"
+    assert column_named("sunshine in june", ["SunSD", "DayLength"]) == ""
+    # ...and a superlative names a date, whatever the model said. Without this the model's
+    # RAW stood, the profile turned it into a total, and "the largest day" was answered with
+    # every day's length added together.
+    assert confirm_aggregation("the largest day in june 2025", "RAW") == "PEAK_DATE"
+    assert confirm_aggregation("total rainfall in june", "RAW") == "SUM"
+    # "sum" lives inside "summarize", and a substring match made every summary a total
+    assert confirm_aggregation("summarize the weather in Hyderabad", "SUM") == "RAW"
+    # "which day" supported both directions, so it confirmed whichever the model guessed
+    assert confirm_aggregation("which day is the hottest", "LOW_DATE") == "RAW"
+    assert confirm_aggregation("which day is the hottest", "PEAK_DATE") == "PEAK_DATE"
+
+    print(f"  {len(COMPUTE)} statistics, {len(Aggregation)} labels, refusals hold")
+    print("aggregations OK - every figure computed, combined, nothing approximated")
+
+
 def main():
     """Every check in this file, in order. Any assertion failure stops it."""
-    for check in (check_timewindow, check_places, check_plan, check_windows, check_analysis, check_quality, check_advice, check_render, check_routing, check_presentation,):
+    for check in (check_timewindow, check_places, check_plan, check_windows, check_analysis, check_quality, check_advice, check_render, check_routing, check_presentation,
+                  check_aggregations,):
         print(f"{check.__name__}:")
         check()
-    print("\n10 check(s) passed")
+    print("\n11 check(s) passed")
 
 
 if __name__ == "__main__":

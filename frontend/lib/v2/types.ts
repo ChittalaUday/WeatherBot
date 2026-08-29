@@ -107,6 +107,8 @@ export type Result = {
   policy_id: string | null;
   forecast_updated_at: string;
   presentation: Presentation;
+  /** "markdown" only when the wording layer laid the answer out; the fallback is plain text. */
+  summary_format?: "markdown" | "text";
   /** Did a model word this reply, or did it fall back to the deterministic sentence? */
   generated: boolean;
   /** Why it fell back, when it did - shown, because a silent fallback is a lie by omission. */

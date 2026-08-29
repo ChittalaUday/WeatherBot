@@ -30,9 +30,13 @@ def check_context():
     assert "1 Aug | 2" in week, week
     assert week.index("Range") < week.index("Notable") < week.index("Figures"), week
 
-    # too much table: the rows go, the summary of them stays
+    # Too much table: the rows go and a per-measurement digest takes their place. The old
+    # line said "365 rows ... the figures above cover the whole period" when there were no
+    # figures above, so a model asked to summarise everything had nothing to summarise.
     year = build(month(365)).render()
-    assert "1 Aug | 2" not in year and "365 rows" in year, year
+    assert "1 Aug | 2" not in year, "a year is not listed row by row"
+    assert "365 readings" in year and "Rainfall (mm):" in year, year
+    assert "too many to list" not in year, "the dead end is gone"
     assert "average rainfall" in year, "the summary must survive when the rows do not"
     assert "|" not in build(month(24)).render(), "a day of hourly rows is a large set"
 
@@ -273,12 +277,46 @@ def check_grounding():
         assert "vijawada" in both.lower(), both
     print("generation demo OK" + (" (ollama offline - passed through)" if said == line else ""))
 
+def check_layout():
+    """Self-check: when an answer is laid out rather than said, and that the guard which
+    decides whether to show it at all is actually enforced."""
+    from backend.generation import llm, prompts
+    from backend.pipeline.analysis import wants_structure
+
+    # the decision is read off what the analysis found, not off the question
+    assert not wants_structure([], [], [{"name": "Guntur"}], 1), "one figure is a sentence"
+    assert wants_structure([{}, {}], [{}, {}], [{"name": "Guntur"}], 1), "four findings"
+    assert wants_structure([], [], [{}, {}, {}], 1), "three places is a table of an answer"
+    assert wants_structure([], [], [{"name": "Guntur"}], 6), "a full report is six columns"
+
+    # the layout rules only reach a turn that wants them, and they override VOICE's ban
+    plain = prompts.system(answering=True, grounded=True)
+    laid_out = prompts.system(answering=True, grounded=True, structured=True)
+    assert "no bullet points" in plain and "bullet list" in laid_out
+    assert laid_out.index("no bullet points") < laid_out.index("bullet list"), \
+        "the layout block has to come after the ban it overrides"
+
+    # `clean` collapsed all whitespace, which is what a bullet list is made of
+    bullets = "Guntur stays warm.\n\n- **12.4mm** on Thursday\n- **36C** on Friday"
+    assert "\n" in llm.clean(bullets, structured=True), "structured output keeps its layout"
+    assert "\n" not in llm.clean(bullets), "a paragraph is still collapsed to one"
+
+    # the guard: a reply that fails it is not shown. `usable` returning "" is the whole
+    # contract, and the caller took `said` regardless of it for four commits.
+    scaffolded = "Here is the weather report for Guntur. Rain is 2.0mm."
+    assert llm.usable(scaffolded, "Rain is 2.0mm.", "Rain is 2.0mm.") == "", \
+        "an announcement is not an answer"
+    good = "Guntur gets about 2mm of rain, so it stays light."
+    assert llm.usable(good, "Rain is 2.0mm.", "Rain is 2.0mm."), good
+    print("layout OK - structure from the analysis, and the guard actually gates the reply")
+
+
 def main():
     """Every check in this file, in order. Any assertion failure stops it."""
-    for check in (check_context, check_prompts, check_grounding,):
+    for check in (check_context, check_prompts, check_grounding, check_layout,):
         print(f"{check.__name__}:")
         check()
-    print("\n3 check(s) passed")
+    print("\n4 check(s) passed")
 
 
 if __name__ == "__main__":

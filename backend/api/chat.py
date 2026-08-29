@@ -43,8 +43,8 @@ from backend.api.schemas import (
 from backend.config import CONFIDENT, MIN_CONFIDENCE
 from backend.nlu import context, duckling, normalize_text
 from backend.nlu import understand as read
+from backend.pipeline import analysis, render, resolve_places, run, sources
 from backend.pipeline import places as place_index
-from backend.pipeline import render, resolve_places, run, sources
 from src.schema import Operation
 
 router = APIRouter()
@@ -77,10 +77,6 @@ async def turn(text: str, *, chat_id: str, model: str | None = None,
     yield {"type": "status", "stage": "understanding"}
     cleaned = normalize_text(text)              # shorthand and typos folded, audit kept
     began = time.perf_counter()
-    # The classifier and the time reading go out together - they need nothing from each other,
-    # and run serially the HTTP round trip was pure added latency on every turn naming a
-    # period. `read` keeps the trained head off the event loop and awaits a prompted one, so
-    # the overlap holds whichever is switched on. `time_hint` still goes through `known()`.
     understanding, hint = await asyncio.gather(
         read(registry, cleaned.normalized, model),
         duckling.canonical(cleaned.normalized, started_at),
@@ -142,8 +138,7 @@ async def turn(text: str, *, chat_id: str, model: str | None = None,
     }
 
     named = [n for n in understanding.locations if not place_index.is_relative(n)]
-    # v4 does not tag a relative span at all, so the sentence is the fallback - without it
-    # "soil moisture in my field" is answered with "which place should I check?"
+    over_the_cap: list[str] = []
     relative = ([n for n in understanding.locations if place_index.is_relative(n)]
                 or place_index.relative_in(cleaned.normalized))
 
@@ -169,7 +164,7 @@ async def turn(text: str, *, chat_id: str, model: str | None = None,
         places, unresolved = [], []
         if named and not inherited:
             began = time.perf_counter()
-            places, unresolved = await resolve_places(http, named)
+            places, unresolved, over_the_cap = await resolve_places(http, named)
             timing["solr_ms"] += ms(began)
 
             # Retrieve before generating: the nearest names the index *does* hold are what
@@ -191,6 +186,18 @@ async def turn(text: str, *, chat_id: str, model: str | None = None,
             if point is not None:
                 places = [await sources.reverse_geocode(http, point["lat"], point["lon"])]
             timing["solr_ms"] += ms(began)
+
+        # The tagger found nothing, and the index might. It is a model over 623,000 names, so
+        # it will always have gaps - "Guntur weather" is two tokens with almost no context and
+        # came back with no location at all. One lookup per candidate word before giving up,
+        # and only on the path that was about to be a dead end anyway.
+        if not places and not relative and not (coords or state.coords):
+            began = time.perf_counter()
+            solr = lambda q, rows=8: sources.solr_query(http, q, rows)
+            places = await place_index.find_in(solr, cleaned.normalized)
+            timing["solr_ms"] += ms(began)
+            if places:
+                understanding.locations = [p["raw"] for p in places]
 
         # 4. No usable place and no coordinates yet -> ask the browser. Rule 4.1 keeps "near
         # me" as raw text; resolving it is this layer's job.
@@ -257,6 +264,7 @@ async def turn(text: str, *, chat_id: str, model: str | None = None,
         if place.get("fuzzy"):
             answer.summary += (f" (No exact match for \"{place['raw']}\" - showing the "
                                f"closest, {place['normalized']}, {place['state']}.)")
+    answer.over_the_cap = over_the_cap
     if unresolved and (coords or state.coords):
         # First, not last: this changes what the whole answer is *about*, and a model told to
         # lead with the conclusion leads with its opening words.
@@ -281,10 +289,17 @@ async def turn(text: str, *, chat_id: str, model: str | None = None,
     # An advice turn is the one place the wording must not think for itself. Everywhere else
     # it may say what the figures mean - the difference between an answer and a label printer.
     deciding = answer.advice is not None
+    # Read off what the analysis found, not off the question: six findings want a laid-out
+    # answer whatever was asked, and one finding wants a sentence.
+    structured = analysis.wants_structure(
+        answer.reductions, answer.insights, answer.places,
+        # minus the time column, which is not a measurement anyone came for
+        max(len(answer.table.get("columns") or []) - 1, 0))
     said = ""
     async for kind, piece in generation.stream(answer.summary, text, context=retrieved,
                                                deciding=deciding, history=history,
-                                               headings=sections.headings()):
+                                               headings=sections.headings(),
+                                               structured=structured):
         if kind == "answer":
             said += piece
         yield {"type": "thinking" if kind == "thinking" else "delta", "text": piece}
@@ -296,7 +311,15 @@ async def turn(text: str, *, chat_id: str, model: str | None = None,
                              answer.advice.verdict if answer.advice else "")
     if said and not kept:
         print(f"generation: dropped a reply for {text!r}: {said[:140]!r}", flush=True)
-    answer.summary = said or answer.summary
+    # `kept`, not `said`. This line took the reply whether or not it passed, so every guard in
+    # `usable` - invented figures, reversed verdicts, scaffolding - was computed, logged as
+    # dropped, and then shown anyway. A rejected reply falls back to the deterministic
+    # sentence, which is what "dropped" was always supposed to mean.
+    answer.summary = kept or answer.summary
+    # Read off the reply, not off the request: the layout was asked for, and a model that
+    # found one sentence to say correctly said one. The deterministic fallback is never
+    # markdown either, so a client is never told to parse a stray "-" as a bullet.
+    answer.summary_format = "markdown" if generation.is_markdown(kept) else "text"
 
     # Normally already done. The cap is for the turn where phrasing failed instantly; past it
     # the rule's answer, already in place, stands.
